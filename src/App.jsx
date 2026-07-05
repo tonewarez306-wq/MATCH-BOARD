@@ -36,7 +36,7 @@ const TEAM_COLORS = {
   'C': 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30',
   'D': 'text-red-400 bg-red-500/10 border-red-500/30'
 };
-const TEAM_TEXT_COLORS = { 'A': 'text-white', 'B': 'text-blue-400', 'C': 'text-yellow-400', 'D': 'text-red-400' };
+const TEAM_TEXT_COLORS = { 'A': 'text-white-400', 'B': 'text-blue-400', 'C': 'text-yellow-400', 'D': 'text-red-400' };
 
 const resizeImage = (file, maxWidth = 300, maxHeight = 300) => {
   return new Promise((resolve) => {
