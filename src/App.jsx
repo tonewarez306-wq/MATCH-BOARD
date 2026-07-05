@@ -1788,6 +1788,14 @@ export default function App() {
           </div>
         </div>
       )}
+      {renderSystemModals()}
+      {renderShareModal()}
+    </div>
+  );
+}
+
+// ==========================================
+// RENDER - 메인 화면 (경기 / 스케쥴 / 명단)
 
       {/* Roster Form Modal */}
       {rosterModal.isOpen && (
