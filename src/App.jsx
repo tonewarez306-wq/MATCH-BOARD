@@ -122,7 +122,6 @@ export default function App() {
 
   // === PWA 앱 설치 관련 상태 ===
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
 
@@ -199,7 +198,6 @@ export default function App() {
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      setShowInstallBanner(true);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -216,14 +214,19 @@ export default function App() {
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
       if (outcome === 'accepted') {
-        setShowInstallBanner(false);
+        setDeferredPrompt(null);
       }
-      setDeferredPrompt(null);
     } else if (isIOS) {
       // iOS Safari 수동 안내
       setSystemAlert({
         isOpen: true,
-        message: "아이폰은 화면 하단의 [공유(내보내기)] 버튼 ⍐ 을 누른 후,\n[홈 화면에 추가]를 선택해주세요!"
+        message: "📱 아이폰 설치 안내\n\n1. 하단 [공유] 버튼(⍐)을 누르세요.\n2. 메뉴에서 [홈 화면에 추가]를 선택하세요.\n3. 홈 화면에서 앱을 실행할 수 있습니다."
+      });
+    } else {
+      // 그 외 지원하지 않는 환경 안내
+      setSystemAlert({
+        isOpen: true,
+        message: "이미 설치되었거나 현재 브라우저에서 자동 설치를 지원하지 않습니다.\n브라우저 메뉴의 '홈 화면에 추가' 기능을 이용해주세요."
       });
     }
   };
@@ -1270,22 +1273,14 @@ export default function App() {
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
       
-      {/* 홈 화면 설치 유도 배너 (조건 충족 시에만 노출) */}
-      {(!isStandalone && (showInstallBanner || isIOS)) && (
-        <div className="bg-blue-500/10 border-b border-blue-500/20 px-4 py-3 flex justify-between items-center animate-in slide-in-from-top shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-500 p-1.5 rounded-lg text-white">
-              <Download size={16} />
-            </div>
-            <div>
-              <p className="text-white text-[13px] font-bold">MATCHBOARD 앱 설치하기</p>
-              <p className="text-slate-400 text-[10px]">홈 화면에 추가하고 더 편하게 접속하세요</p>
-            </div>
-          </div>
-          <button onClick={handleInstallApp} className="bg-blue-500 hover:bg-blue-400 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition shadow-sm">
-            설치
-          </button>
-        </div>
+      {/* 홈 화면 설치 유도 버튼 (앱이 설치되지 않은 경우에만 노출) */}
+      {!isStandalone && (
+        <button 
+          onClick={handleInstallApp}
+          className="w-full bg-blue-600 py-3 text-white font-bold flex items-center justify-center gap-2 shadow-lg hover:bg-blue-500 transition active:scale-[0.98] border-b border-blue-700 shrink-0"
+        >
+          <Download size={18} /> 홈 화면에 바로가기 추가
+        </button>
       )}
 
       <header className="px-6 py-4 border-b border-slate-800 bg-slate-900 sticky top-0 z-10 flex justify-between items-center">
@@ -1607,6 +1602,7 @@ export default function App() {
                 </table>
               </div>
 
+              {/* 팀 편성 명단 및 히스토리 표시 영역 추가 */}
               <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
                 <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-800 pb-2 flex justify-between items-end">
                     <span>참석자 편성 명단</span>
@@ -1614,6 +1610,7 @@ export default function App() {
                 </div>
                 <div className="space-y-4">
                   {TEAM_LETTERS.slice(0, detailModal.match.teamCount).map(teamLetter => {
+                    // 해당 팀에 소속된 참석자만 필터링
                     const teamPlayers = players.filter(p => 
                       detailModal.match.attendees.includes(p.id) && 
                       (detailModal.match.teamAssignments[p.id] || 'A') === teamLetter
@@ -1628,6 +1625,7 @@ export default function App() {
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {teamPlayers.map(p => {
+                            // 변경 히스토리 추출 (ex: A ➔ B)
                             const history = detailModal.match.teamHistory?.[p.id];
                             let historyStr = "";
                             if (history && history.length > 1) {
