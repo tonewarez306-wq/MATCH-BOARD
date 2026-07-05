@@ -7,6 +7,7 @@ import {
   MapPin, Clock, Trophy, Shield, Lock, 
   ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings
 } from 'lucide-react';
+import html2canvas from 'html2canvas';
 
 // ==========================================
 // Firebase 설정
@@ -508,7 +509,7 @@ export default function App() {
 
     const newQuarterScore = { quarter: liveState.currentQuarter, team1: t1, team2: t2, score1: qScore1, score2: qScore2 };
     const updatedMatch = { ...liveMatch, quarterScores: [...liveMatch.quarterScores, newQuarterScore] };
-       
+        
     if (liveState.currentQuarter >= liveMatch.totalQuarters) {
        for (const p of players) {
          if (updatedMatch.attendees.includes(p.id)) {
@@ -532,81 +533,63 @@ export default function App() {
     }, 1000);
   };
 
-  // ★ 웹 표준 네이티브 공유 API 적용 ★
+  // ★ 텍스트가 아닌 팝업 캡처 및 이미지 공유 로직 적용 ★
   const handleShareAction = async () => {
-    const sData = shareModal.data;
-    const standings = calculateStandings(sData);
-    const isExternal = sData.matchType === 'external';
+    const captureTarget = document.getElementById('capture-area');
+    if (!captureTarget) return;
 
-    let text = `[MATCHBOARD 경기 결과]\n`;
-    text += `📅 ${sData.date} ${sData.time}\n`;
-    text += `📍 ${sData.location}\n`;
-    text += `⚽ ${isExternal ? `교류전 vs ${sData.opponentName}` : `자체전 (${sData.teamCount}팀)`}\n\n`;
-    
-    text += `🏆 순위표\n`;
-    standings.forEach((st, idx) => {
-      text += `${idx + 1}. ${getTeamDisplayName(sData, st.team)} (${st.w}승 ${st.d}무 ${st.l}패 / 득${st.gf} 실${st.ga} / 득실 ${st.gd > 0 ? '+'+st.gd : st.gd})\n`;
-    });
-    
-    text += `\n📊 쿼터별 상세 기록\n`;
-    if (sData.quarterScores && sData.quarterScores.length > 0) {
-      sData.quarterScores.forEach(qs => {
-        text += `\n[${qs.quarter}Q] ${getTeamDisplayName(sData, qs.team1)} ${qs.score1} : ${qs.score2} ${getTeamDisplayName(sData, qs.team2)}\n`;
-
-        const qLogs = sData.logs.filter(l => l.quarter === qs.quarter);
-        const team1Logs = qLogs.filter(l => l.teamLetter === qs.team1);
-        const team2Logs = qLogs.filter(l => l.teamLetter === qs.team2);
-
-        if (team1Logs.length > 0) {
-          text += `  - ${getTeamDisplayName(sData, qs.team1)} 득점: `;
-          text += team1Logs.map(l => `${l.scorerName}${l.assistName ? `(도움:${l.assistName})` : ''}`).join(', ') + '\n';
-        }
-        if (team2Logs.length > 0) {
-          text += `  - ${getTeamDisplayName(sData, qs.team2)} 득점: `;
-          text += team2Logs.map(l => `${l.scorerName}${l.assistName ? `(도움:${l.assistName})` : ''}`).join(', ') + '\n';
-        }
-      });
-    } else {
-      text += `기록 없음\n`;
-    }
-
-    setShareModal({isOpen: false, step: 1, data: null});
-
-    // Web Share API 지원 확인 (스마트폰 브라우저 네이티브 공유창 호출)
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: 'MATCHBOARD 경기 결과',
-          text: text,
-        });
-        return;
-      } catch (error) {
-        console.log('공유 취소 또는 에러', error);
-      }
-    } 
-    
-    // 지원하지 않는 환경(PC 등)인 경우 안전하게 클립보드 복사 폴백
     try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const textArea = document.createElement("textarea");
-        textArea.value = text;
-        textArea.style.position = "fixed";
-        textArea.style.left = "-9999px";
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textArea);
-      }
-      setSystemAlert({ isOpen: true, message: '결과가 클립보드에 복사되었습니다!\n원하는 곳에 붙여넣기 해주세요.' });
-    } catch (err) {
-      setSystemAlert({ isOpen: true, message: '텍스트 복사에 실패했습니다.' });
+      // 1. html2canvas를 사용해 특정 DOM을 Canvas로 변환
+      const canvas = await html2canvas(captureTarget, {
+        scale: 2, // 화질을 깨끗하게 하기 위해 2배 확대
+        useCORS: true, // 외부 이미지(로고 등) 로드 에러 방지
+        backgroundColor: '#FEE500' // 노란색 배경색 명시
+      });
+
+      // 2. Canvas를 Blob(이미지 파일 데이터)으로 변환
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+
+        const file = new File([blob], 'matchboard_result.png', { type: 'image/png' });
+
+        setShareModal({isOpen: false, step: 1, data: null});
+
+        // 3. Web Share API (모바일 환경에서 스마트폰의 공유 창 호출)
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              title: 'MATCHBOARD 경기 결과',
+              files: [file]
+            });
+            return;
+          } catch (error) {
+            console.log('사용자가 공유를 취소했거나 에러 발생', error);
+          }
+        } 
+        
+        // 4. 모바일 공유 API를 지원하지 않는 환경(PC 등)인 경우 안전하게 클립보드에 이미지 복사
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            const clipboardItem = new ClipboardItem({ 'image/png': blob });
+            await navigator.clipboard.write([clipboardItem]);
+            setSystemAlert({ isOpen: true, message: '결과 이미지가 클립보드에 복사되었습니다!\n원하는 카카오톡 채팅창에 붙여넣기(Ctrl+V) 해주세요.' });
+          } else {
+            throw new Error('Clipboard API 미지원');
+          }
+        } catch (err) {
+          console.error(err);
+          setSystemAlert({ isOpen: true, message: '현재 브라우저 환경에서는 이미지 복사를 지원하지 않습니다.\n모바일 기기를 이용해 주세요.' });
+        }
+
+      }, 'image/png');
+
+    } catch (error) {
+      console.error('캡처 에러:', error);
+      setSystemAlert({ isOpen: true, message: '화면을 캡처하는 중 문제가 발생했습니다.' });
     }
   };
 
-  // 공통 시스템 모달 렌더러 (z-index를 100으로 높여 항상 최상단에 뜨도록 보장)
+  // 공통 시스템 모달 렌더러
   const renderSystemModals = () => (
     <>
       {systemAlert.isOpen && (
@@ -640,115 +623,160 @@ export default function App() {
 
     return (
       <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
-        <div className="bg-[#FEE500] p-6 rounded-3xl w-full max-w-sm shadow-2xl flex flex-col items-center text-center max-h-[90vh]">
-          {shareModal.step === 1 ? (
-            <>
-              <div className="w-16 h-16 border-4 border-slate-900/20 border-t-slate-900 rounded-full animate-spin mb-4"></div>
-              <h2 className="text-lg font-black text-slate-900 mb-1">데이터 컴파일 중...</h2>
-              <p className="text-sm text-slate-800 font-medium">깔끔한 리포트를 만들고 있어요.</p>
-            </>
-          ) : (
-            <div className="w-full flex flex-col min-h-0">
-              <div className="flex justify-between items-center mb-3 px-1 shrink-0">
-                <h2 className="text-lg font-black text-slate-900 flex items-center gap-1"><MessageCircle size={18} className="fill-current"/> 공유 미리보기</h2>
-              </div>
-              
-              <div className="bg-[#b2c7d9] w-full p-4 rounded-2xl mb-4 text-left shadow-inner flex-1 overflow-y-auto custom-scrollbar">
-                <div className="text-[10px] text-slate-500 font-medium text-center mb-4">{chatDate}</div>
-                <div className="flex gap-2">
-                  <div className="w-8 h-8 rounded-[12px] bg-slate-300 flex-shrink-0 flex items-center justify-center overflow-hidden border border-white/50 shadow-sm">
-                    {activeTeam?.logo?.startsWith('data:image') ? <img src={activeTeam.logo} alt="logo" className="w-full h-full object-cover" /> : <span className="text-lg">{activeTeam?.logo || '⚽'}</span>}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[11px] text-slate-700 mb-1 ml-1 font-bold">{activeTeam?.name || '나'}</div>
-                    <div className="bg-white rounded-xl overflow-hidden shadow-sm border border-black/5 p-3">
-                      
-                      <div className="mb-3">
-                        <h3 className="font-black text-slate-800 text-[14px] leading-tight">
-                           {sData?.matchType === 'external' ? `[교류전] vs ${sData?.opponentName}` : `[자체전] ${sData?.location}`}
-                        </h3>
-                        <p className="text-slate-500 text-[10px] mt-1">{sData?.date} {sData?.time} · 참석 {sData?.attendees?.length || 0}명</p>
-                      </div>
+        <div className="w-full max-w-sm flex flex-col items-center max-h-[90vh]">
+          
+          {/* 캡처할 대상 영역 (공유 버튼 제외) */}
+          <div id="capture-area" className="bg-[#FEE500] p-6 rounded-3xl w-full shadow-2xl flex flex-col items-center text-center overflow-hidden">
+            {shareModal.step === 1 ? (
+              <>
+                <div className="w-16 h-16 border-4 border-slate-900/20 border-t-slate-900 rounded-full animate-spin mb-4 mt-8"></div>
+                <h2 className="text-lg font-black text-slate-900 mb-1">결과 리포트 준비 중...</h2>
+                <p className="text-sm text-slate-800 font-medium mb-8">잠시만 기다려주세요.</p>
+              </>
+            ) : (
+              <div className="w-full flex flex-col min-h-0">
+                <div className="flex justify-between items-center mb-3 px-1 shrink-0">
+                  <h2 className="text-lg font-black text-slate-900 flex items-center gap-1"><MessageCircle size={18} className="fill-current"/> 경기 결과 리포트</h2>
+                </div>
+                
+                <div className="bg-[#b2c7d9] w-full p-4 rounded-2xl mb-2 text-left shadow-inner flex-1 overflow-y-auto custom-scrollbar">
+                  <div className="text-[10px] text-slate-500 font-medium text-center mb-4">{chatDate}</div>
+                  <div className="flex gap-2">
+                    <div className="w-8 h-8 rounded-[12px] bg-slate-300 flex-shrink-0 flex items-center justify-center overflow-hidden border border-white/50 shadow-sm">
+                      {activeTeam?.logo?.startsWith('data:image') ? <img src={activeTeam.logo} alt="logo" className="w-full h-full object-cover" /> : <span className="text-lg">{activeTeam?.logo || '⚽'}</span>}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] text-slate-700 mb-1 ml-1 font-bold">{activeTeam?.name || '나'}</div>
+                      <div className="bg-white rounded-xl overflow-hidden shadow-sm border border-black/5 p-3">
+                        
+                        <div className="mb-3">
+                          <h3 className="font-black text-slate-800 text-[14px] leading-tight">
+                             {sData?.matchType === 'external' ? `[교류전] vs ${sData?.opponentName}` : `[자체전] ${sData?.location}`}
+                          </h3>
+                          <p className="text-slate-500 text-[10px] mt-1">{sData?.date} {sData?.time} · 참석 {sData?.attendees?.length || 0}명</p>
+                        </div>
 
-                      <div className="bg-slate-50 rounded-lg p-2 mb-3 border border-slate-100">
-                         <div className="font-bold text-slate-700 text-[11px] border-b border-slate-200 pb-1 mb-1">
-                           순위표
-                         </div>
-                         <table className="w-full text-[10px] text-center mt-1">
-                           <thead>
-                             <tr className="text-slate-400 font-bold">
-                               <th className="pb-1 text-left">팀</th><th className="pb-1">승</th><th className="pb-1">무</th><th className="pb-1">패</th><th className="pb-1">득</th><th className="pb-1">실</th><th className="pb-1">득실</th><th className="pb-1">승점</th>
-                             </tr>
-                           </thead>
-                           <tbody>
-                             {standings.map(st => (
-                               <tr key={st.team} className="border-t border-slate-100 text-slate-600">
-                                 <td className={`py-1.5 font-bold text-left ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(sData, st.team)}</td>
-                                 <td className="py-1.5">{st.w}</td>
-                                 <td className="py-1.5">{st.d}</td>
-                                 <td className="py-1.5">{st.l}</td>
-                                 <td className="py-1.5">{st.gf}</td>
-                                 <td className="py-1.5">{st.ga}</td>
-                                 <td className="py-1.5">{st.gd > 0 ? '+'+st.gd : st.gd}</td>
-                                 <td className="py-1.5 text-blue-500 font-bold">{st.pts}</td>
+                        <div className="bg-slate-50 rounded-lg p-2 mb-3 border border-slate-100">
+                           <div className="font-bold text-slate-700 text-[11px] border-b border-slate-200 pb-1 mb-1">
+                             순위표
+                           </div>
+                           <table className="w-full text-[10px] text-center mt-1">
+                             <thead>
+                               <tr className="text-slate-400 font-bold">
+                                 <th className="pb-1 text-left">팀</th><th className="pb-1">승</th><th className="pb-1">무</th><th className="pb-1">패</th><th className="pb-1">득</th><th className="pb-1">실</th><th className="pb-1">득실</th><th className="pb-1">승점</th>
                                </tr>
-                             ))}
-                           </tbody>
-                         </table>
-                      </div>
+                             </thead>
+                             <tbody>
+                               {standings.map(st => (
+                                 <tr key={st.team} className="border-t border-slate-100 text-slate-600">
+                                   <td className={`py-1.5 font-bold text-left ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(sData, st.team)}</td>
+                                   <td className="py-1.5">{st.w}</td>
+                                   <td className="py-1.5">{st.d}</td>
+                                   <td className="py-1.5">{st.l}</td>
+                                   <td className="py-1.5">{st.gf}</td>
+                                   <td className="py-1.5">{st.ga}</td>
+                                   <td className="py-1.5">{st.gd > 0 ? '+'+st.gd : st.gd}</td>
+                                   <td className="py-1.5 text-blue-500 font-bold">{st.pts}</td>
+                                 </tr>
+                               ))}
+                             </tbody>
+                           </table>
+                        </div>
 
-                      <div className="bg-slate-50 rounded-lg p-2 mb-2 border border-slate-100">
-                         <div className="font-bold text-slate-700 text-[11px] border-b border-slate-200 pb-1 mb-2">쿼터별 상세 기록</div>
-                         <div className="space-y-3">
-                           {sData?.quarterScores?.length > 0 ? sData.quarterScores.map(qs => {
-                             const qLogs = sData.logs.filter(l => l.quarter === qs.quarter);
-                             return (
-                               <div key={qs.quarter} className="bg-white rounded-xl p-2 border border-slate-100 shadow-sm">
-                                  <div className="relative flex justify-center items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                    <span className="absolute left-0 font-black text-blue-500 text-[10px]">{qs.quarter}Q</span>
-                                    <span className="font-bold text-slate-800 text-[11px] text-center flex items-center">
-                                      <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(sData, qs.team1)}</span> 
-                                      <span className="text-slate-400 mx-2">{qs.score1} : {qs.score2}</span> 
-                                      <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(sData, qs.team2)}</span>
-                                    </span>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    {qLogs.length > 0 ? qLogs.map(l => {
-                                      const isLeft = l.teamLetter === qs.team1;
-                                      return (
-                                        <div key={l.id} className={`flex items-start gap-1.5 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
-                                          <span className="text-slate-400 text-[8px] w-6 shrink-0 text-center mt-0.5">{l.time}</span>
-                                          <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
-                                            <div className="text-slate-700 font-bold text-[9px] flex items-center gap-1">
-                                              <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
-                                            </div>
-                                            {l.assistName && (
-                                              <div className="text-slate-400 mt-0.5 flex items-center gap-0.5">
-                                                <Footprints size={8} className="text-slate-400"/> <span className="text-[8px]">{l.assistName}</span>
+                        <div className="bg-slate-50 rounded-lg p-2 mb-2 border border-slate-100">
+                           <div className="font-bold text-slate-700 text-[11px] border-b border-slate-200 pb-1 mb-2">쿼터별 상세 기록</div>
+                           <div className="space-y-3">
+                             {sData?.quarterScores?.length > 0 ? sData.quarterScores.map(qs => {
+                               const qLogs = sData.logs.filter(l => l.quarter === qs.quarter);
+                               return (
+                                 <div key={qs.quarter} className="bg-white rounded-xl p-2 border border-slate-100 shadow-sm">
+                                    <div className="relative flex justify-center items-center border-b border-slate-100 pb-1.5 mb-1.5">
+                                      <span className="absolute left-0 font-black text-blue-500 text-[10px]">{qs.quarter}Q</span>
+                                      <span className="font-bold text-slate-800 text-[11px] text-center flex items-center">
+                                        <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(sData, qs.team1)}</span> 
+                                        <span className="text-slate-400 mx-2">{qs.score1} : {qs.score2}</span> 
+                                        <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(sData, qs.team2)}</span>
+                                      </span>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      {qLogs.length > 0 ? qLogs.map(l => {
+                                        const isLeft = l.teamLetter === qs.team1;
+                                        return (
+                                          <div key={l.id} className={`flex items-start gap-1.5 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
+                                            <span className="text-slate-400 text-[8px] w-6 shrink-0 text-center mt-0.5">{l.time}</span>
+                                            <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
+                                              <div className="text-slate-700 font-bold text-[9px] flex items-center gap-1">
+                                                <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
                                               </div>
-                                            )}
+                                              {l.assistName && (
+                                                <div className="text-slate-400 mt-0.5 flex items-center gap-0.5">
+                                                  <Footprints size={8} className="text-slate-400"/> <span className="text-[8px]">{l.assistName}</span>
+                                                </div>
+                                              )}
+                                            </div>
                                           </div>
-                                        </div>
-                                      )
-                                    }) : <div className="text-[9px] text-slate-400 text-center py-1">득점 기록이 없습니다.</div>}
-                                  </div>
-                               </div>
-                             )
-                           }) : (
-                             <div className="text-[10px] text-slate-400 text-center py-2">아직 기록이 없습니다.</div>
-                           )}
-                         </div>
+                                        )
+                                      }) : <div className="text-[9px] text-slate-400 text-center py-1">득점 기록이 없습니다.</div>}
+                                    </div>
+                                 </div>
+                               )
+                             }) : (
+                               <div className="text-[10px] text-slate-400 text-center py-2">아직 기록이 없습니다.</div>
+                             )}
+                           </div>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-              <button onClick={handleShareAction} className="w-full py-3 bg-slate-900 text-[#FEE500] rounded-xl font-black text-lg hover:bg-slate-800 transition shrink-0 mt-4">결과 공유하기</button>
+            )}
+          </div>
+
+          {/* 화면 캡처 대상이 아닌 외부 영역에 버튼 배치 */}
+          {shareModal.step === 2 && (
+            <div className="w-full mt-6 space-y-3 shrink-0 px-2">
+              <button onClick={handleShareAction} className="w-full py-4 bg-slate-900 text-[#FEE500] rounded-2xl font-black text-lg hover:bg-slate-800 transition shadow-2xl flex items-center justify-center gap-2">
+                <Share2 size={20} />
+                이미지로 결과 공유하기
+              </button>
+              <button onClick={() => setShareModal({isOpen: false, step: 1, data: null})} className="w-full py-3 text-slate-400 font-bold hover:text-white transition">
+                닫기
+              </button>
             </div>
           )}
+
         </div>
       </div>
     );
+  };
+
+  const renderCalendarDays = () => {
+    // ... 생략 없이 달력을 그리는 함수 구현 (원래 소스에 있던 부분)
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    const days = [];
+    for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="p-2" />);
+    
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const dayMatches = currentTeamMatches.filter(m => m.date === dateStr);
+      
+      days.push(
+        <div key={day} className="p-2 aspect-square border border-slate-700/50 rounded-xl relative flex flex-col items-center hover:bg-slate-700/50 transition">
+          <span className="text-xs font-bold text-slate-300">{day}</span>
+          <div className="flex gap-1 mt-1">
+            {dayMatches.map((m, idx) => (
+              <div key={idx} className={`w-1.5 h-1.5 rounded-full ${m.status === 'completed' ? 'bg-slate-500' : 'bg-blue-400'}`} />
+            ))}
+          </div>
+        </div>
+      );
+    }
+    return days;
   };
 
   if (appState === 'login') {
@@ -1149,8 +1177,8 @@ export default function App() {
                              <Footprints size={12} className="text-slate-500"/> <span className="text-xs">{l.assistName}</span>
                            </div>
                          )}
-                       </div>
-                     </div>
+                        </div>
+                      </div>
                     )
                  })}
                  {liveMatch.logs.filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-xs text-slate-600 italic text-center">득점 없음</div>}
@@ -1256,9 +1284,6 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // RENDER - 메인 화면 (경기 / 스케쥴 / 명단)
-  // ==========================================
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-2xl">
       <style>{`
@@ -1291,7 +1316,6 @@ export default function App() {
 
       <main className="p-6">
         
-        {}
         {/* === 1. 경기 Tab === */}
         {activeTab === 'matches' && (
           <div className="space-y-6 animate-in fade-in">
@@ -1433,7 +1457,6 @@ export default function App() {
           </div>
         )}
 
-        {}
         {/* === 2. 스케쥴 (달력) Tab === */}
         {activeTab === 'schedule' && (
           <div className="space-y-6 animate-in fade-in">
@@ -1485,7 +1508,6 @@ export default function App() {
           </div>
         )}
 
-        {}
         {/* === 3. 명단 Tab === */}
         {activeTab === 'roster' && (
           <div className="space-y-4 animate-in fade-in">
@@ -1788,14 +1810,6 @@ export default function App() {
           </div>
         </div>
       )}
-      {renderSystemModals()}
-      {renderShareModal()}
-    </div>
-  );
-}
-
-// ==========================================
-// RENDER - 메인 화면 (경기 / 스케쥴 / 명단)
 
       {/* Roster Form Modal */}
       {rosterModal.isOpen && (
