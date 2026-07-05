@@ -84,7 +84,6 @@ const loadHtml2Canvas = () => {
   });
 };
 
-// 순위표 계산 함수 (외부 분리하여 재사용성 강화)
 const calculateStandings = (match) => {
   const stats = {};
   TEAM_LETTERS.slice(0, match.teamCount).forEach(t => {
@@ -119,6 +118,9 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false); 
   const [adminPassword, setAdminPassword] = useState('admin');
   
+  // [최적화] 데이터 로딩 상태 추가
+  const [isLoaded, setIsLoaded] = useState(false);
+
   const [teams, setTeams] = useState([]);
   const [activeTeamId, setActiveTeamId] = useState(null);
   const [players, setPlayers] = useState([]);
@@ -151,7 +153,6 @@ export default function App() {
   const [liveState, setLiveState] = useState({ currentQuarter: 1, playingTeams: ['A', 'B'], isQuarterActive: false });
   const [goalFlow, setGoalFlow] = useState({ isOpen: false, step: 1, teamLetter: null, scorer: null });
 
-  // [최적화] 렌더링 때마다 반복되는 찾기 연산 방지
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
@@ -163,7 +164,10 @@ export default function App() {
       else signInAnonymously(auth).catch(err => console.error(err));
     });
 
-    const unsubTeams = onSnapshot(collection(db, 'teams'), snap => setTeams(snap.docs.map(d => d.data())));
+    const unsubTeams = onSnapshot(collection(db, 'teams'), snap => {
+      setTeams(snap.docs.map(d => d.data()));
+      setIsLoaded(true); // 팀 데이터가 로드되면 true로 변경
+    });
     const unsubPlayers = onSnapshot(collection(db, 'players'), snap => setPlayers(snap.docs.map(d => d.data())));
     const unsubMatches = onSnapshot(collection(db, 'matches'), snap => setMatches(snap.docs.map(d => d.data())));
 
@@ -186,14 +190,12 @@ export default function App() {
 
   const viewYearMonth = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
   
-  // [최적화] 이번 달 경기 목록 메모이제이션
   const monthlyMatches = useMemo(() => {
     return currentTeamMatches.filter(m => m.date.startsWith(viewYearMonth));
   }, [currentTeamMatches, viewYearMonth]);
 
   const scheduledThisMonth = useMemo(() => monthlyMatches.filter(m => m.status === 'scheduled').sort((a,b) => a.date.localeCompare(b.date)), [monthlyMatches]);
   
-  // [최적화] 완료된 경기 데이터에 '순위표(standings)'를 미리 계산해 포함시켜 둠 (렌더링 시 과부하 방지)
   const completedThisMonthWithStandings = useMemo(() => {
     return monthlyMatches
       .filter(m => m.status === 'completed')
@@ -201,7 +203,6 @@ export default function App() {
       .map(m => ({ ...m, standings: calculateStandings(m) }));
   }, [monthlyMatches]);
 
-  // [최적화] 캘린더용 날짜별 해시맵 (달력의 각 날짜마다 반복 탐색하는 O(N^2) 문제를 O(N)으로 개선)
   const matchesByDate = useMemo(() => {
     const map = {};
     monthlyMatches.forEach(m => {
@@ -412,8 +413,9 @@ export default function App() {
     });
   };
 
-  const assignTeam = async (playerId, teamLetter) => {
-    const m = matches.find(match => match.id === assignmentModal.match.id);
+  // [최적화] 팀 변경 시 즉각적인 반응성 확보 (Optimistic UI Update)
+  const assignTeam = (playerId, teamLetter) => {
+    const m = assignmentModal.match; // 모달 내의 현재 상태를 즉시 참조
     if(m) {
       const currentTeam = m.teamAssignments?.[playerId] || 'A';
       if (currentTeam === teamLetter) return;
@@ -426,15 +428,20 @@ export default function App() {
           newHistoryMap[playerId] = [...playerHistory, teamLetter];
       }
 
-      await setDoc(doc(db, 'matches', m.id), { 
+      const updatedMatch = { 
         ...m, 
-        teamAssignments: newAssigns,
-        teamHistory: newHistoryMap
-      });
+        teamAssignments: newAssigns, 
+        teamHistory: newHistoryMap 
+      };
+
+      // 1. 화면 즉시 렌더링 (await 제거로 딜레이 0초)
       setAssignmentModal(prev => ({ 
         ...prev, 
-        match: { ...m, teamAssignments: newAssigns, teamHistory: newHistoryMap } 
+        match: updatedMatch 
       }));
+
+      // 2. 백그라운드 서버 동기화
+      setDoc(doc(db, 'matches', m.id), updatedMatch).catch(console.error);
     }
   };
 
@@ -561,7 +568,7 @@ export default function App() {
         const canvas = await html2canvas(captureTarget, {
           scale: 2, 
           useCORS: true, 
-          backgroundColor: null 
+          backgroundColor: '#0F172A' // 다크테마 배경색에 완벽히 일치시켜서 투명 잘림 방지
         });
 
         canvas.toBlob((blob) => {
@@ -640,13 +647,13 @@ export default function App() {
           {shareModal.step === 1 ? (
             <div className="bg-slate-800 border border-slate-700 p-6 rounded-3xl w-full shadow-xl flex flex-col items-center text-center animate-in zoom-in-95">
               <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4 mt-8"></div>
-              <h2 className="text-lg font-black text-white mb-1">이미지 생성 중...</h2>
-              <p className="text-sm text-slate-400 font-medium mb-8">잠시만 기다려주세요.</p>
+              <h2 className="text-lg font-black text-white mb-1">리포트 이미지 생성 중...</h2>
+              <p className="text-sm text-slate-400 font-medium mb-8">화면을 캡처하고 있습니다.</p>
             </div>
           ) : (
             <div className="bg-slate-800 border border-slate-700 p-5 rounded-3xl w-full shadow-xl flex flex-col items-center text-center flex-1 min-h-0 animate-in fade-in">
               <h2 className="text-lg font-black text-white flex items-center gap-1 mb-4 shrink-0">
-                <MessageCircle size={18} className="text-blue-500"/> 리포트 미리보기
+                <MessageCircle size={18} className="text-blue-500"/> 이미지 리포트 생성 완료
               </h2>
               
               <div className="w-full flex-1 overflow-y-auto custom-scrollbar rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50">
@@ -683,7 +690,6 @@ export default function App() {
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       
-      // [최적화] 전체 배열 반복 대신 미리 만들어둔 해시맵에서 O(1)로 가져옴
       const dayMatches = matchesByDate[dateStr] || [];
       
       days.push(
@@ -738,35 +744,42 @@ export default function App() {
         <div className="space-y-4 mb-8">
           <h2 className="text-sm font-bold text-slate-500 px-2">{isLoginAdminMode ? '등록된 팀 관리' : '내 팀 선택하기'}</h2>
           
-          {teams.length === 0 && !isLoginAdminMode && (
-            <div className="text-center py-10 bg-slate-800/50 rounded-2xl border border-slate-700 text-sm text-slate-500">
+          {/* [최적화] 데이터 통신 전 화면 로딩 깜빡임 제거 */}
+          {!isLoaded ? (
+            <div className="flex justify-center py-12">
+              <div className="w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+            </div>
+          ) : teams.length === 0 && !isLoginAdminMode ? (
+            <div className="text-center py-10 bg-slate-800/50 rounded-2xl border border-slate-700 text-sm text-slate-500 animate-in fade-in">
               등록된 팀이 없습니다.<br/>우측 상단의 <strong className="text-slate-400">관리자 설정</strong>에서<br/>새로운 팀을 생성해 주세요.
             </div>
-          )}
-
-          {teams.map(team => (
-            <div key={team.id} className="relative group">
-              <button 
-                onClick={() => !isLoginAdminMode && setAuthModal({ isOpen: true, type: 'teamLogin', targetTeam: team })} 
-                className={`w-full bg-slate-800 hover:bg-slate-700 p-4 rounded-2xl border border-slate-700 flex items-center gap-4 transition text-left ${isLoginAdminMode ? 'cursor-default' : 'cursor-pointer'}`}
-              >
-                <div className="w-12 h-12 bg-slate-900 rounded-full flex items-center justify-center text-2xl border border-slate-600 overflow-hidden shrink-0 bg-white/5">
-                  {team.logo?.startsWith('data:image') ? <img src={team.logo} alt={team.name} className="w-full h-full object-cover" /> : team.logo}
+          ) : (
+            <div className="space-y-4 animate-in fade-in">
+              {teams.map(team => (
+                <div key={team.id} className="relative group">
+                  <button 
+                    onClick={() => !isLoginAdminMode && setAuthModal({ isOpen: true, type: 'teamLogin', targetTeam: team })} 
+                    className={`w-full bg-slate-800 hover:bg-slate-700 p-4 rounded-2xl border border-slate-700 flex items-center gap-4 transition text-left ${isLoginAdminMode ? 'cursor-default' : 'cursor-pointer'}`}
+                  >
+                    <div className="w-12 h-12 bg-slate-900 rounded-full flex items-center justify-center text-2xl border border-slate-600 overflow-hidden shrink-0 bg-white/5">
+                      {team.logo?.startsWith('data:image') ? <img src={team.logo} alt={team.name} className="w-full h-full object-cover" /> : team.logo}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-bold text-white text-lg">{team.name}</div>
+                      <div className="text-xs text-slate-400">{isLoginAdminMode ? `비밀번호: ${team.password}` : '터치하여 로그인'}</div>
+                    </div>
+                    {!isLoginAdminMode && <ChevronRight className="text-slate-500" />}
+                  </button>
+                  {isLoginAdminMode && (
+                    <div className="absolute top-1/2 -translate-y-1/2 right-4 flex gap-2">
+                      <button onClick={() => { setEditTeamLogo(team.logo); setEditTeamModal({ isOpen: true, team }); }} className="p-2 bg-slate-700 text-slate-300 rounded-lg hover:text-white transition shadow-sm"><Edit size={16}/></button>
+                      <button onClick={() => requestDeleteTeam(team.id)} className="p-2 bg-slate-700 text-slate-300 rounded-lg hover:text-red-400 transition shadow-sm"><Trash2 size={16}/></button>
+                    </div>
+                  )}
                 </div>
-                <div className="flex-1">
-                  <div className="font-bold text-white text-lg">{team.name}</div>
-                  <div className="text-xs text-slate-400">{isLoginAdminMode ? `비밀번호: ${team.password}` : '터치하여 로그인'}</div>
-                </div>
-                {!isLoginAdminMode && <ChevronRight className="text-slate-500" />}
-              </button>
-              {isLoginAdminMode && (
-                <div className="absolute top-1/2 -translate-y-1/2 right-4 flex gap-2">
-                  <button onClick={() => { setEditTeamLogo(team.logo); setEditTeamModal({ isOpen: true, team }); }} className="p-2 bg-slate-700 text-slate-300 rounded-lg hover:text-white transition shadow-sm"><Edit size={16}/></button>
-                  <button onClick={() => requestDeleteTeam(team.id)} className="p-2 bg-slate-700 text-slate-300 rounded-lg hover:text-red-400 transition shadow-sm"><Trash2 size={16}/></button>
-                </div>
-              )}
+              ))}
             </div>
-          ))}
+          )}
         </div>
 
         {isLoginAdminMode && (
@@ -1211,7 +1224,6 @@ export default function App() {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
-      {/* [최적화] 모바일 스크롤 버벅임을 유발하는 backdrop-blur 효과를 단색 배경으로 변경 */}
       <header className="px-6 py-4 border-b border-slate-800 bg-slate-900 sticky top-0 z-10 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700 text-lg overflow-hidden shrink-0">
@@ -1295,7 +1307,6 @@ export default function App() {
                   </div>
                 ))}
 
-                {/* [최적화] 렌더링마다 순위표를 다시 계산하는 대신, 미리 계산해둔 배열(completedThisMonthWithStandings)을 사용 */}
                 {completedThisMonthWithStandings.map(m => {
                   return (
                     <div key={m.id} onClick={() => setDetailModal({isOpen: true, match: m})} className="bg-slate-900 p-5 rounded-2xl border border-slate-700 opacity-80 hover:opacity-100 hover:border-slate-500 cursor-pointer transition relative group">
@@ -1465,7 +1476,6 @@ export default function App() {
         )}
       </main>
 
-      {/* [최적화] 하단 네비게이션에서도 backdrop-blur 효과 제거 */}
       <nav className="fixed bottom-0 w-full max-w-md bg-slate-900 border-t border-slate-800 flex justify-around p-2 pb-6 z-40">
         <button onClick={() => setActiveTab('matches')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'matches' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}>
           <List size={20} className="mb-1" />
@@ -1488,8 +1498,8 @@ export default function App() {
       {/* Match Details Modal */}
       {detailModal.isOpen && detailModal.match && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className="bg-slate-800 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
-            <div className="p-6 border-b border-slate-700 bg-slate-900 shrink-0">
+          <div className="bg-slate-900 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
+            <div className="p-6 border-b border-slate-800 bg-slate-900 shrink-0">
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
@@ -1508,8 +1518,8 @@ export default function App() {
             </div>
             
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-6">
-              <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
-                <div className="text-xs text-slate-400 mb-3 font-bold border-b border-slate-800 pb-2">순위표</div>
+              <div className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-md">
+                <div className="text-xs text-slate-400 mb-3 font-bold border-b border-slate-700 pb-2">순위표</div>
                 <table className="w-full text-xs text-center">
                   <thead>
                     <tr className="text-slate-500 font-bold">
@@ -1518,7 +1528,7 @@ export default function App() {
                   </thead>
                   <tbody>
                     {calculateStandings(detailModal.match).map((st, index) => (
-                      <tr key={st.team} className="border-t border-slate-800">
+                      <tr key={st.team} className="border-t border-slate-700/50">
                         <td className={`py-2 font-black ${index === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{index + 1}</td>
                         <td className={`py-2 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(detailModal.match, st.team)}</td>
                         <td className="py-2 text-white">{st.w}</td>
@@ -1534,8 +1544,8 @@ export default function App() {
               </div>
 
               {/* 팀 편성 명단 및 히스토리 표시 영역 추가 */}
-              <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
-                <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-800 pb-2 flex justify-between items-end">
+              <div className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-md">
+                <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-700 pb-2 flex justify-between items-end">
                     <span>참석자 편성 명단</span>
                     <span className="text-[9px] font-normal text-slate-500">* ( )는 팀 이동 내역</span>
                 </div>
@@ -1563,7 +1573,7 @@ export default function App() {
                                 historyStr = ` (${history.join('➔')})`;
                             }
                             return (
-                              <div key={p.id} className="bg-slate-800 px-2 py-1.5 rounded border border-slate-700 text-[10px] text-slate-300 flex items-center">
+                              <div key={p.id} className="bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-700/50 text-[10px] text-slate-300 flex items-center">
                                 <span className="font-bold text-white">{p.name}</span>
                                 {historyStr && <span className="text-slate-500 ml-1 tracking-tighter font-medium">{historyStr}</span>}
                               </div>
@@ -1577,8 +1587,8 @@ export default function App() {
               </div>
 
               {detailModal.match.quarterScores.map(qs => (
-                <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
-                   <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
+                <div key={qs.quarter} className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-md">
+                   <div className="relative flex justify-center items-center border-b border-slate-700 pb-3 mb-3">
                      <span className="absolute left-0 font-black text-blue-400">{qs.quarter}Q</span>
                      <span className="font-bold text-white text-lg text-center">
                        <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(detailModal.match, qs.team1)}</span> 
@@ -1591,14 +1601,14 @@ export default function App() {
                        const isLeft = l.teamLetter === qs.team1;
                        return (
                          <div key={l.id} className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
-                           <span className="text-slate-600 text-[10px] w-8 shrink-0 text-center">{l.time}</span>
+                           <span className="text-slate-500 text-[10px] w-8 shrink-0 text-center">{l.time}</span>
                            <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
-                             <div className="text-white font-bold text-sm flex items-center gap-1">
+                             <div className="text-slate-200 font-bold text-sm flex items-center gap-1">
                                <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
                              </div>
                              {l.assistName && (
-                               <div className="text-slate-400 mt-0.5 flex items-center gap-1">
-                                 <Footprints size={12} className="text-slate-500"/> <span className="text-xs">{l.assistName}</span>
+                               <div className="text-slate-500 mt-0.5 flex items-center gap-1">
+                                 <Footprints size={12} className="text-slate-600"/> <span className="text-xs">{l.assistName}</span>
                                </div>
                              )}
                            </div>
@@ -1831,83 +1841,122 @@ export default function App() {
         </div>
       )}
 
-      {/* 숨겨진 화면 캡처 전용 컴포넌트 */}
+      {/* 숨겨진 화면 캡처 전용 컴포넌트 (앱 내부의 다크 테마 디자인과 100% 일치하도록 재구성) */}
       {shareModal.isOpen && shareModal.data && (
-        <div className="fixed top-0 left-0 w-[380px] opacity-0 pointer-events-none z-[-100] overflow-visible p-4">
-          <div id="capture-area-hidden" className="bg-white rounded-2xl overflow-hidden shadow-lg border border-slate-200 p-5">
-            <div className="mb-4 border-b border-slate-100 pb-4">
-              <h3 className="font-black text-slate-900 text-[18px] leading-tight mb-1">
+        <div className="fixed top-0 left-0 w-[500px] opacity-0 pointer-events-none z-[-100] overflow-visible">
+          <div id="capture-area-hidden" className="bg-slate-900 p-8 w-full flex flex-col items-center text-left text-slate-200 border-none">
+            
+            {/* Header Area */}
+            <div className="mb-8 w-full pb-5 border-b border-slate-800">
+              <h3 className="font-black text-white text-[28px] leading-tight mb-2">
                  {shareModal.data.matchType === 'external' ? `[교류전] vs ${shareModal.data.opponentName}` : `[자체전] ${shareModal.data.location}`}
               </h3>
-              <p className="text-slate-500 text-[12px] font-medium">{shareModal.data.date} {shareModal.data.time} · 참석 {shareModal.data.attendees?.length || 0}명</p>
+              <p className="text-slate-400 text-[15px] font-medium">
+                 {new Date(shareModal.data.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} {shareModal.data.time} · 참석 {shareModal.data.attendees?.length || 0}명
+              </p>
             </div>
 
-            <div className="mb-5">
-               <div className="font-black text-slate-800 text-[13px] border-b border-slate-200 pb-1.5 mb-2">순위표</div>
-               <table className="w-full text-[12px] text-center">
+            {/* Standings */}
+            <div className="w-full bg-slate-800 rounded-3xl p-6 mb-5 border border-slate-700 shadow-lg">
+               <div className="font-black text-slate-300 text-[16px] border-b border-slate-700 pb-3 mb-4">순위표</div>
+               <table className="w-full text-[15px] text-center">
                  <thead>
-                   <tr className="text-slate-400 font-bold">
-                     <th className="pb-2 text-left">팀</th><th className="pb-2">승</th><th className="pb-2">무</th><th className="pb-2">패</th><th className="pb-2">득</th><th className="pb-2">실</th><th className="pb-2">득실</th><th className="pb-2">승점</th>
+                   <tr className="text-slate-500 font-bold">
+                     <th className="pb-3 text-left">팀</th><th className="pb-3">승</th><th className="pb-3">무</th><th className="pb-3">패</th><th className="pb-3">득</th><th className="pb-3">실</th><th className="pb-3">득실</th><th className="pb-3">승점</th>
                    </tr>
                  </thead>
                  <tbody>
-                   {calculateStandings(shareModal.data).map(st => (
-                     <tr key={st.team} className="border-t border-slate-100 text-slate-700">
-                       <td className={`py-2.5 font-bold text-left ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareModal.data, st.team)}</td>
-                       <td className="py-2.5">{st.w}</td>
-                       <td className="py-2.5">{st.d}</td>
-                       <td className="py-2.5">{st.l}</td>
-                       <td className="py-2.5">{st.gf}</td>
-                       <td className="py-2.5">{st.ga}</td>
-                       <td className="py-2.5">{st.gd > 0 ? '+'+st.gd : st.gd}</td>
-                       <td className="py-2.5 text-blue-500 font-black">{st.pts}</td>
+                   {calculateStandings(shareModal.data).map((st, i) => (
+                     <tr key={st.team} className="border-t border-slate-700/50 text-slate-300">
+                       <td className={`py-4 font-bold text-left ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareModal.data, st.team)}</td>
+                       <td className="py-4 text-white">{st.w}</td>
+                       <td className="py-4 text-slate-400">{st.d}</td>
+                       <td className="py-4 text-slate-400">{st.l}</td>
+                       <td className="py-4 text-white">{st.gf}</td>
+                       <td className="py-4 text-slate-400">{st.ga}</td>
+                       <td className="py-4 text-white">{st.gd > 0 ? '+'+st.gd : st.gd}</td>
+                       <td className="py-4 text-blue-400 font-black">{st.pts}</td>
                      </tr>
                    ))}
                  </tbody>
                </table>
             </div>
 
-            <div>
-               <div className="font-black text-slate-800 text-[13px] border-b border-slate-200 pb-1.5 mb-3">쿼터별 상세 기록</div>
-               <div className="space-y-3">
+            {/* Roster */}
+            <div className="w-full bg-slate-800 rounded-3xl p-6 mb-5 border border-slate-700 shadow-lg">
+                <div className="text-[16px] text-slate-300 mb-5 font-black border-b border-slate-700 pb-3 flex justify-between items-end">
+                    <span>참석자 편성 명단</span>
+                    <span className="text-[12px] font-normal text-slate-500">* ( )는 팀 이동 내역</span>
+                </div>
+                <div className="space-y-6">
+                  {TEAM_LETTERS.slice(0, shareModal.data.teamCount).map(teamLetter => {
+                    const teamPlayers = players.filter(p => shareModal.data.attendees.includes(p.id) && (shareModal.data.teamAssignments[p.id] || 'A') === teamLetter);
+                    if(teamPlayers.length === 0) return null;
+                    return (
+                      <div key={teamLetter}>
+                        <div className={`text-[14px] font-black mb-3 ${TEAM_TEXT_COLORS[teamLetter]}`}>
+                          {getTeamDisplayName(shareModal.data, teamLetter)}
+                        </div>
+                        <div className="flex flex-wrap gap-2.5">
+                          {teamPlayers.map(p => {
+                            const history = shareModal.data.teamHistory?.[p.id];
+                            let historyStr = "";
+                            if (history && history.length > 1) {
+                                historyStr = ` (${history.join('➔')})`;
+                            }
+                            return (
+                              <div key={p.id} className="bg-slate-900 px-3 py-2 rounded-lg border border-slate-700/50 text-[13px] text-slate-300 flex items-center shadow-sm">
+                                <span className="font-bold text-white">{p.name}</span>
+                                {historyStr && <span className="text-slate-500 ml-1 tracking-tighter font-medium">{historyStr}</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+            </div>
+
+            {/* Quarter Logs */}
+            <div className="w-full">
                  {shareModal.data.quarterScores?.length > 0 ? shareModal.data.quarterScores.map(qs => {
                    const qLogs = shareModal.data.logs.filter(l => l.quarter === qs.quarter);
                    return (
-                     <div key={qs.quarter} className="bg-slate-50/50 rounded-xl p-3 border border-slate-100">
-                        <div className="relative flex justify-center items-center border-b border-slate-100 pb-2 mb-2">
-                          <span className="absolute left-0 font-black text-blue-500 text-[12px]">{qs.quarter}Q</span>
-                          <span className="font-bold text-slate-800 text-[13px] text-center flex items-center">
+                     <div key={qs.quarter} className="w-full bg-slate-800 rounded-3xl p-6 mb-5 border border-slate-700 shadow-lg">
+                        <div className="relative flex justify-center items-center border-b border-slate-700 pb-4 mb-4">
+                          <span className="absolute left-0 font-black text-blue-400 text-[16px]">{qs.quarter}Q</span>
+                          <span className="font-black text-white text-[20px] text-center flex items-center">
                             <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(shareModal.data, qs.team1)}</span> 
-                            <span className="text-slate-400 mx-2">{qs.score1} : {qs.score2}</span> 
+                            <span className="text-slate-500 mx-5">{qs.score1} : {qs.score2}</span> 
                             <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(shareModal.data, qs.team2)}</span>
                           </span>
                         </div>
-                        <div className="space-y-2">
+                        <div className="space-y-4">
                           {qLogs.length > 0 ? qLogs.map(l => {
                             const isLeft = l.teamLetter === qs.team1;
                             return (
-                              <div key={l.id} className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
-                                <span className="text-slate-400 text-[9px] w-8 shrink-0 text-center mt-0.5">{l.time}</span>
+                              <div key={l.id} className={`flex items-center gap-3 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
+                                <span className="text-slate-500 text-[12px] w-12 shrink-0 text-center">{l.time}</span>
                                 <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
-                                  <div className="text-slate-800 font-bold text-[11px] flex items-center gap-1">
+                                  <div className="text-slate-200 font-bold text-[15px] flex items-center gap-2">
                                     <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
                                   </div>
                                   {l.assistName && (
-                                    <div className="text-slate-500 mt-0.5 flex items-center gap-0.5">
-                                      <Footprints size={10} className="text-slate-400"/> <span className="text-[10px]">{l.assistName}</span>
+                                    <div className="text-slate-500 mt-1 flex items-center gap-1.5">
+                                      <Footprints size={14} className="text-slate-600"/> <span className="text-[13px]">{l.assistName}</span>
                                     </div>
                                   )}
                                 </div>
                               </div>
                             )
-                          }) : <div className="text-[11px] text-slate-400 text-center py-2">득점 기록이 없습니다.</div>}
+                          }) : <div className="text-[14px] text-slate-500 text-center py-4 italic">득점 기록이 없습니다.</div>}
                         </div>
                      </div>
                    )
                  }) : (
-                   <div className="text-[11px] text-slate-400 text-center py-3">아직 기록이 없습니다.</div>
+                   <div className="text-[14px] text-slate-500 text-center py-6 bg-slate-800 rounded-3xl border border-slate-700 shadow-lg">아직 기록이 없습니다.</div>
                  )}
-               </div>
             </div>
           </div>
         </div>
