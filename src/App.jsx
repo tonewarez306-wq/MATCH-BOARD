@@ -5,7 +5,7 @@ import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'fi
 import { 
   Calendar, Users, BarChart2, Plus, 
   MapPin, Clock, Trophy, Shield, Lock, 
-  ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings, Download
+  ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings
 } from 'lucide-react';
 
 // ==========================================
@@ -120,11 +120,6 @@ export default function App() {
   
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // === PWA 앱 설치 관련 상태 ===
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [isIOS, setIsIOS] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
-
   const [teams, setTeams] = useState([]);
   const [activeTeamId, setActiveTeamId] = useState(null);
   const [players, setPlayers] = useState([]);
@@ -182,54 +177,6 @@ export default function App() {
       unsubMatches();
     };
   }, []);
-
-  // === 홈 화면에 추가 (PWA) 감지 Effect ===
-  useEffect(() => {
-    // 1. iOS 기기 확인
-    const userAgent = window.navigator.userAgent.toLowerCase();
-    const ios = /iphone|ipad|ipod/.test(userAgent);
-    setIsIOS(ios);
-
-    // 2. 이미 홈 화면에 설치되어 실행 중인지 확인
-    const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-    setIsStandalone(standalone);
-
-    // 3. Android/Chrome 설치 프롬프트 이벤트 가로채기
-    const handleBeforeInstallPrompt = (e) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
-  }, []);
-
-  // 앱 설치 버튼 클릭 핸들러
-  const handleInstallApp = async () => {
-    if (deferredPrompt) {
-      // Android / PC Chrome 등에서 정상적으로 PWA 조건이 충족된 경우 팝업
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') {
-        setDeferredPrompt(null);
-      }
-    } else if (isIOS) {
-      // iOS Safari 수동 안내
-      setSystemAlert({
-        isOpen: true,
-        message: "📱 아이폰 설치 안내\n\n1. 하단 [공유] 버튼(⍐)을 누르세요.\n2. 메뉴에서 [홈 화면에 추가]를 선택하세요.\n3. 우측 상단 '추가'를 누르시면 완료!"
-      });
-    } else {
-      // 안드로이드지만 PWA 조건 미충족으로 프롬프트가 안 뜰 경우 수동 안내
-      setSystemAlert({
-        isOpen: true,
-        message: "🤖 안드로이드 설치 안내\n\n현재 브라우저에서는 자동 팝업이 지원되지 않습니다.\n\n브라우저 우측 상단 메뉴(⋮)를 누른 뒤\n[홈 화면에 추가] 또는 [앱 설치]를 선택해 주세요!"
-      });
-    }
-  };
 
   const getTeamDisplayName = (match, letter) => {
     if (!match) return `팀 ${letter}`;
@@ -1272,16 +1219,6 @@ export default function App() {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
-      
-      {/* 홈 화면 설치 유도 버튼 (앱이 설치되지 않은 경우에만 노출) */}
-      {!isStandalone && (
-        <button 
-          onClick={handleInstallApp}
-          className="w-full bg-blue-600 py-3 text-white font-bold flex items-center justify-center gap-2 shadow-lg hover:bg-blue-500 transition active:scale-[0.98] border-b border-blue-700 shrink-0"
-        >
-          <Download size={18} /> 홈 화면에 바로가기 추가
-        </button>
-      )}
 
       <header className="px-6 py-4 border-b border-slate-800 bg-slate-900 sticky top-0 z-10 flex justify-between items-center">
         <div className="flex items-center gap-3">
