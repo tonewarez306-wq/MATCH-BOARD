@@ -5,7 +5,7 @@ import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'fi
 import { 
   Calendar, Users, BarChart2, Plus, 
   MapPin, Clock, Trophy, Shield, Lock, 
-  ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings
+  ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings, Download
 } from 'lucide-react';
 
 // ==========================================
@@ -120,6 +120,11 @@ export default function App() {
   
   const [isLoaded, setIsLoaded] = useState(false);
 
+  // === PWA 앱 설치 관련 상태 ===
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+
   const [teams, setTeams] = useState([]);
   const [activeTeamId, setActiveTeamId] = useState(null);
   const [players, setPlayers] = useState([]);
@@ -150,6 +155,8 @@ export default function App() {
 
   const [liveMatchId, setLiveMatchId] = useState(null);
   const [liveState, setLiveState] = useState({ currentQuarter: 1, playingTeams: ['A', 'B'], isQuarterActive: false });
+  
+  // PK 기능을 위해 goalFlow 상태에 isPK 속성 추가, 비고(remark) 속성 추가
   const [goalFlow, setGoalFlow] = useState({ isOpen: false, step: 1, teamLetter: null, scorer: null, isPK: false, remark: '' });
   // 기록 수정을 위한 모달 상태
   const [logEditModal, setLogEditModal] = useState({ isOpen: false, match: null, log: null });
@@ -179,6 +186,47 @@ export default function App() {
       unsubMatches();
     };
   }, []);
+
+  // === 홈 화면에 추가 (PWA) 감지 Effect ===
+  useEffect(() => {
+    const userAgent = window.navigator.userAgent.toLowerCase();
+    const ios = /iphone|ipad|ipod/.test(userAgent);
+    setIsIOS(ios);
+
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    setIsStandalone(standalone);
+
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    } else if (isIOS) {
+      setSystemAlert({
+        isOpen: true,
+        message: "📱 아이폰 설치 안내\n\n1. 하단 [공유] 버튼(⍐)을 누르세요.\n2. 메뉴에서 [홈 화면에 추가]를 선택하세요.\n3. 우측 상단 '추가'를 누르시면 완료!"
+      });
+    } else {
+      setSystemAlert({
+        isOpen: true,
+        message: "이미 설치되었거나 현재 브라우저에서 자동 설치를 지원하지 않습니다.\n브라우저 메뉴의 '홈 화면에 추가' 기능을 이용해주세요."
+      });
+    }
+  };
 
   const getTeamDisplayName = (match, letter) => {
     if (!match) return `팀 ${letter}`;
@@ -476,7 +524,8 @@ export default function App() {
       assistId: null,
       assistName: null,
       time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }),
-      isPK: false
+      isPK: false,
+      remark: ''
     };
     
     const newLogs = [...liveMatch.logs, newLog]; 
@@ -878,6 +927,11 @@ export default function App() {
                                 {l.assistName && (
                                   <div className="text-slate-500 mt-1 flex items-center gap-1.5">
                                     <Footprints size={14} className="text-slate-500"/> <span className="text-[13px]">{l.assistName}</span>
+                                  </div>
+                                )}
+                                {l.remark && (
+                                  <div className={`text-slate-400 mt-1.5 text-[12px] bg-slate-900/50 px-2 py-1 rounded-md border border-slate-700/50 ${isLeft ? 'text-left' : 'text-right'}`}>
+                                    {l.remark}
                                   </div>
                                 )}
                               </div>
@@ -1349,6 +1403,7 @@ export default function App() {
               </div>
             </div>
           )}
+          {renderLogEditModal()}
           {renderSystemModals()}
         </div>
       );
@@ -1382,7 +1437,7 @@ export default function App() {
 
         <div className="flex gap-4 mb-6 shrink-0">
           <button 
-            onClick={() => setGoalFlow({ isOpen: true, step: 1, teamLetter: t1Letter, scorer: null, isPK: false })} 
+            onClick={() => setGoalFlow({ isOpen: true, step: 1, teamLetter: t1Letter, scorer: null, isPK: false, remark: '' })} 
             className={`flex-1 border-2 py-6 rounded-3xl flex flex-col items-center justify-center gap-2 transition shadow-lg ${TEAM_COLORS[t1Letter]}`}
           >
             <Trophy size={28} className="fill-current"/>
@@ -1391,7 +1446,7 @@ export default function App() {
           <button 
             onClick={() => {
               if (isExternal && t2Letter === 'B') handleOpponentGoal();
-              else setGoalFlow({ isOpen: true, step: 1, teamLetter: t2Letter, scorer: null, isPK: false });
+              else setGoalFlow({ isOpen: true, step: 1, teamLetter: t2Letter, scorer: null, isPK: false, remark: '' });
             }} 
             className={`flex-1 border-2 py-6 rounded-3xl flex flex-col items-center justify-center gap-2 transition shadow-lg ${TEAM_COLORS[t2Letter]}`}
           >
@@ -1436,6 +1491,11 @@ export default function App() {
                              <Footprints size={12} className="text-slate-500"/> <span className="text-xs">{l.assistName}</span>
                            </div>
                          )}
+                         {l.remark && (
+                           <div className={`text-slate-400 mt-1 text-[10px] bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700 ${isLeft ? 'text-left' : 'text-right'}`}>
+                             {l.remark}
+                           </div>
+                         )}
                         </div>
                       </div>
                     )
@@ -1474,6 +1534,11 @@ export default function App() {
                            <Footprints size={12} className="text-slate-500"/> <span className="text-xs">{l.assistName}</span>
                          </div>
                        )}
+                       {l.remark && (
+                         <div className={`text-slate-400 mt-1 text-[10px] bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700 ${isLeft ? 'text-left' : 'text-right'}`}>
+                           {l.remark}
+                         </div>
+                       )}
                      </div>
                    </div>
                  )
@@ -1492,20 +1557,31 @@ export default function App() {
                   <span className={`w-6 h-6 rounded flex items-center justify-center text-sm ${TEAM_COLORS[goalFlow.teamLetter]}`}>{goalFlow.teamLetter}</span>
                   {goalFlow.step === 1 ? '득점자 선택' : '어시스트 선택 (선택사항)'}
                 </h2>
-                <button onClick={() => setGoalFlow({isOpen: false, step: 1, teamLetter: null, scorer: null, isPK: false})} className="text-slate-400 bg-slate-700 p-2 rounded-full"><X size={20}/></button>
+                <button onClick={() => setGoalFlow({isOpen: false, step: 1, teamLetter: null, scorer: null, isPK: false, remark: ''})} className="text-slate-400 bg-slate-700 p-2 rounded-full"><X size={20}/></button>
               </div>
               <div className="flex-1 overflow-y-auto space-y-2 pb-6 custom-scrollbar">
                 
                 {goalFlow.step === 1 && (
-                   <label className="flex items-center gap-2 mb-4 p-3 bg-slate-900 rounded-xl border border-slate-700 cursor-pointer hover:border-slate-500 transition">
-                     <input 
-                        type="checkbox" 
-                        checked={goalFlow.isPK || false} 
-                        onChange={(e) => setGoalFlow({...goalFlow, isPK: e.target.checked})} 
-                        className="accent-blue-500 w-4 h-4 rounded" 
-                     />
-                     <span className="text-white font-bold text-sm">페널티킥 (PK) 득점 여부</span>
-                   </label>
+                   <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 mb-4 space-y-3">
+                     <label className="flex items-center gap-2 cursor-pointer">
+                       <input 
+                          type="checkbox" 
+                          checked={goalFlow.isPK || false} 
+                          onChange={(e) => setGoalFlow({...goalFlow, isPK: e.target.checked})} 
+                          className="accent-blue-500 w-4 h-4 rounded" 
+                       />
+                       <span className="text-white font-bold text-sm">페널티킥 (PK) 득점</span>
+                     </label>
+                     <div>
+                       <input 
+                          type="text" 
+                          value={goalFlow.remark || ''} 
+                          onChange={(e) => setGoalFlow({...goalFlow, remark: e.target.value})} 
+                          placeholder="비고 텍스트 (예: 환상적인 중거리 슛)" 
+                          className="w-full bg-slate-800 border border-slate-600 p-2.5 rounded-lg text-white text-sm outline-none focus:border-blue-500 transition" 
+                       />
+                     </div>
+                   </div>
                 )}
 
                 {goalFlow.step === 2 && (
@@ -1557,6 +1633,7 @@ export default function App() {
           </div>
         )}
 
+        {renderHiddenCaptureArea()}
         {renderLogEditModal()}
         {renderSystemModals()}
         {renderShareModal()}
@@ -1570,7 +1647,6 @@ export default function App() {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
-
       <header className="px-6 py-4 border-b border-slate-800 bg-slate-900 sticky top-0 z-10 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700 text-lg overflow-hidden shrink-0">
@@ -1935,68 +2011,43 @@ export default function App() {
                 </div>
               ))}
 
-                                <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
-                                  <div className="text-slate-800 font-bold text-[11px] flex items-center gap-1">
-                                    <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
-                                    {l.isPK && <span className="text-[9px] bg-red-500/10 text-red-500 px-1 py-0.5 rounded ml-1 border border-red-500/20">PK</span>}
-                                  </div>
-                                  {l.assistName && (
-                                    <div className="text-slate-500 mt-0.5 flex items-center gap-0.5">
-                                      <Footprints size={10} className="text-slate-400"/> <span className="text-[10px]">{l.assistName}</span>
-                                    </div>
-                                  )}
-                                  {l.remark && (
-                                    <div className={`text-slate-500 mt-1 text-[10px] bg-white px-1.5 py-0.5 rounded shadow-sm border border-slate-100 ${isLeft ? 'text-left' : 'text-right'}`}>
-                                      {l.remark}
-                                    </div>
-                                  )}
-                                </div>
+              {/* [수정] 참석자 편성 명단을 가장 아래로 배치 */}
+              <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
+                <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-800 pb-2 flex justify-between items-end">
+                    <span>참석자 편성 명단</span>
+                    <span className="text-[9px] font-normal text-slate-500">* ( )는 팀 이동 내역</span>
+                </div>
+                <div className="space-y-4">
+                  {TEAM_LETTERS.slice(0, detailModal.match.teamCount).map(teamLetter => {
+                    // 해당 팀에 소속된 참석자만 필터링
+                    const teamPlayers = players.filter(p => 
+                      detailModal.match.attendees.includes(p.id) && 
+                      (detailModal.match.teamAssignments[p.id] || 'A') === teamLetter
+                    );
+                    
+                    if(teamPlayers.length === 0) return null;
+
+                    return (
+                      <div key={teamLetter}>
+                        <div className={`text-[11px] font-black mb-2 ${TEAM_TEXT_COLORS[teamLetter]}`}>
+                          {getTeamDisplayName(detailModal.match, teamLetter)}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {teamPlayers.map(p => {
+                            // 변경 히스토리 추출 (ex: A ➔ B)
+                            const history = detailModal.match.teamHistory?.[p.id];
+                            let historyStr = "";
+                            if (history && history.length > 1) {
+                                historyStr = ` (${history.join('➔')})`;
+                            }
+                            return (
+                              <div key={p.id} className="bg-slate-800 px-2 py-1.5 rounded border border-slate-700 text-[10px] text-slate-300 flex items-center">
+                                <span className="font-bold text-white">{p.name}</span>
+                                {historyStr && <span className="text-slate-500 ml-1 tracking-tighter font-medium">{historyStr}</span>}
                               </div>
-                            )
-                          }) : <div className="text-[11px] text-slate-400 text-center py-2">득점 기록이 없습니다.</div>}
+                            );
+                          })}
                         </div>
-                        <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
-                         <div className="text-white font-bold text-sm flex items-center gap-1">
-                           <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
-                           {l.isPK && <span className="text-[9px] bg-red-500/20 text-red-400 px-1 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
-                         </div>
-                         {l.assistName && (
-                           <div className="text-slate-400 mt-0.5 flex items-center gap-1">
-                             <Footprints size={12} className="text-slate-500"/> <span className="text-xs">{l.assistName}</span>
-                           </div>
-                         )}
-                         {l.remark && (
-                           <div className={`text-slate-400 mt-1 text-[10px] bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700 ${isLeft ? 'text-left' : 'text-right'}`}>
-                             {l.remark}
-                           </div>
-                         )}
-                        </div>
-                      </div>
-                    )
-                 })}
-                 {liveMatch.logs.filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-xs text-slate-600 italic text-center">득점 없음</div>}
-               </div>
-                     <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
-                       <div className="text-white font-bold text-sm flex items-center gap-1">
-                         <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
-                         {l.isPK && <span className="text-[9px] bg-red-500/20 text-red-400 px-1 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
-                       </div>
-                       {l.assistName && (
-                         <div className="text-slate-400 mt-0.5 flex items-center gap-1">
-                           <Footprints size={12} className="text-slate-500"/> <span className="text-xs">{l.assistName}</span>
-                         </div>
-                       )}
-                       {l.remark && (
-                         <div className={`text-slate-400 mt-1 text-[10px] bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700 ${isLeft ? 'text-left' : 'text-right'}`}>
-                           {l.remark}
-                         </div>
-                       )}
-                     </div>
-                   </div>
-                 )
-               })}
-               {currentQLogs.length === 0 && <div className="text-xs text-slate-500 italic text-center">아직 득점이 없습니다.</div>}
-             </div>
                       </div>
                     );
                   })}
@@ -2081,42 +2132,41 @@ export default function App() {
                   {currentTeamPlayers.map(p => (
                     <label key={p.id} className="flex items-center gap-2 bg-slate-900 p-3 rounded-lg border border-slate-700 cursor-pointer hover:border-slate-500 transition">
                       <input type="checkbox" name={`attendee_${p.id}`} defaultChecked={matchModal.match ? matchModal.match.attendees?.includes(p.id) : true} className="accent-blue-500 w-4 h-4 rounded" />
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-black text-white flex items-center gap-2">
-                  <span className={`w-6 h-6 rounded flex items-center justify-center text-sm ${TEAM_COLORS[goalFlow.teamLetter]}`}>{goalFlow.teamLetter}</span>
-                  {goalFlow.step === 1 ? '득점자 선택' : '어시스트 선택 (선택사항)'}
-                </h2>
-                <button onClick={() => setGoalFlow({isOpen: false, step: 1, teamLetter: null, scorer: null, isPK: false, remark: ''})} className="text-slate-400 bg-slate-700 p-2 rounded-full"><X size={20}/></button>
+                      <span className="text-sm font-bold text-white">{p.name}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
-              <div className="flex-1 overflow-y-auto space-y-2 pb-6 custom-scrollbar">
-                
-                {goalFlow.step === 1 && (
-                   <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 mb-4 space-y-3">
-                     <label className="flex items-center gap-2 cursor-pointer">
-                       <input 
-                          type="checkbox" 
-                          checked={goalFlow.isPK || false} 
-                          onChange={(e) => setGoalFlow({...goalFlow, isPK: e.target.checked})} 
-                          className="accent-blue-500 w-4 h-4 rounded" 
-                       />
-                       <span className="text-white font-bold text-sm">페널티킥 (PK) 득점</span>
-                     </label>
-                     <div>
-                       <input 
-                          type="text" 
-                          value={goalFlow.remark || ''} 
-                          onChange={(e) => setGoalFlow({...goalFlow, remark: e.target.value})} 
-                          placeholder="비고 텍스트 (예: 환상적인 중거리 슛)" 
-                          className="w-full bg-slate-800 border border-slate-600 p-2.5 rounded-lg text-white text-sm outline-none focus:border-blue-500 transition" 
-                       />
-                     </div>
-                   </div>
-                )}
+            </form>
+            <div className="pt-4 shrink-0 border-t border-slate-700">
+              <button type="submit" form="matchForm" className="w-full py-4 bg-blue-500 hover:bg-blue-400 text-white rounded-xl font-bold text-lg transition shadow-lg">저장하기</button>
+            </div>
+          </div>
+        </div>
+      )}
 
-                {goalFlow.step === 2 && (
-                  <button onClick={() => handleGoalSubmit(null, goalFlow.teamLetter)} className="w-full p-4 rounded-xl text-left font-bold border-2 border-dashed border-slate-600 text-slate-400 hover:border-slate-400 mb-4 transition">
-                    ❌ 도움 없음 (단독 돌파/상대 자책 등)
-                  </button>
+      {/* Assignment Modal (Main View) */}
+      {assignmentModal.isOpen && assignmentModal.match && assignmentModal.match.matchType !== 'external' && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-md border border-slate-700 max-h-[80vh] flex flex-col shadow-xl">
+            <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-700">
+              <div><h2 className="text-lg font-bold text-white">참석자 팀 편성</h2></div>
+              <button onClick={() => setAssignmentModal({isOpen: false, match: null})} className="text-white bg-blue-500 px-4 py-2 rounded-xl font-bold">완료</button>
+            </div>
+            <div className="flex-1 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
+              {currentTeamPlayers.filter(p => assignmentModal.match.attendees.includes(p.id)).map(p => {
+                const currentTeam = assignmentModal.match.teamAssignments[p.id] || 'A';
+                return (
+                  <div key={p.id} className="bg-slate-900 p-3 rounded-xl flex justify-between items-center border border-slate-700">
+                    <div className="font-bold text-white">{p.name} <span className="text-xs text-slate-500 ml-1">{p.birthYear}</span></div>
+                    <div className="flex bg-slate-800 rounded-lg p-1">
+                      {TEAM_LETTERS.slice(0, assignmentModal.match.teamCount).map(t => (
+                        <button 
+                          key={t} onClick={() => assignTeam(p.id, t)}
+                          className={`w-8 h-8 flex items-center justify-center text-xs font-black rounded-md transition ${currentTeam === t ? TEAM_COLORS[t] + ' shadow' : 'text-slate-500 hover:text-white'}`}
+                        >
+                          {t}
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -2226,9 +2276,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 숨겨진 화면 캡처 전용 컴포넌트 */}
       {renderHiddenCaptureArea()}
-
       {renderLogEditModal()}
       {renderSystemModals()}
       {renderShareModal()}
