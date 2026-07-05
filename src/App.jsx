@@ -30,12 +30,12 @@ const db = getFirestore(app);
 // ==========================================
 const TEAM_LETTERS = ['A', 'B', 'C', 'D'];
 const TEAM_COLORS = {
-  'A': 'text-red-400 bg-red-500/10 border-red-500/30',
+  'A': 'text-white bg-white/10 border-white/30',
   'B': 'text-blue-400 bg-blue-500/10 border-blue-500/30',
-  'C': 'text-green-400 bg-green-500/10 border-green-500/30',
-  'D': 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30'
+  'C': 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30',
+  'D': 'text-red-400 bg-red-500/10 border-red-500/30'
 };
-const TEAM_TEXT_COLORS = { 'A': 'text-red-400', 'B': 'text-blue-400', 'C': 'text-green-400', 'D': 'text-yellow-400' };
+const TEAM_TEXT_COLORS = { 'A': 'text-white', 'B': 'text-blue-400', 'C': 'text-yellow-400', 'D': 'text-red-400' };
 
 const resizeImage = (file, maxWidth = 300, maxHeight = 300) => {
   return new Promise((resolve) => {
@@ -1912,7 +1912,7 @@ export default function App() {
                         <table className="w-full text-xs text-center">
                           <thead>
                             <tr className="text-slate-500 font-bold">
-                              <th className="pb-2">순위</th><th className="pb-2 text-left">팀</th><th className="pb-2">승</th><th className="pb-2">무</th><th className="pb-2">패</th><th className="pb-2">득</th><th className="pb-2">실</th><th className="pb-2">득실</th>
+                              <th className="pb-2">순위</th><th className="pb-2 text-left">팀</th><th className="pb-2 text-blue-400">승점</th><th className="pb-2">승</th><th className="pb-2">무</th><th className="pb-2">패</th><th className="pb-2">득</th><th className="pb-2">실</th><th className="pb-2">득실</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1920,6 +1920,7 @@ export default function App() {
                               <tr key={st.team} className="border-t border-slate-700/50">
                                 <td className={`py-2 font-black ${index === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{index + 1}</td>
                                 <td className={`py-2 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(m, st.team)}</td>
+                                <td className="py-2 text-blue-400 font-black">{st.pts}</td>
                                 <td className="py-2 text-white">{st.w}</td>
                                 <td className="py-2 text-slate-400">{st.d}</td>
                                 <td className="py-2 text-slate-400">{st.l}</td>
@@ -2103,14 +2104,15 @@ export default function App() {
                 <table className="w-full text-xs text-center">
                   <thead>
                     <tr className="text-slate-500 font-bold">
-                      <th className="pb-2">순위</th><th className="pb-2 text-left">팀</th><th className="pb-2">승</th><th className="pb-2">무</th><th className="pb-2">패</th><th className="pb-2">득</th><th className="pb-2">실</th><th className="pb-2">득실</th>
+                      <th className="pb-2">순위</th><th className="pb-2 text-left">팀</th><th className="pb-2 text-blue-400">승점</th><th className="pb-2">승</th><th className="pb-2">무</th><th className="pb-2">패</th><th className="pb-2">득</th><th className="pb-2">실</th><th className="pb-2">득실</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {calculateStandings(currentDetailMatch).map((st, index) => (
+                    {calculateStandings(detailModal.match).map((st, index) => (
                       <tr key={st.team} className="border-t border-slate-800">
                         <td className={`py-2 font-black ${index === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{index + 1}</td>
-                        <td className={`py-2 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(currentDetailMatch, st.team)}</td>
+                        <td className={`py-2 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(detailModal.match, st.team)}</td>
+                        <td className="py-2 text-blue-400 font-black">{st.pts}</td>
                         <td className="py-2 text-white">{st.w}</td>
                         <td className="py-2 text-slate-400">{st.d}</td>
                         <td className="py-2 text-slate-400">{st.l}</td>
@@ -2122,17 +2124,30 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
-
-              {currentDetailMatch.quarterScores.map(qs => (
-                <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
-                   <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
-                     <span className="absolute left-0 font-black text-blue-400">{qs.quarter}Q</span>
-                     <span className="font-bold text-white text-lg text-center">
-                       <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(currentDetailMatch, qs.team1)}</span> 
-                       <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span> 
-                       <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(currentDetailMatch, qs.team2)}</span>
-                     </span>
-                   </div>
+          <div className="w-full bg-slate-800 rounded-2xl p-6 mb-6 border border-slate-700/50 shadow-md">
+             <div className="font-black text-slate-400 text-[15px] border-b border-slate-700/50 pb-3 mb-4">순위표</div>
+             <table className="w-full text-[13px] text-center">
+               <thead>
+                 <tr className="text-slate-500 font-bold">
+                   <th className="pb-3 text-left">팀</th><th className="pb-3 text-blue-400">승점</th><th className="pb-3">승</th><th className="pb-3">무</th><th className="pb-3">패</th><th className="pb-3">득</th><th className="pb-3">실</th><th className="pb-3">득실</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 {calculateStandings(shareModal.data).map((st, i) => (
+                   <tr key={st.team} className="border-t border-slate-700/50 text-slate-300">
+                     <td className={`py-3 font-bold text-left ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareModal.data, st.team)}</td>
+                     <td className="py-3 text-blue-400 font-black">{st.pts}</td>
+                     <td className="py-3 text-white">{st.w}</td>
+                     <td className="py-3 text-slate-400">{st.d}</td>
+                     <td className="py-3 text-slate-400">{st.l}</td>
+                     <td className="py-3 text-white">{st.gf}</td>
+                     <td className="py-3 text-slate-400">{st.ga}</td>
+                     <td className="py-3 text-white">{st.gd > 0 ? '+'+st.gd : st.gd}</td>
+                   </tr>
+                 ))}
+               </tbody>
+             </table>
+          </div>
                    <div className="space-y-3">
                      {currentDetailMatch.logs.filter(l => l.quarter === qs.quarter).map(l => {
                        const isLeft = l.teamLetter === qs.team1;
