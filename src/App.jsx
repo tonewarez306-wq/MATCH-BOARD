@@ -1832,103 +1832,82 @@ export default function App() {
 
       {/* 숨겨진 화면 캡처 전용 컴포넌트 (모달 뒤편에서 잘림 없이 전체 높이로 렌더링 후 캡처됨) */}
       {shareModal.isOpen && shareModal.data && (
-        <div className="fixed top-0 left-0 w-[380px] opacity-0 pointer-events-none z-[-100] overflow-visible">
-          {/* 노란색 배경에서 id="capture-area-hidden" 제거 */}
-          <div className="bg-[#FEE500] p-6 w-full flex flex-col items-center text-center">
-            <div className="flex justify-between items-center mb-4 px-1 w-full">
-              <h2 className="text-lg font-black text-slate-900 flex items-center gap-1"><MessageCircle size={18} className="fill-current"/> 경기 결과 리포트</h2>
+        <div className="fixed top-0 left-0 w-[380px] opacity-0 pointer-events-none z-[-100] overflow-visible p-4">
+          {/* 순수하게 경기결과 정보만 담은 흰색 팝업창 영역을 캡처 타겟으로 지정 */}
+          <div id="capture-area-hidden" className="bg-white rounded-2xl overflow-hidden shadow-xl border border-slate-200 p-5">
+            <div className="mb-4 border-b border-slate-100 pb-4">
+              <h3 className="font-black text-slate-900 text-[18px] leading-tight mb-1">
+                 {shareModal.data.matchType === 'external' ? `[교류전] vs ${shareModal.data.opponentName}` : `[자체전] ${shareModal.data.location}`}
+              </h3>
+              <p className="text-slate-500 text-[12px] font-medium">{shareModal.data.date} {shareModal.data.time} · 참석 {shareModal.data.attendees?.length || 0}명</p>
             </div>
-            {/* 회파란색 배경 부분에 id="capture-area-hidden" 추가 */}
-            <div id="capture-area-hidden" className="bg-[#b2c7d9] w-full p-4 rounded-2xl text-left shadow-inner">
-              <div className="text-[10px] text-slate-500 font-medium text-center mb-4">
-                {new Date(shareModal.data.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
-              </div>
-              <div className="flex gap-2">
-                <div className="w-8 h-8 rounded-[12px] bg-slate-300 flex-shrink-0 flex items-center justify-center overflow-hidden border border-white/50 shadow-sm">
-                  {activeTeam?.logo?.startsWith('data:image') ? <img src={activeTeam.logo} alt="logo" className="w-full h-full object-cover" /> : <span className="text-lg">{activeTeam?.logo || '⚽'}</span>}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[11px] text-slate-700 mb-1 ml-1 font-bold">{activeTeam?.name || '나'}</div>
-                  <div className="bg-white rounded-xl overflow-hidden shadow-sm border border-black/5 p-3">
-                    
-                    <div className="mb-3">
-                      <h3 className="font-black text-slate-800 text-[14px] leading-tight">
-                         {shareModal.data.matchType === 'external' ? `[교류전] vs ${shareModal.data.opponentName}` : `[자체전] ${shareModal.data.location}`}
-                      </h3>
-                      <p className="text-slate-500 text-[10px] mt-1">{shareModal.data.date} {shareModal.data.time} · 참석 {shareModal.data.attendees?.length || 0}명</p>
-                    </div>
 
-                    <div className="bg-slate-50 rounded-lg p-2 mb-3 border border-slate-100">
-                       <div className="font-bold text-slate-700 text-[11px] border-b border-slate-200 pb-1 mb-1">순위표</div>
-                       <table className="w-full text-[10px] text-center mt-1">
-                         <thead>
-                           <tr className="text-slate-400 font-bold">
-                             <th className="pb-1 text-left">팀</th><th className="pb-1">승</th><th className="pb-1">무</th><th className="pb-1">패</th><th className="pb-1">득</th><th className="pb-1">실</th><th className="pb-1">득실</th><th className="pb-1">승점</th>
-                           </tr>
-                         </thead>
-                         <tbody>
-                           {calculateStandings(shareModal.data).map(st => (
-                             <tr key={st.team} className="border-t border-slate-100 text-slate-600">
-                               <td className={`py-1.5 font-bold text-left ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareModal.data, st.team)}</td>
-                               <td className="py-1.5">{st.w}</td>
-                               <td className="py-1.5">{st.d}</td>
-                               <td className="py-1.5">{st.l}</td>
-                               <td className="py-1.5">{st.gf}</td>
-                               <td className="py-1.5">{st.ga}</td>
-                               <td className="py-1.5">{st.gd > 0 ? '+'+st.gd : st.gd}</td>
-                               <td className="py-1.5 text-blue-500 font-bold">{st.pts}</td>
-                             </tr>
-                           ))}
-                         </tbody>
-                       </table>
-                    </div>
+            <div className="mb-5">
+               <div className="font-black text-slate-800 text-[13px] border-b border-slate-200 pb-1.5 mb-2">순위표</div>
+               <table className="w-full text-[12px] text-center">
+                 <thead>
+                   <tr className="text-slate-400 font-bold">
+                     <th className="pb-2 text-left">팀</th><th className="pb-2">승</th><th className="pb-2">무</th><th className="pb-2">패</th><th className="pb-2">득</th><th className="pb-2">실</th><th className="pb-2">득실</th><th className="pb-2">승점</th>
+                   </tr>
+                 </thead>
+                 <tbody>
+                   {calculateStandings(shareModal.data).map(st => (
+                     <tr key={st.team} className="border-t border-slate-100 text-slate-700">
+                       <td className={`py-2.5 font-bold text-left ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareModal.data, st.team)}</td>
+                       <td className="py-2.5">{st.w}</td>
+                       <td className="py-2.5">{st.d}</td>
+                       <td className="py-2.5">{st.l}</td>
+                       <td className="py-2.5">{st.gf}</td>
+                       <td className="py-2.5">{st.ga}</td>
+                       <td className="py-2.5">{st.gd > 0 ? '+'+st.gd : st.gd}</td>
+                       <td className="py-2.5 text-blue-500 font-black">{st.pts}</td>
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
+            </div>
 
-                    <div className="bg-slate-50 rounded-lg p-2 mb-2 border border-slate-100">
-                       <div className="font-bold text-slate-700 text-[11px] border-b border-slate-200 pb-1 mb-2">쿼터별 상세 기록</div>
-                       <div className="space-y-3">
-                         {shareModal.data.quarterScores?.length > 0 ? shareModal.data.quarterScores.map(qs => {
-                           const qLogs = shareModal.data.logs.filter(l => l.quarter === qs.quarter);
-                           return (
-                             <div key={qs.quarter} className="bg-white rounded-xl p-2 border border-slate-100 shadow-sm">
-                                <div className="relative flex justify-center items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                  <span className="absolute left-0 font-black text-blue-500 text-[10px]">{qs.quarter}Q</span>
-                                  <span className="font-bold text-slate-800 text-[11px] text-center flex items-center">
-                                    <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(shareModal.data, qs.team1)}</span> 
-                                    <span className="text-slate-400 mx-2">{qs.score1} : {qs.score2}</span> 
-                                    <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(shareModal.data, qs.team2)}</span>
-                                  </span>
+            <div>
+               <div className="font-black text-slate-800 text-[13px] border-b border-slate-200 pb-1.5 mb-3">쿼터별 상세 기록</div>
+               <div className="space-y-3">
+                 {shareModal.data.quarterScores?.length > 0 ? shareModal.data.quarterScores.map(qs => {
+                   const qLogs = shareModal.data.logs.filter(l => l.quarter === qs.quarter);
+                   return (
+                     <div key={qs.quarter} className="bg-slate-50/50 rounded-xl p-3 border border-slate-100">
+                        <div className="relative flex justify-center items-center border-b border-slate-100 pb-2 mb-2">
+                          <span className="absolute left-0 font-black text-blue-500 text-[12px]">{qs.quarter}Q</span>
+                          <span className="font-bold text-slate-800 text-[13px] text-center flex items-center">
+                            <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(shareModal.data, qs.team1)}</span> 
+                            <span className="text-slate-400 mx-2">{qs.score1} : {qs.score2}</span> 
+                            <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(shareModal.data, qs.team2)}</span>
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {qLogs.length > 0 ? qLogs.map(l => {
+                            const isLeft = l.teamLetter === qs.team1;
+                            return (
+                              <div key={l.id} className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
+                                <span className="text-slate-400 text-[9px] w-8 shrink-0 text-center mt-0.5">{l.time}</span>
+                                <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
+                                  <div className="text-slate-800 font-bold text-[11px] flex items-center gap-1">
+                                    <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
+                                  </div>
+                                  {l.assistName && (
+                                    <div className="text-slate-500 mt-0.5 flex items-center gap-0.5">
+                                      <Footprints size={10} className="text-slate-400"/> <span className="text-[10px]">{l.assistName}</span>
+                                    </div>
+                                  )}
                                 </div>
-                                <div className="space-y-1.5">
-                                  {qLogs.length > 0 ? qLogs.map(l => {
-                                    const isLeft = l.teamLetter === qs.team1;
-                                    return (
-                                      <div key={l.id} className={`flex items-start gap-1.5 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
-                                        <span className="text-slate-400 text-[8px] w-6 shrink-0 text-center mt-0.5">{l.time}</span>
-                                        <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
-                                          <div className="text-slate-700 font-bold text-[9px] flex items-center gap-1">
-                                            <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
-                                          </div>
-                                          {l.assistName && (
-                                            <div className="text-slate-400 mt-0.5 flex items-center gap-0.5">
-                                              <Footprints size={8} className="text-slate-400"/> <span className="text-[8px]">{l.assistName}</span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    )
-                                  }) : <div className="text-[9px] text-slate-400 text-center py-1">득점 기록이 없습니다.</div>}
-                                </div>
-                             </div>
-                           )
-                         }) : (
-                           <div className="text-[10px] text-slate-400 text-center py-2">아직 기록이 없습니다.</div>
-                         )}
-                       </div>
-                    </div>
-
-                  </div>
-                </div>
-              </div>
+                              </div>
+                            )
+                          }) : <div className="text-[11px] text-slate-400 text-center py-2">득점 기록이 없습니다.</div>}
+                        </div>
+                     </div>
+                   )
+                 }) : (
+                   <div className="text-[11px] text-slate-400 text-center py-3">아직 기록이 없습니다.</div>
+                 )}
+               </div>
             </div>
           </div>
         </div>
