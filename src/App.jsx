@@ -37,9 +37,6 @@ const TEAM_COLORS = {
 };
 const TEAM_TEXT_COLORS = { 'A': 'text-red-400', 'B': 'text-blue-400', 'C': 'text-green-400', 'D': 'text-yellow-400' };
 
-// ==========================================
-// 이미지 압축 헬퍼 함수 (Firestore 1MB 제한 방지)
-// ==========================================
 const resizeImage = (file, maxWidth = 300, maxHeight = 300) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -66,7 +63,6 @@ const resizeImage = (file, maxWidth = 300, maxHeight = 300) => {
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
-        // 해상도를 줄이고 JPEG 80% 화질로 압축하여 용량을 대폭 감소
         resolve(canvas.toDataURL('image/jpeg', 0.8)); 
       };
     };
@@ -74,9 +70,6 @@ const resizeImage = (file, maxWidth = 300, maxHeight = 300) => {
   });
 };
 
-// ==========================================
-// html2canvas 동적 로드 헬퍼 (import 에러 방지)
-// ==========================================
 const loadHtml2Canvas = () => {
   return new Promise((resolve, reject) => {
     if (window.html2canvas) {
@@ -91,11 +84,38 @@ const loadHtml2Canvas = () => {
   });
 };
 
+// 순위표 계산 함수 (외부 분리하여 재사용성 강화)
+const calculateStandings = (match) => {
+  const stats = {};
+  TEAM_LETTERS.slice(0, match.teamCount).forEach(t => {
+    stats[t] = { team: t, matches: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 };
+  });
+
+  match.quarterScores.forEach(qs => {
+    const { team1, team2, score1, score2 } = qs;
+    if (!stats[team1] || !stats[team2]) return;
+    
+    stats[team1].matches++; stats[team2].matches++;
+    stats[team1].gf += score1; stats[team1].ga += score2;
+    stats[team2].gf += score2; stats[team2].ga += score1;
+
+    if (score1 > score2) { stats[team1].w++; stats[team2].l++; stats[team1].pts += 3; }
+    else if (score1 < score2) { stats[team2].w++; stats[team1].l++; stats[team2].pts += 3; }
+    else { stats[team1].d++; stats[team2].d++; stats[team1].pts += 1; stats[team2].pts += 1; }
+  });
+
+  Object.values(stats).forEach(s => s.gd = s.gf - s.ga);
+  return Object.values(stats).sort((a, b) => {
+    if (b.pts !== a.pts) return b.pts - a.pts;
+    if (b.gd !== a.gd) return b.gd - a.gd;
+    return b.gf - a.gf;
+  });
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
-
   const [appState, setAppState] = useState('login'); 
-  const [activeTab, setActiveTab] = useState('matches'); // matches, schedule, roster
+  const [activeTab, setActiveTab] = useState('matches'); 
   const [isAdmin, setIsAdmin] = useState(false); 
   const [adminPassword, setAdminPassword] = useState('admin');
   
@@ -104,7 +124,6 @@ export default function App() {
   const [players, setPlayers] = useState([]);
   const [matches, setMatches] = useState([]);
 
-  // 월 이동 상태 (경기, 스케쥴 탭 공통 사용)
   const [viewDate, setViewDate] = useState(new Date());
 
   const [systemAlert, setSystemAlert] = useState({ isOpen: false, message: '' });
@@ -132,7 +151,8 @@ export default function App() {
   const [liveState, setLiveState] = useState({ currentQuarter: 1, playingTeams: ['A', 'B'], isQuarterActive: false });
   const [goalFlow, setGoalFlow] = useState({ isOpen: false, step: 1, teamLetter: null, scorer: null });
 
-  const activeTeam = teams.find(t => t.id === activeTeamId);
+  // [최적화] 렌더링 때마다 반복되는 찾기 연산 방지
+  const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
   const liveMatch = useMemo(() => matches.find(m => m.id === liveMatchId), [matches, liveMatchId]);
@@ -164,44 +184,35 @@ export default function App() {
     return `팀 ${letter}`;
   };
 
-  // 현재 뷰 달의 데이터 필터링
   const viewYearMonth = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
+  
+  // [최적화] 이번 달 경기 목록 메모이제이션
   const monthlyMatches = useMemo(() => {
     return currentTeamMatches.filter(m => m.date.startsWith(viewYearMonth));
   }, [currentTeamMatches, viewYearMonth]);
 
   const scheduledThisMonth = useMemo(() => monthlyMatches.filter(m => m.status === 'scheduled').sort((a,b) => a.date.localeCompare(b.date)), [monthlyMatches]);
-  const completedThisMonth = useMemo(() => monthlyMatches.filter(m => m.status === 'completed').sort((a,b) => b.date.localeCompare(a.date)), [monthlyMatches]);
+  
+  // [최적화] 완료된 경기 데이터에 '순위표(standings)'를 미리 계산해 포함시켜 둠 (렌더링 시 과부하 방지)
+  const completedThisMonthWithStandings = useMemo(() => {
+    return monthlyMatches
+      .filter(m => m.status === 'completed')
+      .sort((a,b) => b.date.localeCompare(a.date))
+      .map(m => ({ ...m, standings: calculateStandings(m) }));
+  }, [monthlyMatches]);
+
+  // [최적화] 캘린더용 날짜별 해시맵 (달력의 각 날짜마다 반복 탐색하는 O(N^2) 문제를 O(N)으로 개선)
+  const matchesByDate = useMemo(() => {
+    const map = {};
+    monthlyMatches.forEach(m => {
+      if (!map[m.date]) map[m.date] = [];
+      map[m.date].push(m);
+    });
+    return map;
+  }, [monthlyMatches]);
 
   const prevMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
   const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
-
-  const calculateStandings = (match) => {
-    const stats = {};
-    TEAM_LETTERS.slice(0, match.teamCount).forEach(t => {
-      stats[t] = { team: t, matches: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 };
-    });
-
-    match.quarterScores.forEach(qs => {
-      const { team1, team2, score1, score2 } = qs;
-      if (!stats[team1] || !stats[team2]) return;
-      
-      stats[team1].matches++; stats[team2].matches++;
-      stats[team1].gf += score1; stats[team1].ga += score2;
-      stats[team2].gf += score2; stats[team2].ga += score1;
-
-      if (score1 > score2) { stats[team1].w++; stats[team2].l++; stats[team1].pts += 3; }
-      else if (score1 < score2) { stats[team2].w++; stats[team1].l++; stats[team2].pts += 3; }
-      else { stats[team1].d++; stats[team2].d++; stats[team1].pts += 1; stats[team2].pts += 1; }
-    });
-
-    Object.values(stats).forEach(s => s.gd = s.gf - s.ga);
-    return Object.values(stats).sort((a, b) => {
-      if (b.pts !== a.pts) return b.pts - a.pts;
-      if (b.gd !== a.gd) return b.gd - a.gd;
-      return b.gf - a.gf;
-    });
-  };
 
   const openMatchModal = (match) => {
     setMatchTypeForm(match?.matchType || 'internal');
@@ -212,7 +223,6 @@ export default function App() {
     const matchDateTime = new Date(`${match.date}T${match.time}`);
     const now = new Date();
     
-    // 관리자가 아니고, 경기 시작 시간 전이라면 알럿 표시
     if (!isAdmin && matchDateTime > now) {
       setSystemAlert({
         isOpen: true, 
@@ -239,8 +249,7 @@ export default function App() {
         setIsCreateTeamOpen(true);
       } else setSystemAlert({ isOpen: true, message: '시스템 관리자 비밀번호가 틀렸습니다.' });
     } else if (authModal.type === 'adminMode') {
-      const currentTeamObj = teams.find(t => t.id === activeTeamId);
-      if (pwd === (currentTeamObj?.adminPassword || 'admin')) {
+      if (pwd === (activeTeam?.adminPassword || 'admin')) {
         setIsAdmin(true);
         setAuthModal({ isOpen: false });
       } else setSystemAlert({ isOpen: true, message: '팀 관리자 비밀번호가 틀렸습니다.' });
@@ -407,11 +416,9 @@ export default function App() {
     const m = matches.find(match => match.id === assignmentModal.match.id);
     if(m) {
       const currentTeam = m.teamAssignments?.[playerId] || 'A';
-      if (currentTeam === teamLetter) return; // 변경 없음
+      if (currentTeam === teamLetter) return;
 
       const newAssigns = { ...m.teamAssignments, [playerId]: teamLetter };
-      
-      // 팀 변경 히스토리 기록 (중복 방지)
       const newHistoryMap = { ...(m.teamHistory || {}) };
       const playerHistory = newHistoryMap[playerId] || [currentTeam];
       
@@ -542,11 +549,9 @@ export default function App() {
     }
   };
 
-  // 백그라운드에서 이미지를 미리 캡처하는 로직으로 변경
   const triggerShare = (data) => {
     setShareModal({ isOpen: true, step: 1, data, file: null, imgUrl: null });
 
-    // 숨겨진 캡처 영역이 DOM에 렌더링될 시간을 잠시 줍니다.
     setTimeout(async () => {
       const captureTarget = document.getElementById('capture-area-hidden');
       if (!captureTarget) return;
@@ -556,14 +561,13 @@ export default function App() {
         const canvas = await html2canvas(captureTarget, {
           scale: 2, 
           useCORS: true, 
-          backgroundColor: null // 투명한 배경으로 캡처 (모서리 둥글게 보존)
+          backgroundColor: null 
         });
 
         canvas.toBlob((blob) => {
           if (!blob) return;
           const file = new File([blob], 'matchboard_result.png', { type: 'image/png' });
           const imgUrl = URL.createObjectURL(blob);
-          // 이미지 생성이 완료되면 Step 2(미리보기 화면)로 넘어갑니다.
           setShareModal(prev => ({ ...prev, step: 2, file, imgUrl }));
         }, 'image/png');
       } catch (err) {
@@ -574,7 +578,6 @@ export default function App() {
     }, 500); 
   };
 
-  // 사용자가 클릭 시 "즉시" OS 공유 창(카카오톡)을 호출합니다.
   const doActualShare = async () => {
     const file = shareModal.file;
     if (!file) return;
@@ -589,7 +592,6 @@ export default function App() {
         console.log('공유 취소 또는 에러', error);
       }
     } else {
-      // 모바일 네이티브 공유 미지원 기기 (PC 등) 대응
       try {
         if (navigator.clipboard && window.isSecureContext) {
           const clipboardItem = new ClipboardItem({ 'image/png': file });
@@ -605,12 +607,11 @@ export default function App() {
     }
   };
 
-  // 공통 시스템 모달 렌더러
   const renderSystemModals = () => (
     <>
       {systemAlert.isOpen && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
-          <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-2xl text-center animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
             <p className="text-white font-bold mb-6 whitespace-pre-line">{systemAlert.message}</p>
             <button onClick={() => setSystemAlert({isOpen: false, message: ''})} className="w-full py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
           </div>
@@ -618,7 +619,7 @@ export default function App() {
       )}
       {systemConfirm.isOpen && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
-          <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-2xl text-center animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
             <p className="text-white font-bold mb-6 whitespace-pre-line">{systemConfirm.message}</p>
             <div className="flex gap-3">
               <button onClick={() => setSystemConfirm({isOpen: false, message: '', onConfirm: null})} className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 transition text-white rounded-xl font-bold">취소</button>
@@ -637,30 +638,29 @@ export default function App() {
       <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-50">
         <div className="w-full max-w-sm flex flex-col items-center max-h-[90vh]">
           {shareModal.step === 1 ? (
-            <div className="bg-[#FEE500] p-6 rounded-3xl w-full shadow-2xl flex flex-col items-center text-center animate-in zoom-in-95">
-              <div className="w-16 h-16 border-4 border-slate-900/20 border-t-slate-900 rounded-full animate-spin mb-4 mt-8"></div>
-              <h2 className="text-lg font-black text-slate-900 mb-1">결과 이미지 생성 중...</h2>
-              <p className="text-sm text-slate-800 font-medium mb-8">잠시만 기다려주세요.</p>
+            <div className="bg-slate-800 border border-slate-700 p-6 rounded-3xl w-full shadow-xl flex flex-col items-center text-center animate-in zoom-in-95">
+              <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4 mt-8"></div>
+              <h2 className="text-lg font-black text-white mb-1">이미지 생성 중...</h2>
+              <p className="text-sm text-slate-400 font-medium mb-8">잠시만 기다려주세요.</p>
             </div>
           ) : (
-            <div className="bg-[#FEE500] p-5 rounded-3xl w-full shadow-2xl flex flex-col items-center text-center flex-1 min-h-0 animate-in fade-in">
-              <h2 className="text-lg font-black text-slate-900 flex items-center gap-1 mb-4 shrink-0">
-                <MessageCircle size={18} className="fill-current"/> 리포트 미리보기
+            <div className="bg-slate-800 border border-slate-700 p-5 rounded-3xl w-full shadow-xl flex flex-col items-center text-center flex-1 min-h-0 animate-in fade-in">
+              <h2 className="text-lg font-black text-white flex items-center gap-1 mb-4 shrink-0">
+                <MessageCircle size={18} className="text-blue-500"/> 리포트 미리보기
               </h2>
               
-              {/* 생성된 캡처 이미지를 띄워줍니다 (잘림 방지 확인용) */}
-              <div className="w-full flex-1 overflow-y-auto custom-scrollbar rounded-xl bg-black/5 p-2 shadow-inner border border-black/10">
+              <div className="w-full flex-1 overflow-y-auto custom-scrollbar rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50">
                 {shareModal.imgUrl && (
                    <img src={shareModal.imgUrl} alt="Preview" className="w-full h-auto rounded-lg shadow-sm" />
                 )}
               </div>
 
               <div className="w-full mt-5 space-y-3 shrink-0">
-                <button onClick={doActualShare} className="w-full py-4 bg-slate-900 text-[#FEE500] rounded-2xl font-black text-lg hover:bg-slate-800 transition shadow-xl flex items-center justify-center gap-2">
+                <button onClick={doActualShare} className="w-full py-4 bg-[#FEE500] text-slate-900 rounded-2xl font-black text-lg hover:bg-[#FEE500]/90 transition shadow-lg flex items-center justify-center gap-2">
                   <Share2 size={20} />
                   카카오톡 공유하기
                 </button>
-                <button onClick={() => setShareModal({isOpen: false, step: 1, data: null, file: null, imgUrl: null})} className="w-full py-3 text-slate-700 font-bold hover:text-slate-900 transition bg-black/5 rounded-xl">
+                <button onClick={() => setShareModal({isOpen: false, step: 1, data: null, file: null, imgUrl: null})} className="w-full py-3 text-slate-400 font-bold hover:text-white transition bg-slate-700/50 rounded-xl border border-slate-700">
                   닫기
                 </button>
               </div>
@@ -672,7 +672,6 @@ export default function App() {
   };
 
   const renderCalendarDays = () => {
-    // ... 생략 없이 달력을 그리는 함수 구현 (원래 소스에 있던 부분)
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
     const firstDay = new Date(year, month, 1).getDay();
@@ -683,10 +682,12 @@ export default function App() {
     
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const dayMatches = currentTeamMatches.filter(m => m.date === dateStr);
+      
+      // [최적화] 전체 배열 반복 대신 미리 만들어둔 해시맵에서 O(1)로 가져옴
+      const dayMatches = matchesByDate[dateStr] || [];
       
       days.push(
-        <div key={day} className="p-2 aspect-square border border-slate-700/50 rounded-xl relative flex flex-col items-center hover:bg-slate-700/50 transition">
+        <div key={day} className="p-2 aspect-square border border-slate-700/50 rounded-xl relative flex flex-col items-center bg-slate-800/30">
           <span className="text-xs font-bold text-slate-300">{day}</span>
           <div className="flex gap-1 mt-1">
             {dayMatches.map((m, idx) => (
@@ -718,12 +719,12 @@ export default function App() {
           <div className="flex justify-center mb-5">
             <div className="relative">
               <div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 rounded-full animate-pulse"></div>
-              <div className="w-16 h-16 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-2xl flex items-center justify-center shadow-2xl relative z-10">
+              <div className="w-16 h-16 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-2xl flex items-center justify-center shadow-lg relative z-10">
                 <Activity size={32} className="text-blue-500" />
               </div>
             </div>
           </div>
-          <h1 className="text-4xl font-black tracking-tighter mb-3 bg-gradient-to-r from-white via-blue-100 to-slate-400 text-transparent bg-clip-text drop-shadow-sm">
+          <h1 className="text-4xl font-black tracking-tighter mb-3 bg-gradient-to-r from-white via-blue-100 to-slate-400 text-transparent bg-clip-text">
             MATCHBOARD
           </h1>
           <p className="text-slate-400 text-sm font-medium tracking-wide">승리를 기록하는 가장 스마트한 방법</p>
@@ -781,7 +782,7 @@ export default function App() {
 
         {authModal.isOpen && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-            <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl">
+            <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
               <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
                 <Lock size={20} className="text-blue-500"/> 
                 {authModal.type === 'loginAdminAuth' ? '시스템 관리자 인증' : `${authModal.targetTeam?.name} 로그인`}
@@ -807,7 +808,7 @@ export default function App() {
 
         {isCreateTeamOpen && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-            <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl">
+            <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
               <h2 className="text-xl font-bold text-white mb-6 text-center">신규 팀 생성</h2>
               <form onSubmit={handleCreateTeam} className="space-y-4">
                 <div>
@@ -853,7 +854,7 @@ export default function App() {
 
         {editTeamModal.isOpen && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-            <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl">
+            <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
               <h2 className="text-xl font-bold text-white mb-6 text-center">팀 정보 수정</h2>
               <form onSubmit={handleEditTeam} className="space-y-4">
                 <div>
@@ -899,7 +900,7 @@ export default function App() {
 
         {adminPwdChangeModal && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-            <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl">
+            <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
               <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
                 <Shield size={20} className="text-blue-500"/> 마스터 비밀번호 변경
               </h2>
@@ -960,34 +961,34 @@ export default function App() {
             
             {isExternal ? (
               <div className="flex items-center justify-center gap-4 mb-12">
-                <div className={`w-32 border-4 text-white font-black text-xl text-center py-8 rounded-2xl shadow-2xl ${TEAM_COLORS['A']}`}>
+                <div className={`w-32 border-4 text-white font-black text-xl text-center py-8 rounded-2xl shadow-xl ${TEAM_COLORS['A']}`}>
                    {activeTeam?.name || '우리 팀'}
                 </div>
                 <span className="text-slate-600 font-black italic text-2xl">VS</span>
-                <div className={`w-32 border-4 text-white font-black text-xl text-center py-8 rounded-2xl shadow-2xl ${TEAM_COLORS['B']}`}>
+                <div className={`w-32 border-4 text-white font-black text-xl text-center py-8 rounded-2xl shadow-xl ${TEAM_COLORS['B']}`}>
                    {liveMatch.opponentName}
                 </div>
               </div>
             ) : (
               <div className="flex items-center justify-center gap-4 mb-12">
-                <select value={liveState.playingTeams[0]} onChange={(e) => setLiveState({...liveState, playingTeams: [e.target.value, liveState.playingTeams[1]]})} className={`w-28 border-4 text-white font-black text-3xl text-center py-6 rounded-2xl appearance-none shadow-2xl ${TEAM_COLORS[liveState.playingTeams[0]]} outline-none`}>
+                <select value={liveState.playingTeams[0]} onChange={(e) => setLiveState({...liveState, playingTeams: [e.target.value, liveState.playingTeams[1]]})} className={`w-28 border-4 text-white font-black text-3xl text-center py-6 rounded-2xl appearance-none shadow-xl ${TEAM_COLORS[liveState.playingTeams[0]]} outline-none`}>
                   {TEAM_LETTERS.slice(0, liveMatch.teamCount).map(t => <option key={t} value={t} className="bg-slate-900">팀 {t}</option>)}
                 </select>
                 <span className="text-slate-600 font-black italic text-2xl">VS</span>
-                <select value={liveState.playingTeams[1]} onChange={(e) => setLiveState({...liveState, playingTeams: [liveState.playingTeams[0], e.target.value]})} className={`w-28 border-4 text-white font-black text-3xl text-center py-6 rounded-2xl appearance-none shadow-2xl ${TEAM_COLORS[liveState.playingTeams[1]]} outline-none`}>
+                <select value={liveState.playingTeams[1]} onChange={(e) => setLiveState({...liveState, playingTeams: [liveState.playingTeams[0], e.target.value]})} className={`w-28 border-4 text-white font-black text-3xl text-center py-6 rounded-2xl appearance-none shadow-xl ${TEAM_COLORS[liveState.playingTeams[1]]} outline-none`}>
                   {TEAM_LETTERS.slice(0, liveMatch.teamCount).map(t => <option key={t} value={t} className="bg-slate-900">팀 {t}</option>)}
                 </select>
               </div>
             )}
             
-            <button onClick={() => setLiveState({...liveState, isQuarterActive: true})} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 rounded-xl text-xl shadow-[0_0_20px_rgba(59,130,246,0.3)] transition">쿼터 시작하기</button>
+            <button onClick={() => setLiveState({...liveState, isQuarterActive: true})} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 rounded-xl text-xl shadow-lg transition">쿼터 시작하기</button>
           </div>
 
           {renderShareModal()}
           
           {assignmentModal.isOpen && assignmentModal.match && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-md border border-slate-700 max-h-[80vh] flex flex-col shadow-2xl">
+              <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-md border border-slate-700 max-h-[80vh] flex flex-col shadow-xl">
                 <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-700">
                   <div><h2 className="text-lg font-bold text-white">참석자 팀 편성</h2></div>
                   <button onClick={() => setAssignmentModal({isOpen: false, match: null})} className="text-white bg-blue-500 px-4 py-2 rounded-xl font-bold">완료</button>
@@ -1031,7 +1032,7 @@ export default function App() {
       <div className="min-h-screen bg-slate-900 text-slate-200 font-sans p-4 max-w-md mx-auto relative flex flex-col h-screen">
         {renderLiveHeader(`${liveState.currentQuarter}Q 라이브`)}
 
-        <div className="bg-slate-800 rounded-3xl p-6 flex justify-between items-center mb-6 border border-slate-700 shadow-2xl relative overflow-hidden">
+        <div className="bg-slate-800 rounded-3xl p-6 flex justify-between items-center mb-6 border border-slate-700 shadow-xl relative overflow-hidden">
           <div className={`absolute top-0 left-0 w-1/2 h-1 bg-current ${TEAM_TEXT_COLORS[t1Letter]}`}></div>
           <div className={`absolute top-0 right-0 w-1/2 h-1 bg-current ${TEAM_TEXT_COLORS[t2Letter]}`}></div>
           
@@ -1106,7 +1107,7 @@ export default function App() {
             </div>
           ))}
 
-          <div className="bg-slate-900 rounded-xl p-3 border border-slate-600 shadow-[0_0_15px_rgba(255,255,255,0.05)]">
+          <div className="bg-slate-900 rounded-xl p-3 border border-slate-600 shadow-lg">
              <div className="relative flex justify-center items-center border-b border-slate-800 pb-2 mb-3">
                <span className="absolute left-0 font-black text-white animate-pulse">{liveState.currentQuarter}Q <span className="text-[10px] text-slate-400 font-normal ml-0.5">진행중</span></span>
                <span className="font-bold text-white text-sm">
@@ -1171,7 +1172,7 @@ export default function App() {
         
         {assignmentModal.isOpen && assignmentModal.match && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-            <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-md border border-slate-700 max-h-[80vh] flex flex-col shadow-2xl">
+            <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-md border border-slate-700 max-h-[80vh] flex flex-col shadow-xl">
               <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-700">
                 <div><h2 className="text-lg font-bold text-white">참석자 팀 편성</h2></div>
                 <button onClick={() => setAssignmentModal({isOpen: false, match: null})} className="text-white bg-blue-500 px-4 py-2 rounded-xl font-bold">완료</button>
@@ -1205,12 +1206,13 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-2xl">
+    <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl">
       <style>{`
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
-      <header className="px-6 py-4 border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-10 flex justify-between items-center">
+      {/* [최적화] 모바일 스크롤 버벅임을 유발하는 backdrop-blur 효과를 단색 배경으로 변경 */}
+      <header className="px-6 py-4 border-b border-slate-800 bg-slate-900 sticky top-0 z-10 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700 text-lg overflow-hidden shrink-0">
             {activeTeam?.logo?.startsWith('data:image') ? <img src={activeTeam?.logo} alt="logo" className="w-full h-full object-cover" /> : activeTeam?.logo}
@@ -1285,7 +1287,7 @@ export default function App() {
                           <Users size={16}/> 편성
                         </button>
                       )}
-                      <button onClick={() => handleActionClick('start', m)} className={`bg-blue-500 text-white font-bold py-3 rounded-xl text-sm flex justify-center items-center gap-2 shadow-[0_0_15px_rgba(59,130,246,0.2)] hover:bg-blue-600 transition ${m.matchType === 'external' ? 'w-full' : 'flex-1'}`}>
+                      <button onClick={() => handleActionClick('start', m)} className={`bg-blue-500 text-white font-bold py-3 rounded-xl text-sm flex justify-center items-center gap-2 shadow-lg hover:bg-blue-600 transition ${m.matchType === 'external' ? 'w-full' : 'flex-1'}`}>
                         {m.logs.length > 0 ? <Activity size={16}/> : <Play size={16} className="fill-current"/>} 
                         {m.logs.length > 0 ? '이어하기' : '기록 시작'}
                       </button>
@@ -1293,9 +1295,8 @@ export default function App() {
                   </div>
                 ))}
 
-                {completedThisMonth.map(m => {
-                  const standings = calculateStandings(m);
-                  
+                {/* [최적화] 렌더링마다 순위표를 다시 계산하는 대신, 미리 계산해둔 배열(completedThisMonthWithStandings)을 사용 */}
+                {completedThisMonthWithStandings.map(m => {
                   return (
                     <div key={m.id} onClick={() => setDetailModal({isOpen: true, match: m})} className="bg-slate-900 p-5 rounded-2xl border border-slate-700 opacity-80 hover:opacity-100 hover:border-slate-500 cursor-pointer transition relative group">
                       <div className="absolute top-3 right-3 flex gap-2">
@@ -1324,7 +1325,7 @@ export default function App() {
                             </tr>
                           </thead>
                           <tbody>
-                            {standings.map((st, index) => (
+                            {m.standings.map((st, index) => (
                               <tr key={st.team} className="border-t border-slate-700/50">
                                 <td className={`py-2 font-black ${index === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{index + 1}</td>
                                 <td className={`py-2 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(m, st.team)}</td>
@@ -1340,7 +1341,6 @@ export default function App() {
                         </table>
                       </div>
 
-                      {/* H-Scrollable Quarter Score Board */}
                       <div className="mb-3">
                         <div className="flex justify-between items-center text-xs text-slate-400 mb-2 font-bold px-1">
                           <span>쿼터별 스코어 보드</span>
@@ -1465,7 +1465,8 @@ export default function App() {
         )}
       </main>
 
-      <nav className="fixed bottom-0 w-full max-w-md bg-slate-900/95 backdrop-blur border-t border-slate-800 flex justify-around p-2 pb-6 z-40">
+      {/* [최적화] 하단 네비게이션에서도 backdrop-blur 효과 제거 */}
+      <nav className="fixed bottom-0 w-full max-w-md bg-slate-900 border-t border-slate-800 flex justify-around p-2 pb-6 z-40">
         <button onClick={() => setActiveTab('matches')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'matches' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}>
           <List size={20} className="mb-1" />
           <span className="text-[10px] font-bold">경기</span>
@@ -1487,7 +1488,7 @@ export default function App() {
       {/* Match Details Modal */}
       {detailModal.isOpen && detailModal.match && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className="bg-slate-800 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+          <div className="bg-slate-800 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
             <div className="p-6 border-b border-slate-700 bg-slate-900 shrink-0">
               <div className="flex justify-between items-start mb-2">
                 <div>
@@ -1616,7 +1617,7 @@ export default function App() {
       {/* Match Form Modal */}
       {matchModal.isOpen && (
         <div className="fixed inset-0 bg-black/80 flex items-end justify-center z-50">
-          <div className="bg-slate-800 p-6 rounded-t-3xl w-full max-w-md border-t border-slate-700 animate-in slide-in-from-bottom max-h-[90vh] flex flex-col shadow-2xl">
+          <div className="bg-slate-800 p-6 rounded-t-3xl w-full max-w-md border-t border-slate-700 animate-in slide-in-from-bottom max-h-[90vh] flex flex-col shadow-xl">
             <div className="flex justify-between items-center mb-4 shrink-0">
               <h2 className="text-xl font-bold text-white">{matchModal.match ? '일정 수정' : '새 일정 등록'}</h2>
               <button onClick={() => setMatchModal({isOpen: false, match: null})} className="text-slate-400 hover:text-white"><X size={24}/></button>
@@ -1702,7 +1703,7 @@ export default function App() {
       {/* Assignment Modal (Main View) */}
       {assignmentModal.isOpen && assignmentModal.match && assignmentModal.match.matchType !== 'external' && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-md border border-slate-700 max-h-[80vh] flex flex-col shadow-2xl">
+          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-md border border-slate-700 max-h-[80vh] flex flex-col shadow-xl">
             <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-700">
               <div><h2 className="text-lg font-bold text-white">참석자 팀 편성</h2></div>
               <button onClick={() => setAssignmentModal({isOpen: false, match: null})} className="text-white bg-blue-500 px-4 py-2 rounded-xl font-bold">완료</button>
@@ -1734,7 +1735,7 @@ export default function App() {
       {/* Roster Form Modal */}
       {rosterModal.isOpen && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl">
+          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
             <h2 className="text-xl font-bold text-white mb-6 text-center">{rosterModal.player ? '명단 수정' : '새 선수 등록'}</h2>
             <form onSubmit={saveRoster} className="space-y-4">
               <div>
@@ -1757,7 +1758,7 @@ export default function App() {
       {/* Admin Mode Auth Modal */}
       {authModal.isOpen && authModal.type === 'adminMode' && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl">
+          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
             <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
               <Shield size={20} className="text-blue-500"/> 
               팀 관리자 전환
@@ -1784,7 +1785,7 @@ export default function App() {
       {/* Team & System Settings Modal */}
       {teamSettingsModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl">
+          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
             <h2 className="text-xl font-bold text-white mb-6 text-center">환경 설정</h2>
             <form onSubmit={handleTeamSettingsSave} className="space-y-4">
               <div>
@@ -1830,11 +1831,10 @@ export default function App() {
         </div>
       )}
 
-      {/* 숨겨진 화면 캡처 전용 컴포넌트 (모달 뒤편에서 잘림 없이 전체 높이로 렌더링 후 캡처됨) */}
+      {/* 숨겨진 화면 캡처 전용 컴포넌트 */}
       {shareModal.isOpen && shareModal.data && (
         <div className="fixed top-0 left-0 w-[380px] opacity-0 pointer-events-none z-[-100] overflow-visible p-4">
-          {/* 순수하게 경기결과 정보만 담은 흰색 팝업창 영역을 캡처 타겟으로 지정 */}
-          <div id="capture-area-hidden" className="bg-white rounded-2xl overflow-hidden shadow-xl border border-slate-200 p-5">
+          <div id="capture-area-hidden" className="bg-white rounded-2xl overflow-hidden shadow-lg border border-slate-200 p-5">
             <div className="mb-4 border-b border-slate-100 pb-4">
               <h3 className="font-black text-slate-900 text-[18px] leading-tight mb-1">
                  {shareModal.data.matchType === 'external' ? `[교류전] vs ${shareModal.data.opponentName}` : `[자체전] ${shareModal.data.location}`}
