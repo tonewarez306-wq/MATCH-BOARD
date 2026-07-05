@@ -1,0 +1,5 @@
+{
+  "appId": "com.matchboard.app",
+  "appName": "MatchBoard",
+  "webDir": "dist"
+}
