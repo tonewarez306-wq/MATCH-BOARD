@@ -210,7 +210,7 @@ export default function App() {
   // 앱 설치 버튼 클릭 핸들러
   const handleInstallApp = async () => {
     if (deferredPrompt) {
-      // Android / PC Chrome
+      // Android / PC Chrome 등에서 정상적으로 PWA 조건이 충족된 경우 팝업
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
       if (outcome === 'accepted') {
@@ -220,13 +220,13 @@ export default function App() {
       // iOS Safari 수동 안내
       setSystemAlert({
         isOpen: true,
-        message: "📱 아이폰 설치 안내\n\n1. 하단 [공유] 버튼(⍐)을 누르세요.\n2. 메뉴에서 [홈 화면에 추가]를 선택하세요.\n3. 홈 화면에서 앱을 실행할 수 있습니다."
+        message: "📱 아이폰 설치 안내\n\n1. 하단 [공유] 버튼(⍐)을 누르세요.\n2. 메뉴에서 [홈 화면에 추가]를 선택하세요.\n3. 우측 상단 '추가'를 누르시면 완료!"
       });
     } else {
-      // 그 외 지원하지 않는 환경 안내
+      // 안드로이드지만 PWA 조건 미충족으로 프롬프트가 안 뜰 경우 수동 안내
       setSystemAlert({
         isOpen: true,
-        message: "이미 설치되었거나 현재 브라우저에서 자동 설치를 지원하지 않습니다.\n브라우저 메뉴의 '홈 화면에 추가' 기능을 이용해주세요."
+        message: "🤖 안드로이드 설치 안내\n\n현재 브라우저에서는 자동 팝업이 지원되지 않습니다.\n\n브라우저 우측 상단 메뉴(⋮)를 누른 뒤\n[홈 화면에 추가] 또는 [앱 설치]를 선택해 주세요!"
       });
     }
   };
