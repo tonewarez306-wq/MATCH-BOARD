@@ -1833,11 +1833,13 @@ export default function App() {
       {/* 숨겨진 화면 캡처 전용 컴포넌트 (모달 뒤편에서 잘림 없이 전체 높이로 렌더링 후 캡처됨) */}
       {shareModal.isOpen && shareModal.data && (
         <div className="fixed top-0 left-0 w-[380px] opacity-0 pointer-events-none z-[-100] overflow-visible">
-          <div id="capture-area-hidden" className="bg-[#FEE500] p-6 w-full flex flex-col items-center text-center">
+          {/* 노란색 배경에서 id="capture-area-hidden" 제거 */}
+          <div className="bg-[#FEE500] p-6 w-full flex flex-col items-center text-center">
             <div className="flex justify-between items-center mb-4 px-1 w-full">
               <h2 className="text-lg font-black text-slate-900 flex items-center gap-1"><MessageCircle size={18} className="fill-current"/> 경기 결과 리포트</h2>
             </div>
-            <div className="bg-[#b2c7d9] w-full p-4 rounded-2xl text-left shadow-inner">
+            {/* 회파란색 배경 부분에 id="capture-area-hidden" 추가 */}
+            <div id="capture-area-hidden" className="bg-[#b2c7d9] w-full p-4 rounded-2xl text-left shadow-inner">
               <div className="text-[10px] text-slate-500 font-medium text-center mb-4">
                 {new Date(shareModal.data.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
               </div>
