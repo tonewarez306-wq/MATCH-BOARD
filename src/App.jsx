@@ -1498,8 +1498,8 @@ export default function App() {
       {/* Match Details Modal */}
       {detailModal.isOpen && detailModal.match && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className="bg-slate-900 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
-            <div className="p-6 border-b border-slate-800 bg-slate-900 shrink-0">
+          <div className="bg-slate-800 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-700 bg-slate-900 shrink-0">
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
@@ -1517,9 +1517,9 @@ export default function App() {
               </div>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-6">
-              <div className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-md">
-                <div className="text-xs text-slate-400 mb-3 font-bold border-b border-slate-700 pb-2">순위표</div>
+            <div className="flex-1 overflow-y-auto px-3 py-4 custom-scrollbar space-y-4">
+              <div className="bg-slate-900 rounded-2xl p-5 border border-slate-700">
+                <div className="text-[13px] text-slate-300 mb-3 font-black border-b border-slate-800 pb-2">순위표</div>
                 <table className="w-full text-xs text-center">
                   <thead>
                     <tr className="text-slate-500 font-bold">
@@ -1528,7 +1528,7 @@ export default function App() {
                   </thead>
                   <tbody>
                     {calculateStandings(detailModal.match).map((st, index) => (
-                      <tr key={st.team} className="border-t border-slate-700/50">
+                      <tr key={st.team} className="border-t border-slate-800">
                         <td className={`py-2 font-black ${index === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{index + 1}</td>
                         <td className={`py-2 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(detailModal.match, st.team)}</td>
                         <td className="py-2 text-white">{st.w}</td>
@@ -1544,8 +1544,8 @@ export default function App() {
               </div>
 
               {/* 팀 편성 명단 및 히스토리 표시 영역 추가 */}
-              <div className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-md">
-                <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-700 pb-2 flex justify-between items-end">
+              <div className="bg-slate-900 rounded-2xl p-5 border border-slate-700">
+                <div className="text-[13px] text-slate-300 mb-4 font-black border-b border-slate-800 pb-2 flex justify-between items-end">
                     <span>참석자 편성 명단</span>
                     <span className="text-[9px] font-normal text-slate-500">* ( )는 팀 이동 내역</span>
                 </div>
@@ -1573,7 +1573,7 @@ export default function App() {
                                 historyStr = ` (${history.join('➔')})`;
                             }
                             return (
-                              <div key={p.id} className="bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-700/50 text-[10px] text-slate-300 flex items-center">
+                              <div key={p.id} className="bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-700/50 text-[10px] text-slate-300 flex items-center">
                                 <span className="font-bold text-white">{p.name}</span>
                                 {historyStr && <span className="text-slate-500 ml-1 tracking-tighter font-medium">{historyStr}</span>}
                               </div>
@@ -1587,8 +1587,8 @@ export default function App() {
               </div>
 
               {detailModal.match.quarterScores.map(qs => (
-                <div key={qs.quarter} className="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-md">
-                   <div className="relative flex justify-center items-center border-b border-slate-700 pb-3 mb-3">
+                <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-5 border border-slate-700">
+                   <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
                      <span className="absolute left-0 font-black text-blue-400">{qs.quarter}Q</span>
                      <span className="font-bold text-white text-lg text-center">
                        <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(detailModal.match, qs.team1)}</span> 
@@ -1601,14 +1601,14 @@ export default function App() {
                        const isLeft = l.teamLetter === qs.team1;
                        return (
                          <div key={l.id} className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
-                           <span className="text-slate-500 text-[10px] w-8 shrink-0 text-center">{l.time}</span>
+                           <span className="text-slate-600 text-[10px] w-8 shrink-0 text-center">{l.time}</span>
                            <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
-                             <div className="text-slate-200 font-bold text-sm flex items-center gap-1">
+                             <div className="text-white font-bold text-sm flex items-center gap-1">
                                <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
                              </div>
                              {l.assistName && (
-                               <div className="text-slate-500 mt-0.5 flex items-center gap-1">
-                                 <Footprints size={12} className="text-slate-600"/> <span className="text-xs">{l.assistName}</span>
+                               <div className="text-slate-400 mt-0.5 flex items-center gap-1">
+                                 <Footprints size={12} className="text-slate-500"/> <span className="text-xs">{l.assistName}</span>
                                </div>
                              )}
                            </div>
