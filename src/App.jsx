@@ -31,7 +31,7 @@ const db = getFirestore(app);
 const TEAM_LETTERS = ['A', 'B', 'C', 'D'];
 // 요청하신 컬러 적용 (A:흰색, B:파란색, C:노란색, D:빨간색)
 const TEAM_COLORS = {
-  'A': 'text-white bg-white/10 border-white/30',
+  'A': 'text-white-400 bg-white-500/10 border-white-500/30',
   'B': 'text-blue-400 bg-blue-500/10 border-blue-500/30',
   'C': 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30',
   'D': 'text-red-400 bg-red-500/10 border-red-500/30'
