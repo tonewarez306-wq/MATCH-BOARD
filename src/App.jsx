@@ -556,7 +556,7 @@ export default function App() {
         const canvas = await html2canvas(captureTarget, {
           scale: 2, 
           useCORS: true, 
-          backgroundColor: '#FEE500'
+          backgroundColor: null // 투명한 배경으로 캡처 (모서리 둥글게 보존)
         });
 
         canvas.toBlob((blob) => {
