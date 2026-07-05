@@ -155,16 +155,20 @@ export default function App() {
 
   const [liveMatchId, setLiveMatchId] = useState(null);
   const [liveState, setLiveState] = useState({ currentQuarter: 1, playingTeams: ['A', 'B'], isQuarterActive: false });
-  
-  // PK 기능을 위해 goalFlow 상태에 isPK 속성 추가, 비고(remark) 속성 추가
   const [goalFlow, setGoalFlow] = useState({ isOpen: false, step: 1, teamLetter: null, scorer: null, isPK: false, remark: '' });
-  // 기록 수정을 위한 모달 상태
   const [logEditModal, setLogEditModal] = useState({ isOpen: false, match: null, log: null });
+
+  // [추가] 0:0 종료 쿼터 등 누락된 득점을 수동으로 추가하기 위한 모달 상태
+  const [manualGoalModal, setManualGoalModal] = useState({ isOpen: false, match: null, quarterQs: null });
+  const [manualGoalTeam, setManualGoalTeam] = useState('A');
 
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
   const liveMatch = useMemo(() => matches.find(m => m.id === liveMatchId), [matches, liveMatchId]);
+  
+  // [최적화] 상세 팝업 오픈 시 항상 최신 매치 데이터를 바라보도록 처리 (수정 시 실시간 반영 위함)
+  const currentDetailMatch = useMemo(() => detailModal.match ? matches.find(m => m.id === detailModal.match.id) : null, [matches, detailModal.match]);
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
@@ -223,7 +227,7 @@ export default function App() {
     } else {
       setSystemAlert({
         isOpen: true,
-        message: "이미 설치되었거나 현재 브라우저에서 자동 설치를 지원하지 않습니다.\n브라우저 메뉴의 '홈 화면에 추가' 기능을 이용해주세요."
+        message: "🤖 안드로이드 설치 안내\n\n현재 브라우저에서는 자동 팝업이 지원되지 않습니다.\n\n브라우저 우측 상단 메뉴(⋮)를 누른 뒤\n[홈 화면에 추가] 또는 [앱 설치]를 선택해 주세요!"
       });
     }
   };
@@ -545,13 +549,13 @@ export default function App() {
         id: Date.now(),
         quarter: liveState.currentQuarter,
         teamLetter: goalFlow.teamLetter,
-        scorerId: goalFlow.scorer, // ID 저장 추가
+        scorerId: goalFlow.scorer,
         scorerName: players.find(p=>p.id===goalFlow.scorer)?.name,
-        assistId: assistId, // ID 저장 추가
+        assistId: assistId,
         assistName: assistId ? players.find(p=>p.id===assistId)?.name : null,
         time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }),
-        isPK: goalFlow.isPK || false, // PK 여부 저장 추가
-        remark: goalFlow.remark || '' // 비고 텍스트 저장 추가
+        isPK: goalFlow.isPK || false,
+        remark: goalFlow.remark || ''
       };
       
       const newLogs = [...liveMatch.logs, newLog];
@@ -579,8 +583,6 @@ export default function App() {
   // 기록 수정을 위한 모달 열기
   const openLogEditModal = (log, match) => {
     if (!isAdmin) return;
-    
-    // 과거 데이터 호환성을 위해 ID가 없는 경우 이름으로 ID 찾기 보정
     const enrichedLog = { ...log };
     if (!enrichedLog.scorerId && enrichedLog.scorerName) {
          enrichedLog.scorerId = players.find(p => p.name === enrichedLog.scorerName)?.id;
@@ -588,7 +590,6 @@ export default function App() {
     if (!enrichedLog.assistId && enrichedLog.assistName) {
          enrichedLog.assistId = players.find(p => p.name === enrichedLog.assistName)?.id;
     }
-
     setLogEditModal({ isOpen: true, match, log: enrichedLog });
   };
 
@@ -607,7 +608,6 @@ export default function App() {
     const oldScorerId = l.scorerId;
     const oldAssistId = l.assistId;
 
-    // 개인 스탯 업데이트
     if (oldScorerId !== newScorerId) {
         if (oldScorerId) {
            const p = players.find(p => p.id === oldScorerId);
@@ -633,7 +633,6 @@ export default function App() {
     const finalAssistId = newAssistId === 'none' ? null : newAssistId;
     const finalAssistName = finalAssistId ? players.find(p => p.id === finalAssistId)?.name : null;
 
-    // 매치 로그 업데이트
     const updatedLogs = m.logs.map(log => {
         if (log.id === l.id) {
             return {
@@ -701,6 +700,70 @@ export default function App() {
             setSystemAlert({ isOpen: true, message: '득점 기록이 삭제되었습니다.' });
         }
     });
+  };
+
+  // 종료된 쿼터에 누락된 득점 추가 저장
+  const handleManualGoalSave = async (e) => {
+    e.preventDefault();
+    const m = manualGoalModal.match;
+    const qs = manualGoalModal.quarterQs;
+    const teamLetter = manualGoalTeam;
+    const isOpponent = m.matchType === 'external' && teamLetter === 'B';
+    
+    let newLog = {
+        id: Date.now(),
+        quarter: qs.quarter,
+        teamLetter: teamLetter,
+        time: "종료 후 추가", 
+        isPK: false,
+        remark: ''
+    };
+
+    if (isOpponent) {
+        newLog.scorerId = null;
+        newLog.scorerName = m.opponentName || '상대팀';
+        newLog.assistId = null;
+        newLog.assistName = null;
+    } else {
+        const fd = new FormData(e.target);
+        const scorerId = fd.get('scorerId');
+        const assistId = fd.get('assistId');
+        
+        newLog.scorerId = scorerId;
+        newLog.scorerName = players.find(p => p.id === scorerId)?.name;
+        newLog.assistId = assistId === 'none' ? null : assistId;
+        newLog.assistName = newLog.assistId ? players.find(p => p.id === assistId)?.name : null;
+        newLog.isPK = fd.get('isPK') === 'true';
+        newLog.remark = fd.get('remark') || '';
+
+        const scorer = players.find(p => p.id === scorerId);
+        if (scorer) await setDoc(doc(db, 'players', scorer.id), { ...scorer, goals: scorer.goals + 1 });
+        
+        if (newLog.assistId) {
+            const assist = players.find(p => p.id === newLog.assistId);
+            if (assist) await setDoc(doc(db, 'players', assist.id), { ...assist, assists: assist.assists + 1 });
+        }
+    }
+
+    const newLogs = [...m.logs, newLog];
+    const newScores = { ...m.scores, [teamLetter]: (m.scores[teamLetter] || 0) + 1 };
+    
+    const newQuarterScores = m.quarterScores.map(q => {
+        if (q.quarter === qs.quarter) {
+            return {
+                ...q,
+                score1: q.team1 === teamLetter ? q.score1 + 1 : q.score1,
+                score2: q.team2 === teamLetter ? q.score2 + 1 : q.score2,
+            };
+        }
+        return q;
+    });
+
+    const updatedMatch = { ...m, logs: newLogs, scores: newScores, quarterScores: newQuarterScores };
+    await setDoc(doc(db, 'matches', m.id), updatedMatch);
+    
+    setManualGoalModal({ isOpen: false, match: null, quarterQs: null });
+    setSystemAlert({ isOpen: true, message: '누락된 득점 기록이 추가되었습니다.' });
   };
 
   const requestEndQuarter = () => {
@@ -859,165 +922,6 @@ export default function App() {
     );
   };
 
-  const renderHiddenCaptureArea = () => {
-    if (!shareModal.isOpen || !shareModal.data) return null;
-    return (
-      <div className="fixed top-0 left-0 w-[500px] opacity-0 pointer-events-none z-[-100] overflow-visible">
-        <div id="capture-area-hidden" className="bg-slate-900 p-8 w-full flex flex-col items-center text-left text-slate-200 border-none pb-12">
-          
-          <div className="mb-6 w-full pb-5 border-b border-slate-700">
-            <h3 className="font-black text-white text-[28px] leading-tight mb-2">
-               {shareModal.data.matchType === 'external' ? `[교류전] vs ${shareModal.data.opponentName}` : `[자체전] ${shareModal.data.location}`}
-            </h3>
-            <p className="text-slate-400 text-[15px] font-medium">
-               {new Date(shareModal.data.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} {shareModal.data.time} · 참석 {shareModal.data.attendees?.length || 0}명
-            </p>
-          </div>
-
-          <div className="w-full bg-slate-800 rounded-2xl p-6 mb-6 border border-slate-700/50 shadow-md">
-             <div className="font-black text-slate-400 text-[15px] border-b border-slate-700/50 pb-3 mb-4">순위표</div>
-             <table className="w-full text-[15px] text-center">
-               <thead>
-                 <tr className="text-slate-500 font-bold">
-                   <th className="pb-4">순위</th><th className="pb-4 text-left">팀</th><th className="pb-4">승</th><th className="pb-4">무</th><th className="pb-4">패</th><th className="pb-4">득</th><th className="pb-4">실</th><th className="pb-4">득실</th>
-                 </tr>
-               </thead>
-               <tbody>
-                 {calculateStandings(shareModal.data).map((st, i) => (
-                   <tr key={st.team} className="border-t border-slate-700/30 text-slate-300">
-                     <td className={`py-4 font-black ${i === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{i + 1}</td>
-                     <td className={`py-4 font-bold text-left ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareModal.data, st.team)}</td>
-                     <td className="py-4 text-white">{st.w}</td>
-                     <td className="py-4 text-slate-400">{st.d}</td>
-                     <td className="py-4 text-slate-400">{st.l}</td>
-                     <td className="py-4 text-white">{st.gf}</td>
-                     <td className="py-4 text-slate-400">{st.ga}</td>
-                     <td className="py-4 text-white">{st.gd > 0 ? '+'+st.gd : st.gd}</td>
-                   </tr>
-                 ))}
-               </tbody>
-             </table>
-          </div>
-
-          {/* 위치 변경: 쿼터별 상세 기록이 먼저 오도록 배치 */}
-          <div className="w-full space-y-5 mb-6">
-               {shareModal.data.quarterScores?.length > 0 ? shareModal.data.quarterScores.map(qs => {
-                 const qLogs = shareModal.data.logs.filter(l => l.quarter === qs.quarter);
-                 return (
-                   <div key={qs.quarter} className="w-full bg-slate-800 rounded-2xl p-6 border border-slate-700/50 shadow-md">
-                      <div className="relative flex justify-center items-center border-b border-slate-700/50 pb-4 mb-4">
-                        <span className="absolute left-0 font-black text-blue-400 text-[18px]">{qs.quarter}Q</span>
-                        <span className="font-black text-white text-[20px] text-center flex items-center">
-                          <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(shareModal.data, qs.team1)}</span> 
-                          <span className="text-slate-500 mx-5">{qs.score1} : {qs.score2}</span> 
-                          <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(shareModal.data, qs.team2)}</span>
-                        </span>
-                      </div>
-                      <div className="space-y-4">
-                        {qLogs.length > 0 ? qLogs.map(l => {
-                          const isLeft = l.teamLetter === qs.team1;
-                          return (
-                            <div key={l.id} className={`flex items-center gap-4 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
-                              <span className="text-slate-500 text-[12px] w-12 shrink-0 text-center">{l.time}</span>
-                              <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
-                                <div className="text-slate-100 font-bold text-[15px] flex items-center gap-2">
-                                  <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
-                                  {l.isPK && <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
-                                </div>
-                                {l.assistName && (
-                                  <div className="text-slate-500 mt-1 flex items-center gap-1.5">
-                                    <Footprints size={14} className="text-slate-500"/> <span className="text-[13px]">{l.assistName}</span>
-                                  </div>
-                                )}
-                                {l.remark && (
-                                  <div className={`text-slate-400 mt-1.5 text-[12px] bg-slate-900/50 px-2 py-1 rounded-md border border-slate-700/50 ${isLeft ? 'text-left' : 'text-right'}`}>
-                                    {l.remark}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        }) : <div className="text-[14px] text-slate-500 text-center py-4 italic">득점 기록이 없습니다.</div>}
-                      </div>
-                   </div>
-                 )
-               }) : (
-                 <div className="text-[14px] text-slate-500 text-center py-6 bg-slate-800 rounded-2xl border border-slate-700/50 shadow-md">아직 기록이 없습니다.</div>
-               )}
-          </div>
-
-          {/* 위치 변경: 참석자 편성 명단이 최하단에 배치 */}
-          <div className="w-full bg-slate-800 rounded-2xl p-6 border border-slate-700/50 shadow-md">
-              <div className="text-[15px] text-slate-400 mb-5 font-black border-b border-slate-700/50 pb-3 flex justify-between items-end">
-                  <span>참석자 편성 명단</span>
-                  <span className="text-[11px] font-normal text-slate-500">* ( )는 팀 이동 내역</span>
-              </div>
-              <div className="space-y-6">
-                {TEAM_LETTERS.slice(0, shareModal.data.teamCount).map(teamLetter => {
-                  const teamPlayers = players.filter(p => shareModal.data.attendees.includes(p.id) && (shareModal.data.teamAssignments[p.id] || 'A') === teamLetter);
-                  if(teamPlayers.length === 0) return null;
-                  return (
-                    <div key={teamLetter}>
-                      <div className={`text-[14px] font-black mb-3 ${TEAM_TEXT_COLORS[teamLetter]}`}>
-                        {getTeamDisplayName(shareModal.data, teamLetter)}
-                      </div>
-                      <div className="flex flex-wrap gap-2.5">
-                        {teamPlayers.map(p => {
-                          const history = shareModal.data.teamHistory?.[p.id];
-                          let historyStr = "";
-                          if (history && history.length > 1) {
-                              historyStr = ` (${history.join('➔')})`;
-                          }
-                          return (
-                            <div key={p.id} className="bg-slate-900 px-3 py-2 rounded-lg border border-slate-700 text-[13px] text-slate-200 flex items-center shadow-sm">
-                              <span className="font-bold text-white">{p.name}</span>
-                              {historyStr && <span className="text-slate-500 ml-1.5 tracking-tighter font-medium">{historyStr}</span>}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-          </div>
-
-        </div>
-      </div>
-    );
-  };
-
-  const renderCalendarDays = () => {
-    const year = viewDate.getFullYear();
-    const month = viewDate.getMonth();
-    const firstDay = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    
-    const days = [];
-    for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="p-2" />);
-    
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      
-      const dayMatches = matchesByDate[dateStr] || [];
-      
-      days.push(
-        <div key={day} className="p-2 aspect-square border border-slate-700/50 rounded-xl relative flex flex-col items-center bg-slate-800/30">
-          <span className="text-xs font-bold text-slate-300">{day}</span>
-          <div className="flex gap-1 mt-1">
-            {dayMatches.map((m, idx) => (
-              <div key={idx} className={`w-1.5 h-1.5 rounded-full ${m.status === 'completed' ? 'bg-slate-500' : 'bg-blue-400'}`} />
-            ))}
-          </div>
-        </div>
-      );
-    }
-    return days;
-  };
-
-  // ==========================================
-  // [공통 모달] 기록 수정/삭제 모달
-  // ==========================================
   const renderLogEditModal = () => {
     if (!logEditModal.isOpen) return null;
     const m = logEditModal.match;
@@ -1078,6 +982,238 @@ export default function App() {
         </div>
       </div>
     );
+  };
+
+  const renderManualGoalModal = () => {
+    if (!manualGoalModal.isOpen) return null;
+    const m = manualGoalModal.match;
+    const qs = manualGoalModal.quarterQs;
+    const isOpponent = m.matchType === 'external' && manualGoalTeam === 'B';
+
+    return (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[60]">
+        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm shadow-xl border border-slate-700 animate-in zoom-in-95">
+          <h2 className="text-xl font-bold text-white mb-4">{qs.quarter}Q 누락 득점 추가</h2>
+          
+          <div className="flex gap-2 mb-6">
+            <button 
+              type="button" 
+              onClick={() => setManualGoalTeam(qs.team1)} 
+              className={`flex-1 py-2 rounded-xl font-bold text-sm transition ${manualGoalTeam === qs.team1 ? TEAM_COLORS[qs.team1] : 'bg-slate-900 text-slate-500 border border-slate-700'}`}
+            >
+              {getTeamDisplayName(m, qs.team1)}
+            </button>
+            <button 
+              type="button" 
+              onClick={() => setManualGoalTeam(qs.team2)} 
+              className={`flex-1 py-2 rounded-xl font-bold text-sm transition ${manualGoalTeam === qs.team2 ? TEAM_COLORS[qs.team2] : 'bg-slate-900 text-slate-500 border border-slate-700'}`}
+            >
+              {getTeamDisplayName(m, qs.team2)}
+            </button>
+          </div>
+
+          {isOpponent ? (
+            <div>
+              <p className="text-slate-400 mb-6 text-sm text-center">상대팀의 득점을 추가합니다.</p>
+              <div className="flex gap-3">
+                <button onClick={() => setManualGoalModal({isOpen: false, match: null, quarterQs: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
+                <button onClick={handleManualGoalSave} className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">득점 추가</button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleManualGoalSave} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-2">득점자</label>
+                <select name="scorerId" required className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
+                  {players.filter(p => m.attendees.includes(p.id) && (m.teamAssignments[p.id] || 'A') === manualGoalTeam).map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-2">도움 (어시스트)</label>
+                <select name="assistId" defaultValue="none" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
+                  <option value="none">도움 없음</option>
+                  {players.filter(p => m.attendees.includes(p.id) && (m.teamAssignments[p.id] || 'A') === manualGoalTeam).map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <label className="flex items-center gap-2 p-3 bg-slate-900 rounded-xl border border-slate-700 cursor-pointer mt-2">
+                <input type="checkbox" name="isPK" value="true" className="accent-blue-500 w-4 h-4 rounded" />
+                <span className="text-white font-bold text-sm">페널티킥 (PK) 득점 여부</span>
+              </label>
+              
+              <div className="mt-3">
+                <label className="block text-xs font-bold text-slate-400 mb-2">비고 (선택사항)</label>
+                <input type="text" name="remark" placeholder="예: 멋진 프리킥 골" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+              </div>
+              
+              <div className="flex gap-3 pt-4 border-t border-slate-700 mt-4">
+                <button type="button" onClick={() => setManualGoalModal({isOpen: false, match: null, quarterQs: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
+                <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">저장하기</button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderHiddenCaptureArea = () => {
+    if (!shareModal.isOpen || !shareModal.data) return null;
+    return (
+      <div className="fixed top-0 left-0 w-[400px] opacity-0 pointer-events-none z-[-100] overflow-visible">
+        <div id="capture-area-hidden" className="bg-slate-900 p-6 w-full flex flex-col items-center text-left text-slate-200 border-none">
+          
+          <div className="mb-6 w-full pb-4 border-b border-slate-700">
+            <h3 className="font-black text-white text-[22px] leading-tight mb-2">
+               {shareModal.data.matchType === 'external' ? `[교류전] vs ${shareModal.data.opponentName}` : `[자체전] ${shareModal.data.location}`}
+            </h3>
+            <p className="text-slate-400 text-[13px] font-medium">
+               {new Date(shareModal.data.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} {shareModal.data.time} · 참석 {shareModal.data.attendees?.length || 0}명
+            </p>
+          </div>
+
+          <div className="w-full bg-slate-800 rounded-2xl p-5 mb-4 border border-slate-700 shadow-md">
+             <div className="font-black text-slate-300 text-[14px] border-b border-slate-700 pb-2 mb-3">순위표</div>
+             <table className="w-full text-[13px] text-center">
+               <thead>
+                 <tr className="text-slate-500 font-bold">
+                   <th className="pb-3 text-left">팀</th><th className="pb-3">승</th><th className="pb-3">무</th><th className="pb-3">패</th><th className="pb-3">득</th><th className="pb-3">실</th><th className="pb-3">득실</th><th className="pb-3">승점</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 {calculateStandings(shareModal.data).map((st, i) => (
+                   <tr key={st.team} className="border-t border-slate-700/50 text-slate-300">
+                     <td className={`py-3 font-bold text-left ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareModal.data, st.team)}</td>
+                     <td className="py-3 text-white">{st.w}</td>
+                     <td className="py-3 text-slate-400">{st.d}</td>
+                     <td className="py-3 text-slate-400">{st.l}</td>
+                     <td className="py-3 text-white">{st.gf}</td>
+                     <td className="py-3 text-slate-400">{st.ga}</td>
+                     <td className="py-3 text-white">{st.gd > 0 ? '+'+st.gd : st.gd}</td>
+                     <td className="py-3 text-blue-400 font-black">{st.pts}</td>
+                   </tr>
+                 ))}
+               </tbody>
+             </table>
+          </div>
+
+          <div className="w-full space-y-4 mb-4">
+               {shareModal.data.quarterScores?.length > 0 ? shareModal.data.quarterScores.map(qs => {
+                 const qLogs = shareModal.data.logs.filter(l => l.quarter === qs.quarter);
+                 return (
+                   <div key={qs.quarter} className="w-full bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-md">
+                      <div className="relative flex justify-center items-center border-b border-slate-700 pb-3 mb-3">
+                        <span className="absolute left-0 font-black text-blue-400 text-[14px]">{qs.quarter}Q</span>
+                        <span className="font-black text-white text-[16px] text-center flex items-center">
+                          <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(shareModal.data, qs.team1)}</span> 
+                          <span className="text-slate-500 mx-4">{qs.score1} : {qs.score2}</span> 
+                          <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(shareModal.data, qs.team2)}</span>
+                        </span>
+                      </div>
+                      <div className="space-y-3">
+                        {qLogs.length > 0 ? qLogs.map(l => {
+                          const isLeft = l.teamLetter === qs.team1;
+                          return (
+                            <div key={l.id} className={`flex items-center gap-3 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
+                              <span className="text-slate-500 text-[10px] w-10 shrink-0 text-center">{l.time}</span>
+                              <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
+                                <div className="text-slate-200 font-bold text-[13px] flex items-center gap-1.5">
+                                  <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
+                                  {l.isPK && <span className="text-[9px] bg-red-500/20 text-red-400 px-1 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
+                                </div>
+                                {l.assistName && (
+                                  <div className="text-slate-500 mt-1 flex items-center gap-1">
+                                    <Footprints size={12} className="text-slate-600"/> <span className="text-[11px]">{l.assistName}</span>
+                                  </div>
+                                )}
+                                {l.remark && (
+                                  <div className={`text-slate-400 mt-1.5 text-[10px] bg-slate-900/50 px-2 py-1 rounded-md border border-slate-700/50 ${isLeft ? 'text-left' : 'text-right'}`}>
+                                    {l.remark}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        }) : <div className="text-[12px] text-slate-500 text-center py-3 italic">득점 기록이 없습니다.</div>}
+                      </div>
+                   </div>
+                 )
+               }) : (
+                 <div className="text-[12px] text-slate-500 text-center py-5 bg-slate-800 rounded-2xl border border-slate-700 shadow-md">아직 기록이 없습니다.</div>
+               )}
+          </div>
+
+          {/* 명단을 제일 밑으로 이동 */}
+          <div className="w-full bg-slate-800 rounded-2xl p-5 mb-4 border border-slate-700 shadow-md">
+              <div className="text-[14px] text-slate-300 mb-4 font-black border-b border-slate-700 pb-2 flex justify-between items-end">
+                  <span>참석자 편성 명단</span>
+                  <span className="text-[10px] font-normal text-slate-500">* ( )는 팀 이동 내역</span>
+              </div>
+              <div className="space-y-5">
+                {TEAM_LETTERS.slice(0, shareModal.data.teamCount).map(teamLetter => {
+                  const teamPlayers = players.filter(p => shareModal.data.attendees.includes(p.id) && (shareModal.data.teamAssignments[p.id] || 'A') === teamLetter);
+                  if(teamPlayers.length === 0) return null;
+                  return (
+                    <div key={teamLetter}>
+                      <div className={`text-[12px] font-black mb-2.5 ${TEAM_TEXT_COLORS[teamLetter]}`}>
+                        {getTeamDisplayName(shareModal.data, teamLetter)}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {teamPlayers.map(p => {
+                          const history = shareModal.data.teamHistory?.[p.id];
+                          let historyStr = "";
+                          if (history && history.length > 1) {
+                              historyStr = ` (${history.join('➔')})`;
+                          }
+                          return (
+                            <div key={p.id} className="bg-slate-900 px-2.5 py-1.5 rounded-md border border-slate-700/50 text-[11px] text-slate-300 flex items-center shadow-sm">
+                              <span className="font-bold text-white">{p.name}</span>
+                              {historyStr && <span className="text-slate-500 ml-1 tracking-tighter font-medium">{historyStr}</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+          </div>
+
+        </div>
+      </div>
+    );
+  };
+
+  const renderCalendarDays = () => {
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    const days = [];
+    for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="p-2" />);
+    
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      
+      const dayMatches = matchesByDate[dateStr] || [];
+      
+      days.push(
+        <div key={day} className="p-2 aspect-square border border-slate-700/50 rounded-xl relative flex flex-col items-center bg-slate-800/30">
+          <span className="text-xs font-bold text-slate-300">{day}</span>
+          <div className="flex gap-1 mt-1">
+            {dayMatches.map((m, idx) => (
+              <div key={idx} className={`w-1.5 h-1.5 rounded-full ${m.status === 'completed' ? 'bg-slate-500' : 'bg-blue-400'}`} />
+            ))}
+          </div>
+        </div>
+      );
+    }
+    return days;
   };
 
   if (appState === 'login') {
@@ -1370,8 +1506,8 @@ export default function App() {
             <button onClick={() => setLiveState({...liveState, isQuarterActive: true})} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 rounded-xl text-xl shadow-lg transition">쿼터 시작하기</button>
           </div>
 
-          {renderShareModal()}
           {renderHiddenCaptureArea()}
+          {renderShareModal()}
           
           {assignmentModal.isOpen && assignmentModal.match && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
@@ -1403,7 +1539,6 @@ export default function App() {
               </div>
             </div>
           )}
-          {renderLogEditModal()}
           {renderSystemModals()}
         </div>
       );
@@ -1501,6 +1636,16 @@ export default function App() {
                     )
                  })}
                  {liveMatch.logs.filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-xs text-slate-600 italic text-center">득점 없음</div>}
+                 
+                 {/* 완료된 쿼터에 수동으로 득점을 추가하는 버튼 */}
+                 {isAdmin && (
+                    <button 
+                       onClick={() => { setManualGoalTeam(qs.team1); setManualGoalModal({ isOpen: true, match: liveMatch, quarterQs: qs }); }} 
+                       className="w-full mt-2 py-1.5 border border-slate-700 border-dashed rounded-lg text-xs font-bold text-slate-500 hover:text-white hover:border-slate-500 transition flex items-center justify-center gap-1"
+                    >
+                       <Plus size={12}/> 누락된 득점 추가
+                    </button>
+                 )}
                </div>
             </div>
           ))}
@@ -1634,6 +1779,7 @@ export default function App() {
         )}
 
         {renderHiddenCaptureArea()}
+        {renderManualGoalModal()}
         {renderLogEditModal()}
         {renderSystemModals()}
         {renderShareModal()}
@@ -1647,6 +1793,17 @@ export default function App() {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
+      
+      {/* 홈 화면 설치 유도 버튼 (앱이 설치되지 않은 경우에만 노출) */}
+      {!isStandalone && (
+        <button 
+          onClick={handleInstallApp}
+          className="w-full bg-blue-600 py-3 text-white font-bold flex items-center justify-center gap-2 shadow-lg hover:bg-blue-500 transition active:scale-[0.98] border-b border-blue-700 shrink-0"
+        >
+          <Download size={18} /> 홈 화면에 바로가기 추가
+        </button>
+      )}
+
       <header className="px-6 py-4 border-b border-slate-800 bg-slate-900 sticky top-0 z-10 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700 text-lg overflow-hidden shrink-0">
@@ -1919,22 +2076,22 @@ export default function App() {
       {/* ============================================================================ */}
       
       {/* Match Details Modal */}
-      {detailModal.isOpen && detailModal.match && (
+      {detailModal.isOpen && currentDetailMatch && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50 animate-in fade-in">
           <div className="bg-slate-800 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
             <div className="p-6 border-b border-slate-700 bg-slate-900 shrink-0">
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${detailModal.match.matchType === 'external' ? 'bg-purple-500/20 text-purple-400' : 'bg-green-500/20 text-green-400'}`}>
-                      {detailModal.match.matchType === 'external' ? '교류전' : '자체전'}
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${currentDetailMatch.matchType === 'external' ? 'bg-purple-500/20 text-purple-400' : 'bg-green-500/20 text-green-400'}`}>
+                      {currentDetailMatch.matchType === 'external' ? '교류전' : '자체전'}
                     </span>
-                    <h2 className="text-lg font-black text-white">{detailModal.match.date} 결과</h2>
+                    <h2 className="text-lg font-black text-white">{currentDetailMatch.date} 결과</h2>
                   </div>
-                  <p className="text-sm text-slate-400"><MapPin size={12} className="inline mr-1"/>{detailModal.match.location}</p>
+                  <p className="text-sm text-slate-400"><MapPin size={12} className="inline mr-1"/>{currentDetailMatch.location}</p>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => triggerShare(detailModal.match)} className="text-yellow-500 bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"><Share2 size={20}/></button>
+                  <button onClick={() => triggerShare(currentDetailMatch)} className="text-yellow-500 bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"><Share2 size={20}/></button>
                   <button onClick={() => setDetailModal({isOpen: false, match: null})} className="text-slate-400 bg-slate-800 p-2 rounded-full hover:text-white transition"><X size={20}/></button>
                 </div>
               </div>
@@ -1950,10 +2107,10 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {calculateStandings(detailModal.match).map((st, index) => (
+                    {calculateStandings(currentDetailMatch).map((st, index) => (
                       <tr key={st.team} className="border-t border-slate-800">
                         <td className={`py-2 font-black ${index === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{index + 1}</td>
-                        <td className={`py-2 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(detailModal.match, st.team)}</td>
+                        <td className={`py-2 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(currentDetailMatch, st.team)}</td>
                         <td className="py-2 text-white">{st.w}</td>
                         <td className="py-2 text-slate-400">{st.d}</td>
                         <td className="py-2 text-slate-400">{st.l}</td>
@@ -1966,24 +2123,23 @@ export default function App() {
                 </table>
               </div>
 
-              {/* [수정] 쿼터별 상세 기록을 명단보다 위로 배치 */}
-              {detailModal.match.quarterScores.map(qs => (
+              {currentDetailMatch.quarterScores.map(qs => (
                 <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
                    <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
                      <span className="absolute left-0 font-black text-blue-400">{qs.quarter}Q</span>
                      <span className="font-bold text-white text-lg text-center">
-                       <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(detailModal.match, qs.team1)}</span> 
+                       <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(currentDetailMatch, qs.team1)}</span> 
                        <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span> 
-                       <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(detailModal.match, qs.team2)}</span>
+                       <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(currentDetailMatch, qs.team2)}</span>
                      </span>
                    </div>
                    <div className="space-y-3">
-                     {detailModal.match.logs.filter(l => l.quarter === qs.quarter).map(l => {
+                     {currentDetailMatch.logs.filter(l => l.quarter === qs.quarter).map(l => {
                        const isLeft = l.teamLetter === qs.team1;
                        return (
                          <div 
                            key={l.id} 
-                           onClick={() => isAdmin && openLogEditModal(l, detailModal.match)}
+                           onClick={() => isAdmin && openLogEditModal(l, currentDetailMatch)}
                            className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1 rounded-lg transition -mx-1 px-1' : ''}`}
                          >
                            <span className="text-slate-600 text-[10px] w-8 shrink-0 text-center">{l.time}</span>
@@ -2006,23 +2162,31 @@ export default function App() {
                          </div>
                        )
                      })}
-                     {detailModal.match.logs.filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>}
+                     {currentDetailMatch.logs.filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>}
+                     
+                     {/* [추가] 완료된 쿼터에 수동으로 득점을 추가하는 버튼 */}
+                     {isAdmin && (
+                        <button 
+                           onClick={() => { setManualGoalTeam(qs.team1); setManualGoalModal({ isOpen: true, match: currentDetailMatch, quarterQs: qs }); }} 
+                           className="w-full mt-3 py-2 border border-slate-700 border-dashed rounded-lg text-xs font-bold text-slate-500 hover:text-white hover:border-slate-500 transition flex items-center justify-center gap-1"
+                        >
+                           <Plus size={14}/> 누락된 득점 추가
+                        </button>
+                     )}
                    </div>
                 </div>
               ))}
 
-              {/* [수정] 참석자 편성 명단을 가장 아래로 배치 */}
               <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
                 <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-800 pb-2 flex justify-between items-end">
                     <span>참석자 편성 명단</span>
                     <span className="text-[9px] font-normal text-slate-500">* ( )는 팀 이동 내역</span>
                 </div>
                 <div className="space-y-4">
-                  {TEAM_LETTERS.slice(0, detailModal.match.teamCount).map(teamLetter => {
-                    // 해당 팀에 소속된 참석자만 필터링
+                  {TEAM_LETTERS.slice(0, currentDetailMatch.teamCount).map(teamLetter => {
                     const teamPlayers = players.filter(p => 
-                      detailModal.match.attendees.includes(p.id) && 
-                      (detailModal.match.teamAssignments[p.id] || 'A') === teamLetter
+                      currentDetailMatch.attendees.includes(p.id) && 
+                      (currentDetailMatch.teamAssignments[p.id] || 'A') === teamLetter
                     );
                     
                     if(teamPlayers.length === 0) return null;
@@ -2030,12 +2194,11 @@ export default function App() {
                     return (
                       <div key={teamLetter}>
                         <div className={`text-[11px] font-black mb-2 ${TEAM_TEXT_COLORS[teamLetter]}`}>
-                          {getTeamDisplayName(detailModal.match, teamLetter)}
+                          {getTeamDisplayName(currentDetailMatch, teamLetter)}
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {teamPlayers.map(p => {
-                            // 변경 히스토리 추출 (ex: A ➔ B)
-                            const history = detailModal.match.teamHistory?.[p.id];
+                            const history = currentDetailMatch.teamHistory?.[p.id];
                             let historyStr = "";
                             if (history && history.length > 1) {
                                 historyStr = ` (${history.join('➔')})`;
@@ -2276,7 +2439,9 @@ export default function App() {
         </div>
       )}
 
+      {/* 숨겨진 화면 캡처 전용 컴포넌트 */}
       {renderHiddenCaptureArea()}
+      {renderManualGoalModal()}
       {renderLogEditModal()}
       {renderSystemModals()}
       {renderShareModal()}
