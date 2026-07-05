@@ -3,9 +3,9 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { 
-  Calendar, Users, Plus, MapPin, Trophy, Shield, Lock, 
-  ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, 
-  Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings
+  Calendar, Users, BarChart2, Plus, 
+  MapPin, Clock, Trophy, Shield, Lock, 
+  ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings
 } from 'lucide-react';
 
 // ==========================================
@@ -37,7 +37,9 @@ const TEAM_COLORS = {
 };
 const TEAM_TEXT_COLORS = { 'A': 'text-red-400', 'B': 'text-blue-400', 'C': 'text-green-400', 'D': 'text-yellow-400' };
 
-// 이미지 압축 헬퍼 함수
+// ==========================================
+// 이미지 압축 헬퍼 함수 (Firestore 1MB 제한 방지)
+// ==========================================
 const resizeImage = (file, maxWidth = 300, maxHeight = 300) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -64,6 +66,7 @@ const resizeImage = (file, maxWidth = 300, maxHeight = 300) => {
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
+        // 해상도를 줄이고 JPEG 80% 화질로 압축하여 용량을 대폭 감소
         resolve(canvas.toDataURL('image/jpeg', 0.8)); 
       };
     };
@@ -603,6 +606,31 @@ export default function App() {
     }
   };
 
+  // 공통 시스템 모달 렌더러 (z-index를 100으로 높여 항상 최상단에 뜨도록 보장)
+  const renderSystemModals = () => (
+    <>
+      {systemAlert.isOpen && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
+          <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-2xl text-center animate-in fade-in zoom-in-95 duration-200">
+            <p className="text-white font-bold mb-6 whitespace-pre-line">{systemAlert.message}</p>
+            <button onClick={() => setSystemAlert({isOpen: false, message: ''})} className="w-full py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
+          </div>
+        </div>
+      )}
+      {systemConfirm.isOpen && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
+          <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-2xl text-center animate-in fade-in zoom-in-95 duration-200">
+            <p className="text-white font-bold mb-6 whitespace-pre-line">{systemConfirm.message}</p>
+            <div className="flex gap-3">
+              <button onClick={() => setSystemConfirm({isOpen: false, message: '', onConfirm: null})} className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 transition text-white rounded-xl font-bold">취소</button>
+              <button onClick={() => { systemConfirm.onConfirm(); setSystemConfirm({isOpen: false, message: '', onConfirm: null}); }} className="flex-1 py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   const renderShareModal = () => {
     if (!shareModal.isOpen) return null;
     
@@ -721,36 +749,6 @@ export default function App() {
         </div>
       </div>
     );
-  };
-
-  // 달력 렌더링 함수
-  const renderCalendarDays = () => {
-    const year = viewDate.getFullYear();
-    const month = viewDate.getMonth();
-    const firstDay = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const days = [];
-
-    // 앞쪽 빈 칸 채우기
-    for (let i = 0; i < firstDay; i++) {
-        days.push(<div key={`empty-${i}`} className="h-10"></div>);
-    }
-    
-    // 날짜 렌더링
-    for (let i = 1; i <= daysInMonth; i++) {
-        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-        const dayMatches = monthlyMatches.filter(m => m.date === dateStr);
-        const hasMatch = dayMatches.length > 0;
-        const isCompleted = dayMatches.every(m => m.status === 'completed');
-
-        days.push(
-            <div key={i} className={`h-10 flex flex-col items-center justify-start pt-1 rounded-lg border ${hasMatch ? (isCompleted ? 'bg-slate-700 border-slate-600' : 'bg-blue-500/20 border-blue-500/30') : 'border-transparent'}`}>
-                <span className={`text-xs font-bold ${hasMatch ? 'text-white' : 'text-slate-400'}`}>{i}</span>
-                {hasMatch && <div className={`w-1 h-1 rounded-full mt-1 ${isCompleted ? 'bg-slate-400' : 'bg-blue-400'}`}></div>}
-            </div>
-        );
-    }
-    return days;
   };
 
   if (appState === 'login') {
@@ -976,26 +974,7 @@ export default function App() {
           </div>
         )}
 
-        {systemAlert.isOpen && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-2xl text-center">
-              <p className="text-white font-bold mb-6 whitespace-pre-line">{systemAlert.message}</p>
-              <button onClick={() => setSystemAlert({isOpen: false, message: ''})} className="w-full py-3 bg-blue-500 text-white rounded-xl font-bold">확인</button>
-            </div>
-          </div>
-        )}
-
-        {systemConfirm.isOpen && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-2xl text-center">
-              <p className="text-white font-bold mb-6 whitespace-pre-line">{systemConfirm.message}</p>
-              <div className="flex gap-3">
-                <button onClick={() => setSystemConfirm({isOpen: false, message: '', onConfirm: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
-                <button onClick={() => { systemConfirm.onConfirm(); setSystemConfirm({isOpen: false, message: '', onConfirm: null}); }} className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">확인</button>
-              </div>
-            </div>
-          </div>
-        )}
+        {renderSystemModals()}
       </div>
     );
   }
@@ -1088,6 +1067,7 @@ export default function App() {
               </div>
             </div>
           )}
+          {renderSystemModals()}
         </div>
       );
     }
@@ -1271,6 +1251,7 @@ export default function App() {
             </div>
           </div>
         )}
+        {renderSystemModals()}
       </div>
     );
   }
@@ -1310,6 +1291,7 @@ export default function App() {
 
       <main className="p-6">
         
+        {}
         {/* === 1. 경기 Tab === */}
         {activeTab === 'matches' && (
           <div className="space-y-6 animate-in fade-in">
@@ -1451,6 +1433,7 @@ export default function App() {
           </div>
         )}
 
+        {}
         {/* === 2. 스케쥴 (달력) Tab === */}
         {activeTab === 'schedule' && (
           <div className="space-y-6 animate-in fade-in">
@@ -1502,6 +1485,7 @@ export default function App() {
           </div>
         )}
 
+        {}
         {/* === 3. 명단 Tab === */}
         {activeTab === 'roster' && (
           <div className="space-y-4 animate-in fade-in">
@@ -1539,7 +1523,6 @@ export default function App() {
         )}
       </main>
 
-      {/* 하단 탭 내비게이션 (경기 / 스케쥴 / 명단) */}
       <nav className="fixed bottom-0 w-full max-w-md bg-slate-900/95 backdrop-blur border-t border-slate-800 flex justify-around p-2 pb-6 z-40">
         <button onClick={() => setActiveTab('matches')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'matches' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}>
           <List size={20} className="mb-1" />
@@ -1905,32 +1888,8 @@ export default function App() {
         </div>
       )}
 
-      {/* System Alert Modal */}
-      {systemAlert.isOpen && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-2xl text-center">
-            <p className="text-white font-bold mb-6 whitespace-pre-line">{systemAlert.message}</p>
-            <button onClick={() => setSystemAlert({isOpen: false, message: ''})} className="w-full py-3 bg-blue-500 text-white rounded-xl font-bold">확인</button>
-          </div>
-        </div>
-      )}
-
-      {/* System Confirm Modal */}
-      {systemConfirm.isOpen && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-2xl text-center">
-            <p className="text-white font-bold mb-6 whitespace-pre-line">{systemConfirm.message}</p>
-            <div className="flex gap-3">
-              <button onClick={() => setSystemConfirm({isOpen: false, message: '', onConfirm: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
-              <button onClick={() => { systemConfirm.onConfirm(); setSystemConfirm({isOpen: false, message: '', onConfirm: null}); }} className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">확인</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Kakao Share Preview Modal */}
+      {renderSystemModals()}
       {renderShareModal()}
-
     </div>
   );
 }
