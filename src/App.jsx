@@ -175,6 +175,12 @@ export default function App() {
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
   const liveMatch = useMemo(() => matches.find(m => m.id === liveMatchId), [matches, liveMatchId]);
 
+  // [추가] 팝업창 데이터 실시간 동기화를 위한 변수 (DB가 업데이트 되면 팝업창도 자동 새로고침 됨)
+  const displayDetailMatch = useMemo(() => {
+    if (!detailModal.isOpen || !detailModal.match) return null;
+    return matches.find(m => m.id === detailModal.match.id) || detailModal.match;
+  }, [detailModal.isOpen, detailModal.match, matches]);
+
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) setUser(currentUser);
@@ -1926,22 +1932,22 @@ export default function App() {
       {/* ============================================================================ */}
       
       {/* Match Details Modal */}
-      {detailModal.isOpen && detailModal.match && (
+      {detailModal.isOpen && displayDetailMatch && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50 animate-in fade-in">
           <div className="bg-slate-800 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
             <div className="p-6 border-b border-slate-700 bg-slate-900 shrink-0">
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${detailModal.match.matchType === 'external' ? 'bg-purple-500/20 text-purple-400' : 'bg-green-500/20 text-green-400'}`}>
-                      {detailModal.match.matchType === 'external' ? '교류전' : '자체전'}
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${displayDetailMatch.matchType === 'external' ? 'bg-purple-500/20 text-purple-400' : 'bg-green-500/20 text-green-400'}`}>
+                      {displayDetailMatch.matchType === 'external' ? '교류전' : '자체전'}
                     </span>
-                    <h2 className="text-lg font-black text-white">{detailModal.match.date} 결과</h2>
+                    <h2 className="text-lg font-black text-white">{displayDetailMatch.date} 결과</h2>
                   </div>
-                  <p className="text-sm text-slate-400"><MapPin size={12} className="inline mr-1"/>{detailModal.match.location}</p>
+                  <p className="text-sm text-slate-400"><MapPin size={12} className="inline mr-1"/>{displayDetailMatch.location}</p>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => triggerShare(detailModal.match)} className="text-yellow-500 bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"><Share2 size={20}/></button>
+                  <button onClick={() => triggerShare(displayDetailMatch)} className="text-yellow-500 bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"><Share2 size={20}/></button>
                   <button onClick={() => setDetailModal({isOpen: false, match: null})} className="text-slate-400 bg-slate-800 p-2 rounded-full hover:text-white transition"><X size={20}/></button>
                 </div>
               </div>
@@ -1957,10 +1963,10 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {calculateStandings(detailModal.match).map((st, index) => (
+                    {calculateStandings(displayDetailMatch).map((st, index) => (
                       <tr key={st.team} className="border-t border-slate-800">
                         <td className={`py-2 font-black ${index === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{index + 1}</td>
-                        <td className={`py-2 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(detailModal.match, st.team)}</td>
+                        <td className={`py-2 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(displayDetailMatch, st.team)}</td>
                         <td className="py-2 text-blue-400 font-black">{st.pts}</td>
                         <td className="py-2 text-white">{st.w}</td>
                         <td className="py-2 text-slate-400">{st.d}</td>
@@ -1974,23 +1980,23 @@ export default function App() {
                 </table>
               </div>
 
-              {detailModal.match.quarterScores.map(qs => (
+              {displayDetailMatch.quarterScores.map(qs => (
                 <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
                    <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
                      <span className="absolute left-0 font-black text-blue-400">{qs.quarter}Q</span>
                      <span className="font-bold text-white text-lg text-center">
-                       <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(detailModal.match, qs.team1)}</span> 
+                       <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(displayDetailMatch, qs.team1)}</span> 
                        <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span> 
-                       <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(detailModal.match, qs.team2)}</span>
+                       <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(displayDetailMatch, qs.team2)}</span>
                      </span>
                    </div>
                    <div className="space-y-3">
-                     {detailModal.match.logs.filter(l => l.quarter === qs.quarter).map(l => {
+                     {displayDetailMatch.logs.filter(l => l.quarter === qs.quarter).map(l => {
                        const isLeft = l.teamLetter === qs.team1;
                        return (
                          <div 
                            key={l.id} 
-                           onClick={() => isAdmin && openLogEditModal(l, detailModal.match)}
+                           onClick={() => isAdmin && openLogEditModal(l, displayDetailMatch)}
                            className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1 rounded-lg transition -mx-1 px-1' : ''}`}
                          >
                            <span className="text-slate-600 text-[10px] w-8 shrink-0 text-center">{l.time}</span>
@@ -2013,11 +2019,11 @@ export default function App() {
                          </div>
                        )
                      })}
-                     {detailModal.match.logs.filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>}
+                     {displayDetailMatch.logs.filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>}
                    </div>
                    {isAdmin && (
                      <button 
-                       onClick={() => setGoalFlow({ isOpen: true, matchId: detailModal.match.id, quarter: qs.quarter, isMissingAdd: true, step: 0, teamLetter: null, scorer: null, isPK: false, remark: '' })}
+                       onClick={() => setGoalFlow({ isOpen: true, matchId: displayDetailMatch.id, quarter: qs.quarter, isMissingAdd: true, step: 0, teamLetter: null, scorer: null, isPK: false, remark: '' })}
                        className="mt-3 w-full py-2 border border-slate-700 border-dashed rounded-lg text-xs font-bold text-slate-500 hover:text-white hover:bg-slate-800 transition"
                      >
                        + 누락된 득점 추가
@@ -2032,10 +2038,10 @@ export default function App() {
                     <span className="text-[9px] font-normal text-slate-500">* ( )는 팀 이동 내역</span>
                 </div>
                 <div className="space-y-4">
-                  {TEAM_LETTERS.slice(0, detailModal.match.teamCount).map(teamLetter => {
+                  {TEAM_LETTERS.slice(0, displayDetailMatch.teamCount).map(teamLetter => {
                     const teamPlayers = players.filter(p => 
-                      detailModal.match.attendees.includes(p.id) && 
-                      (detailModal.match.teamAssignments[p.id] || 'A') === teamLetter
+                      displayDetailMatch.attendees.includes(p.id) && 
+                      (displayDetailMatch.teamAssignments[p.id] || 'A') === teamLetter
                     );
                     
                     if(teamPlayers.length === 0) return null;
@@ -2043,11 +2049,11 @@ export default function App() {
                     return (
                       <div key={teamLetter}>
                         <div className={`text-[11px] font-black mb-2 ${TEAM_TEXT_COLORS[teamLetter]}`}>
-                          {getTeamDisplayName(detailModal.match, teamLetter)}
+                          {getTeamDisplayName(displayDetailMatch, teamLetter)}
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {teamPlayers.map(p => {
-                            const history = detailModal.match.teamHistory?.[p.id];
+                            const history = displayDetailMatch.teamHistory?.[p.id];
                             let historyStr = "";
                             if (history && history.length > 1) {
                                 historyStr = ` (${history.join('➔')})`;
