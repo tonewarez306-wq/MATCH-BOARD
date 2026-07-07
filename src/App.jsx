@@ -646,13 +646,13 @@ export default function App() {
 
       const scorer = players.find(p => p.id === gfScorer);
       if (scorer) {
-        await setDoc(doc(db, 'players', scorer.id), { ...scorer, goals: scorer.goals + 1 });
+        await setDoc(doc(db, 'players', scorer.id), { ...scorer, goals: (scorer.goals || 0) + 1 });
       }
       
       if (assistId) {
         const assist = players.find(p => p.id === assistId);
         if (assist) {
-          await setDoc(doc(db, 'players', assist.id), { ...assist, assists: assist.assists + 1 });
+          await setDoc(doc(db, 'players', assist.id), { ...assist, assists: (assist.assists || 0) + 1 });
         }
       }
     }
@@ -687,22 +687,22 @@ export default function App() {
     if (oldScorerId !== newScorerId) {
         if (oldScorerId) {
            const p = players.find(p => p.id === oldScorerId);
-           if (p) await setDoc(doc(db, 'players', p.id), { ...p, goals: Math.max(0, p.goals - 1) });
+           if (p) await setDoc(doc(db, 'players', p.id), { ...p, goals: Math.max(0, (p.goals || 0) - 1) });
         }
         if (newScorerId) {
            const p = players.find(p => p.id === newScorerId);
-           if (p) await setDoc(doc(db, 'players', p.id), { ...p, goals: p.goals + 1 });
+           if (p) await setDoc(doc(db, 'players', p.id), { ...p, goals: (p.goals || 0) + 1 });
         }
     }
 
     if (oldAssistId !== newAssistId) {
         if (oldAssistId) {
            const p = players.find(p => p.id === oldAssistId);
-           if (p) await setDoc(doc(db, 'players', p.id), { ...p, assists: Math.max(0, p.assists - 1) });
+           if (p) await setDoc(doc(db, 'players', p.id), { ...p, assists: Math.max(0, (p.assists || 0) - 1) });
         }
         if (newAssistId && newAssistId !== 'none') {
            const p = players.find(p => p.id === newAssistId);
-           if (p) await setDoc(doc(db, 'players', p.id), { ...p, assists: p.assists + 1 });
+           if (p) await setDoc(doc(db, 'players', p.id), { ...p, assists: (p.assists || 0) + 1 });
         }
     }
 
@@ -739,11 +739,11 @@ export default function App() {
         onConfirm: async () => {
             if (l.scorerId) {
                const p = players.find(p => p.id === l.scorerId);
-               if (p) await setDoc(doc(db, 'players', p.id), { ...p, goals: Math.max(0, p.goals - 1) });
+               if (p) await setDoc(doc(db, 'players', p.id), { ...p, goals: Math.max(0, (p.goals || 0) - 1) });
             }
             if (l.assistId) {
                const p = players.find(p => p.id === l.assistId);
-               if (p) await setDoc(doc(db, 'players', p.id), { ...p, assists: Math.max(0, p.assists - 1) });
+               if (p) await setDoc(doc(db, 'players', p.id), { ...p, assists: Math.max(0, (p.assists || 0) - 1) });
             }
 
             const updatedLogs = m.logs.filter(log => log.id !== l.id);
@@ -798,7 +798,7 @@ export default function App() {
     if (liveState.currentQuarter >= liveMatch.totalQuarters) {
        for (const p of players) {
          if (updatedMatch.attendees.includes(p.id)) {
-            await setDoc(doc(db, 'players', p.id), { ...p, caps: p.caps + 1 });
+            await setDoc(doc(db, 'players', p.id), { ...p, caps: (p.caps || 0) + 1 });
          }
        }
        const finalMatch = { ...updatedMatch, status: 'completed' };
@@ -1686,7 +1686,11 @@ export default function App() {
                     <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-600 flex items-center justify-center font-black text-slate-400">{p.birthYear}</div>
                     <div>
                       <div className="font-bold text-white text-lg">{p.name}</div>
-                      <div className="text-xs text-slate-400 font-medium">참석: <span className="text-blue-400 font-bold">{p.caps}</span>회</div>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">참석 <strong className="text-blue-400">{p.caps || 0}</strong></span>
+                        <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">⚽ <strong className="text-white">{p.goals || 0}</strong></span>
+                        <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">👟 <strong className="text-white">{p.assists || 0}</strong></span>
+                      </div>
                     </div>
                   </div>
                   {isAdmin && (
