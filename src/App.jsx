@@ -273,10 +273,13 @@ export default function App() {
   };
 
   const handleActionClick = (action, match) => {
-    if (!isAdmin) {
+    const matchDateTime = new Date(`${match.date}T${match.time}`);
+    const now = new Date();
+
+    if (!isAdmin && matchDateTime > now) {
       setSystemAlert({
         isOpen: true, 
-        message: `해당 기능은 팀 관리자만 이용할 수 있습니다.\n(경기 시간: ${match.date} ${formatTimeAmPm(match.time)})\n\n기록 및 편성을 원하시면 우측 상단의\n[관리자 전환]을 이용해 주세요.`
+        message: `해당 기능은 경기 시작 전에는 이용할 수 없습니다.\n(경기 시간: ${match.date} ${formatTimeAmPm(match.time)})\n\n미리 기록 및 편성을 원하시면 우측 상단의\n[관리자 전환]을 이용해 주세요.`
       });
       return;
     }
