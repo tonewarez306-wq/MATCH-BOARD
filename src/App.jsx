@@ -569,6 +569,45 @@ export default function App() {
     }
   };
 
+  const handleOpponentGoalSubmit = async () => {
+    const targetMatchId = goalFlow.matchId || liveMatchId;
+    const targetMatch = matches.find(m => m.id === targetMatchId);
+    const quarter = goalFlow.quarter || liveState.currentQuarter;
+    
+    const newLog = {
+      id: Date.now(),
+      quarter: quarter,
+      teamLetter: 'B',
+      scorerId: null,
+      scorerName: targetMatch.opponentName || '상대팀',
+      assistId: null,
+      assistName: null,
+      time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }),
+      isPK: goalFlow.isPK || false,
+      remark: goalFlow.remark || ''
+    };
+    
+    const newLogs = [...targetMatch.logs, newLog];
+    const newScores = { ...targetMatch.scores, 'B': (targetMatch.scores['B'] || 0) + 1 };
+    
+    let newQuarterScores = [...targetMatch.quarterScores];
+    if (goalFlow.isMissingAdd) {
+       const qsIndex = newQuarterScores.findIndex(qs => qs.quarter === quarter);
+       if (qsIndex > -1) {
+          const qs = newQuarterScores[qsIndex];
+          newQuarterScores[qsIndex] = {
+             ...qs,
+             score2: qs.score2 + 1
+          };
+       }
+    }
+
+    const updatedMatch = { ...targetMatch, scores: newScores, logs: newLogs, quarterScores: newQuarterScores };
+    
+    await setDoc(doc(db, 'matches', targetMatchId), updatedMatch);
+    setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false });
+  };
+
   const openLogEditModal = (log, match) => {
     if (!isAdmin) return;
     const enrichedLog = { ...log };
@@ -1122,14 +1161,25 @@ export default function App() {
               </button>
             )}
             
-            {(goalFlow.step === 1 || goalFlow.step === 2) && players.filter(p => gfMatch.attendees.includes(p.id) && (gfMatch.teamAssignments[p.id] || 'A') === goalFlow.teamLetter)
-              .filter(p => goalFlow.step === 1 || p.id !== goalFlow.scorer)
-              .map(p => (
-              <button key={p.id} onClick={() => handleGoalSubmit(p.id, goalFlow.teamLetter)} className="w-full p-4 bg-slate-900 rounded-xl flex items-center gap-4 hover:bg-slate-700 border border-slate-700 transition">
-                <span className="font-bold text-lg text-white flex-1 text-left">{p.name}</span>
-                <span className="text-xs text-slate-500">{p.birthYear}</span>
-              </button>
-            ))}
+            {(goalFlow.step === 1 || goalFlow.step === 2) && (
+              gfMatch.matchType === 'external' && goalFlow.teamLetter === 'B' ? (
+                <button 
+                  onClick={handleOpponentGoalSubmit} 
+                  className="w-full p-4 bg-blue-500 hover:bg-blue-400 text-white rounded-xl font-bold shadow-lg transition mt-2 text-lg"
+                >
+                  상대팀 득점 기록 완료
+                </button>
+              ) : (
+                players.filter(p => gfMatch.attendees.includes(p.id) && (gfMatch.teamAssignments[p.id] || 'A') === goalFlow.teamLetter)
+                .filter(p => goalFlow.step === 1 || p.id !== goalFlow.scorer)
+                .map(p => (
+                <button key={p.id} onClick={() => handleGoalSubmit(p.id, goalFlow.teamLetter)} className="w-full p-4 bg-slate-900 rounded-xl flex items-center gap-4 hover:bg-slate-700 border border-slate-700 transition">
+                  <span className="font-bold text-lg text-white flex-1 text-left">{p.name}</span>
+                  <span className="text-xs text-slate-500">{p.birthYear}</span>
+                </button>
+                ))
+              )
+            )}
           </div>
         </div>
       </div>
