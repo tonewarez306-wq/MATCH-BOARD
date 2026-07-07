@@ -2291,6 +2291,7 @@ export default function App() {
       {/* 숨겨진 화면 캡처 전용 컴포넌트 */}
       {renderHiddenCaptureArea()}
 
+      {renderGoalFlowModal()}
       {renderLogEditModal()}
       {renderSystemModals()}
       {renderShareModal()}
