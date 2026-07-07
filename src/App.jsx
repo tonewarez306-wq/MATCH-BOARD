@@ -23,14 +23,33 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 const TEAM_LETTERS = ['A', 'B', 'C', 'D'];
-// A팀의 배경을 완전히 투명하지 않고 솔리드한 다크톤(slate-800)에 테두리를 밝게 주어 구분이 잘 가도록 수정
+// [수정] A팀: 레드, B팀: 블루, C팀: 옐로우, D팀: 그린 순으로 변경
 const TEAM_COLORS = {
-  'A': 'text-white bg-slate-800 border-slate-400',
+  'A': 'text-red-400 bg-red-500/10 border-red-500/30',
   'B': 'text-blue-400 bg-blue-500/10 border-blue-500/30',
   'C': 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30',
-  'D': 'text-red-400 bg-red-500/10 border-red-500/30'
+  'D': 'text-green-400 bg-green-500/10 border-green-500/30'
 };
-const TEAM_TEXT_COLORS = { 'A': 'text-white', 'B': 'text-blue-400', 'C': 'text-yellow-400', 'D': 'text-red-400' };
+const TEAM_TEXT_COLORS = { 'A': 'text-red-400', 'B': 'text-blue-400', 'C': 'text-yellow-400', 'D': 'text-green-400' };
+
+// 시간 포맷 (오전/오후 변환)
+const formatTimeAMPM = (timeStr) => {
+  if (!timeStr) return '';
+  const [hours, minutes] = timeStr.split(':');
+  let h = parseInt(hours, 10);
+  const ampm = h >= 12 ? '오후' : '오전';
+  h = h % 12 || 12;
+  return `${ampm} ${h}:${minutes}`;
+};
+
+// 오늘 날짜 기본값 생성
+const getTodayString = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const resizeImage = (file, maxWidth = 300, maxHeight = 300) => {
   return new Promise((resolve) => {
@@ -105,14 +124,6 @@ const calculateStandings = (match) => {
   });
 };
 
-const getTodayString = () => {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
 export default function App() {
   const [user, setUser] = useState(null);
   const [appState, setAppState] = useState('login'); 
@@ -120,8 +131,6 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false); 
   const [adminPassword, setAdminPassword] = useState('admin');
   const [isLoaded, setIsLoaded] = useState(false);
-
-  // [중요] PWA 관련 (isStandalone, isIOS 등) 에러를 유발하던 상태를 완전히 제거
 
   const [teams, setTeams] = useState([]);
   const [activeTeamId, setActiveTeamId] = useState(null);
@@ -154,7 +163,6 @@ export default function App() {
   const [liveMatchId, setLiveMatchId] = useState(null);
   const [liveState, setLiveState] = useState({ currentQuarter: 1, playingTeams: ['A', 'B'], isQuarterActive: false });
   
-  // PK/비고 기능과 '누락된 득점 추가'를 통합 지원하는 goalFlow 상태
   const [goalFlow, setGoalFlow] = useState({ 
     isOpen: false, matchId: null, step: 1, quarter: null, teamLetter: null, 
     scorer: null, isPK: false, remark: '', isMissingAdd: false 
@@ -188,13 +196,14 @@ export default function App() {
     };
   }, []);
 
+  // [수정] 팀 명칭을 '팀 A' -> 'A팀' 으로 변경
   const getTeamDisplayName = (match, letter) => {
-    if (!match || !letter) return `팀 ${letter || ''}`;
+    if (!match || !letter) return `${letter || ''}팀`;
     if (match.matchType === 'external') {
       if (letter === 'A') return activeTeam?.name || '우리 팀';
       if (letter === 'B') return match.opponentName || '상대 팀';
     }
-    return `팀 ${letter}`;
+    return `${letter}팀`;
   };
 
   const viewYearMonth = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
@@ -236,7 +245,7 @@ export default function App() {
     if (!isAdmin && matchDateTime > now) {
       setSystemAlert({
         isOpen: true, 
-        message: `해당 기능은 경기 시간(${match.date} ${match.time}) 이후,\n또는 관리자만 이용할 수 있습니다.`
+        message: `해당 기능은 경기 시간(${match.date} ${formatTimeAMPM(match.time)}) 이후,\n또는 관리자만 이용할 수 있습니다.`
       });
       return;
     }
@@ -521,7 +530,6 @@ export default function App() {
       const newScores = { ...targetMatch.scores, [goalFlow.teamLetter]: (targetMatch.scores[goalFlow.teamLetter] || 0) + 1 };
       
       let newQuarterScores = [...targetMatch.quarterScores];
-      // 이미 끝난 쿼터에 누락된 득점을 추가하는 경우 스코어보드 갱신
       if (goalFlow.isMissingAdd) {
          const qsIndex = newQuarterScores.findIndex(qs => qs.quarter === quarter);
          if (qsIndex > -1) {
@@ -855,7 +863,7 @@ export default function App() {
                {shareModal.data.matchType === 'external' ? `[교류전] vs ${shareModal.data.opponentName}` : `[자체전] ${shareModal.data.location}`}
             </h3>
             <p className="text-slate-400 text-[15px] font-medium">
-               {new Date(shareModal.data.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} {shareModal.data.time} · 참석 {shareModal.data.attendees?.length || 0}명
+               {new Date(shareModal.data.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} {formatTimeAMPM(shareModal.data.time)} · 참석 {shareModal.data.attendees?.length || 0}명
             </p>
           </div>
 
@@ -1075,7 +1083,6 @@ export default function App() {
           </div>
           
           <div className="flex-1 overflow-y-auto space-y-2 pb-6 custom-scrollbar">
-            {/* Step 0: 누락된 득점 추가 시 팀 먼저 선택 */}
             {goalFlow.step === 0 && (() => {
                const qs = gfMatch.quarterScores.find(q => q.quarter === goalFlow.quarter);
                if (!qs) return null;
@@ -1401,11 +1408,11 @@ export default function App() {
             ) : (
               <div className="flex items-center justify-center gap-4 mb-12">
                 <select value={liveState.playingTeams[0]} onChange={(e) => setLiveState({...liveState, playingTeams: [e.target.value, liveState.playingTeams[1]]})} className={`w-28 border-4 font-black text-3xl text-center py-6 rounded-2xl appearance-none shadow-xl ${TEAM_COLORS[liveState.playingTeams[0]]} outline-none`}>
-                  {TEAM_LETTERS.slice(0, liveMatch.teamCount).map(t => <option key={t} value={t} className="bg-slate-900 text-white">팀 {t}</option>)}
+                  {TEAM_LETTERS.slice(0, liveMatch.teamCount).map(t => <option key={t} value={t} className="bg-slate-900 text-white">{t}팀</option>)}
                 </select>
                 <span className="text-slate-600 font-black italic text-2xl">VS</span>
                 <select value={liveState.playingTeams[1]} onChange={(e) => setLiveState({...liveState, playingTeams: [liveState.playingTeams[0], e.target.value]})} className={`w-28 border-4 font-black text-3xl text-center py-6 rounded-2xl appearance-none shadow-xl ${TEAM_COLORS[liveState.playingTeams[1]]} outline-none`}>
-                  {TEAM_LETTERS.slice(0, liveMatch.teamCount).map(t => <option key={t} value={t} className="bg-slate-900 text-white">팀 {t}</option>)}
+                  {TEAM_LETTERS.slice(0, liveMatch.teamCount).map(t => <option key={t} value={t} className="bg-slate-900 text-white">{t}팀</option>)}
                 </select>
               </div>
             )}
@@ -1703,7 +1710,7 @@ export default function App() {
                       </div>
                     )}
                     <div className="flex items-center gap-2 text-sm text-blue-400 font-bold mb-2">
-                      <span className="bg-blue-500/20 px-2 py-0.5 rounded text-[10px]">예정</span> {m.date} {m.time}
+                      <span className="bg-blue-500/20 px-2 py-0.5 rounded text-[10px]">예정</span> {m.date} {formatTimeAMPM(m.time)}
                     </div>
                     <div className="flex items-center gap-2 mb-1">
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${m.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}>
@@ -1712,7 +1719,7 @@ export default function App() {
                       <div className="text-lg font-bold text-white">{m.location}</div>
                     </div>
                     <div className="text-xs text-slate-400 mb-4 mt-1">
-                      {m.matchType === 'external' ? `우리 팀 VS ${m.opponentName}` : `${m.teamCount}팀 파전`} • 총 {m.totalQuarters}쿼터 • 참석 {m.attendees.length}명
+                      {m.matchType === 'external' ? `우리 팀 VS ${m.opponentName}` : `총 ${m.teamCount}팀 파전`} • 총 {m.totalQuarters}쿼터 • 참석 {m.attendees.length}명
                     </div>
                     
                     <div className="flex gap-2">
@@ -1852,7 +1859,7 @@ export default function App() {
                                     <span className="text-sm font-bold text-white truncate">{m.location}</span>
                                </div>
                                <div className="text-[11px] text-slate-400 truncate">
-                                    {m.time} • {m.matchType === 'external' ? `vs ${m.opponentName}` : `${m.teamCount}팀 자체전`}
+                                    {formatTimeAMPM(m.time)} • {m.matchType === 'external' ? `vs ${m.opponentName}` : `총 ${m.teamCount}팀 자체전`}
                                </div>
                            </div>
                         </div>
