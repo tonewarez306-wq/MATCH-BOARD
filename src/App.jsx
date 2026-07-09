@@ -29,7 +29,6 @@ const db = getFirestore(app);
 // 상수 및 헬퍼
 // ==========================================
 const TEAM_LETTERS = ['A', 'B', 'C', 'D'];
-// 요청하신 컬러 순서: A(레드), B(블루), C(옐로우), D(그린)
 const TEAM_COLORS = {
   'A': 'text-red-400 bg-red-500/10 border-red-500/30',
   'B': 'text-blue-400 bg-blue-500/10 border-blue-500/30',
@@ -91,7 +90,7 @@ const calculateStandings = (match) => {
     stats[t] = { team: t, matches: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 };
   });
 
-  match.quarterScores.forEach(qs => {
+  (match.quarterScores || []).forEach(qs => {
     const { team1, team2, score1, score2 } = qs;
     if (!stats[team1] || !stats[team2]) return;
     
@@ -272,8 +271,10 @@ export default function App() {
     setMatchModal({ isOpen: true, match });
   };
 
+  // ✅ [수정됨] 크로스 브라우저 호환성 강화 및 조회모드 차단 로직
   const handleActionClick = (action, match) => {
-    const matchDateTime = new Date(`${match.date}T${match.time}`);
+    const safeDate = match.date.replace(/-/g, '/');
+    const matchDateTime = new Date(`${safeDate} ${match.time}`);
     const now = new Date();
 
     if (!isAdmin && matchDateTime > now) {
@@ -284,7 +285,14 @@ export default function App() {
       return;
     }
 
-    if (action === 'assign') setAssignmentModal({ isOpen: true, match });
+    if (action === 'assign') {
+      if (!isAdmin) {
+        setSystemAlert({isOpen: true, message: '참석자 팀 편성은 관리자만 수정할 수 있습니다.'});
+        return;
+      }
+      setAssignmentModal({ isOpen: true, match });
+    }
+    
     if (action === 'start') startLiveMatch(match);
   };
 
@@ -490,17 +498,20 @@ export default function App() {
     }
   };
 
+  // ✅ [수정됨] Undefined 배열 접근 에러 방지 (과거 데이터 호환)
   const startLiveMatch = (match) => {
-    const currentQ = match.quarterScores.length + 1;
-    const currentLogs = match.logs.filter(l => l.quarter === currentQ);
+    const qScores = match.quarterScores || [];
+    const mLogs = match.logs || [];
+    
+    const currentQ = qScores.length + 1;
+    const currentLogs = mLogs.filter(l => l.quarter === currentQ);
 
     let playingTeams = ['A', 'B'];
     let isQuarterActive = false;
 
     if (match.matchType === 'external') {
        playingTeams = ['A', 'B']; 
-       // 외부 경기(교류전)는 항상 A vs B 이므로 매치업 화면 생략 가능
-       if (currentLogs.length > 0) isQuarterActive = true; 
+       isQuarterActive = true; // 교류전은 항상 A vs B 이므로 매치업 화면 패스
     } else {
        if (currentLogs.length > 0) {
           const teamsInLogs = [...new Set(currentLogs.map(l => l.teamLetter))];
@@ -516,9 +527,18 @@ export default function App() {
   };
 
   const handleOpponentGoalSubmit = async () => {
-    const targetMatchId = goalFlow.matchId || liveMatchId;
+    const gfMatchId = goalFlow.matchId;
+    const gfQuarter = goalFlow.quarter;
+    const gfIsPK = goalFlow.isPK;
+    const gfRemark = goalFlow.remark;
+    const gfIsMissingAdd = goalFlow.isMissingAdd;
+
+    // 팝업 즉시 닫기
+    setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false });
+
+    const targetMatchId = gfMatchId || liveMatchId;
     const targetMatch = matches.find(m => m.id === targetMatchId);
-    const quarter = goalFlow.quarter || liveState.currentQuarter;
+    const quarter = gfQuarter || liveState.currentQuarter;
     
     const newLog = {
       id: Date.now(),
@@ -529,15 +549,15 @@ export default function App() {
       assistId: null,
       assistName: null,
       time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }),
-      isPK: goalFlow.isPK || false,
-      remark: goalFlow.remark || ''
+      isPK: gfIsPK || false,
+      remark: gfRemark || ''
     };
     
-    const newLogs = [...targetMatch.logs, newLog];
-    const newScores = { ...targetMatch.scores, 'B': (targetMatch.scores['B'] || 0) + 1 };
+    const newLogs = [...(targetMatch.logs || []), newLog];
+    const newScores = { ...(targetMatch.scores || {}), 'B': ((targetMatch.scores || {})['B'] || 0) + 1 };
     
-    let newQuarterScores = [...targetMatch.quarterScores];
-    if (goalFlow.isMissingAdd) {
+    let newQuarterScores = [...(targetMatch.quarterScores || [])];
+    if (gfIsMissingAdd) {
        const qsIndex = newQuarterScores.findIndex(qs => qs.quarter === quarter);
        if (qsIndex > -1) {
           const qs = newQuarterScores[qsIndex];
@@ -546,14 +566,21 @@ export default function App() {
     }
 
     const updatedMatch = { ...targetMatch, scores: newScores, logs: newLogs, quarterScores: newQuarterScores };
-    setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false });
     await setDoc(doc(db, 'matches', targetMatchId), updatedMatch);
   };
 
   const handleOwnGoalSubmit = async (targetTeamLetter, isOurFault = false) => {
-    const targetMatchId = goalFlow.matchId || liveMatchId;
+    const gfMatchId = goalFlow.matchId;
+    const gfQuarter = goalFlow.quarter;
+    const gfRemark = goalFlow.remark;
+    const gfIsMissingAdd = goalFlow.isMissingAdd;
+
+    // 팝업 즉시 닫기
+    setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false });
+
+    const targetMatchId = gfMatchId || liveMatchId;
     const targetMatch = matches.find(m => m.id === targetMatchId);
-    const quarter = goalFlow.quarter || liveState.currentQuarter;
+    const quarter = gfQuarter || liveState.currentQuarter;
     
     const scorerName = isOurFault ? '우리팀 자책골' : '상대팀 자책골';
     
@@ -567,14 +594,14 @@ export default function App() {
       assistName: null,
       time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }),
       isPK: false,
-      remark: goalFlow.remark || ''
+      remark: gfRemark || ''
     };
     
-    const newLogs = [...targetMatch.logs, newLog];
-    const newScores = { ...targetMatch.scores, [targetTeamLetter]: (targetMatch.scores[targetTeamLetter] || 0) + 1 };
+    const newLogs = [...(targetMatch.logs || []), newLog];
+    const newScores = { ...(targetMatch.scores || {}), [targetTeamLetter]: ((targetMatch.scores || {})[targetTeamLetter] || 0) + 1 };
     
-    let newQuarterScores = [...targetMatch.quarterScores];
-    if (goalFlow.isMissingAdd) {
+    let newQuarterScores = [...(targetMatch.quarterScores || [])];
+    if (gfIsMissingAdd) {
        const qsIndex = newQuarterScores.findIndex(qs => qs.quarter === quarter);
        if (qsIndex > -1) {
           const qs = newQuarterScores[qsIndex];
@@ -588,7 +615,6 @@ export default function App() {
     }
 
     const updatedMatch = { ...targetMatch, scores: newScores, logs: newLogs, quarterScores: newQuarterScores };
-    setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false });
     await setDoc(doc(db, 'matches', targetMatchId), updatedMatch);
   };
 
@@ -604,6 +630,7 @@ export default function App() {
       const gfRemark = goalFlow.remark;
       const gfIsMissingAdd = goalFlow.isMissingAdd;
 
+      // 팝업 즉시 닫기
       setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false });
 
       const targetMatchId = gfMatchId || liveMatchId;
@@ -624,10 +651,10 @@ export default function App() {
         remark: gfRemark || ''
       };
       
-      const newLogs = [...targetMatch.logs, newLog];
-      const newScores = { ...targetMatch.scores, [gfTeamLetter]: (targetMatch.scores[gfTeamLetter] || 0) + 1 };
+      const newLogs = [...(targetMatch.logs || []), newLog];
+      const newScores = { ...(targetMatch.scores || {}), [gfTeamLetter]: ((targetMatch.scores || {})[gfTeamLetter] || 0) + 1 };
       
-      let newQuarterScores = [...targetMatch.quarterScores];
+      let newQuarterScores = [...(targetMatch.quarterScores || [])];
       if (gfIsMissingAdd) {
          const qsIndex = newQuarterScores.findIndex(qs => qs.quarter === quarter);
          if (qsIndex > -1) {
@@ -709,7 +736,7 @@ export default function App() {
     const finalAssistId = newAssistId === 'none' ? null : newAssistId;
     const finalAssistName = finalAssistId ? players.find(p => p.id === finalAssistId)?.name : null;
 
-    const updatedLogs = m.logs.map(log => {
+    const updatedLogs = (m.logs || []).map(log => {
         if (log.id === l.id) {
             return {
                 ...log,
@@ -746,9 +773,9 @@ export default function App() {
                if (p) await setDoc(doc(db, 'players', p.id), { ...p, assists: Math.max(0, (p.assists || 0) - 1) });
             }
 
-            const updatedLogs = m.logs.filter(log => log.id !== l.id);
+            const updatedLogs = (m.logs || []).filter(log => log.id !== l.id);
             
-            let updatedQuarterScores = [...m.quarterScores];
+            let updatedQuarterScores = [...(m.quarterScores || [])];
             const qsIndex = updatedQuarterScores.findIndex(qs => qs.quarter === l.quarter);
             if (qsIndex > -1) {
                 const qs = updatedQuarterScores[qsIndex];
@@ -760,7 +787,7 @@ export default function App() {
                 };
             }
 
-            const updatedScores = { ...m.scores };
+            const updatedScores = { ...(m.scores || {}) };
             if (updatedScores[l.teamLetter] !== undefined) {
                 updatedScores[l.teamLetter] = Math.max(0, updatedScores[l.teamLetter] - 1);
             }
@@ -789,11 +816,12 @@ export default function App() {
 
   const endQuarter = async () => {
     const [t1, t2] = liveState.playingTeams;
-    const qScore1 = liveMatch.logs.filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === t1).length;
-    const qScore2 = liveMatch.logs.filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === t2).length;
+    const mLogs = liveMatch.logs || [];
+    const qScore1 = mLogs.filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === t1).length;
+    const qScore2 = mLogs.filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === t2).length;
 
     const newQuarterScore = { quarter: liveState.currentQuarter, team1: t1, team2: t2, score1: qScore1, score2: qScore2 };
-    const updatedMatch = { ...liveMatch, quarterScores: [...liveMatch.quarterScores, newQuarterScore] };
+    const updatedMatch = { ...liveMatch, quarterScores: [...(liveMatch.quarterScores || []), newQuarterScore] };
         
     if (liveState.currentQuarter >= liveMatch.totalQuarters) {
        for (const p of players) {
@@ -861,7 +889,6 @@ export default function App() {
       try {
         await navigator.share({ title: 'MATCHBOARD 경기 결과', files: [file] });
       } catch (error) {
-        console.log('공유 취소 또는 에러', error);
         if (error.name !== 'AbortError') fallbackAlert();
       }
     } else {
@@ -986,8 +1013,8 @@ export default function App() {
           </div>
 
           <div className="w-full space-y-5 mb-6">
-               {shareModal.data.quarterScores?.length > 0 ? shareModal.data.quarterScores.map(qs => {
-                 const qLogs = shareModal.data.logs.filter(l => l.quarter === qs.quarter);
+               {(shareModal.data.quarterScores || []).length > 0 ? (shareModal.data.quarterScores || []).map(qs => {
+                 const qLogs = (shareModal.data.logs || []).filter(l => l.quarter === qs.quarter);
                  return (
                    <div key={qs.quarter} className="w-full bg-slate-800 rounded-2xl p-6 border border-slate-700/50 shadow-md">
                       <div className="relative flex justify-center items-center border-b border-slate-700/50 pb-4 mb-4">
@@ -1449,6 +1476,301 @@ export default function App() {
     );
   }
 
+  if (appState === 'liveMatch' && liveMatch) {
+    const activeTeams = liveState.playingTeams;
+    const isExternal = liveMatch.matchType === 'external';
+    
+    const renderLiveHeader = (title) => (
+      <header className="flex justify-between items-center mb-6 pt-2 shrink-0">
+        <button onClick={() => setAppState('main')} className="flex items-center gap-1 text-slate-400 hover:text-white font-bold text-sm">
+          <ChevronLeft size={20}/> 메인
+        </button>
+        <h2 className="text-lg font-black text-white">{title}</h2>
+        <div className="flex items-center gap-2">
+          {!isExternal && (
+            <button onClick={() => {
+              if(!isAdmin) return setSystemAlert({isOpen: true, message: '팀 편성은 관리자만 수정할 수 있습니다.'});
+              setAssignmentModal({isOpen: true, match: liveMatch});
+            }} className="text-xs bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg font-bold border border-slate-600 flex items-center gap-1 hover:bg-slate-700 transition">
+              <Users size={14}/> 편성
+            </button>
+          )}
+          <button onClick={() => triggerShare(liveMatch)} className="text-xs bg-yellow-500/20 text-yellow-500 px-3 py-1.5 rounded-lg font-bold border border-yellow-500/30 flex items-center gap-1 hover:bg-yellow-500/30 transition">
+            <Share2 size={14}/> 공유
+          </button>
+        </div>
+      </header>
+    );
+
+    if (!liveState.isQuarterActive) {
+      return (
+        <div className="bg-slate-900 text-slate-200 font-sans p-5 sm:p-6 max-w-md mx-auto flex flex-col relative h-[100dvh] overflow-hidden">
+          {globalStyles}
+          {renderLiveHeader("새 쿼터 준비")}
+          <div className="flex-1 flex flex-col justify-center pb-20 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <h2 className="text-3xl font-black text-center text-white mb-2">{liveState.currentQuarter}Q 매치업</h2>
+            <p className="text-center text-slate-400 mb-10">이번 쿼터에 맞붙을 팀을 확인하세요.</p>
+            
+            {isExternal ? (
+              <div className="flex items-center justify-center gap-4 mb-12">
+                <div className={`w-32 border-2 text-white font-black text-xl text-center py-8 rounded-2xl shadow-xl bg-slate-800 border-slate-400`}>
+                   {activeTeam?.name || '우리 팀'}
+                </div>
+                <span className="text-slate-600 font-black italic text-2xl">VS</span>
+                <div className={`w-32 border-2 text-white font-black text-xl text-center py-8 rounded-2xl shadow-xl ${TEAM_COLORS['B']}`}>
+                   {liveMatch.opponentName}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center gap-4 mb-12">
+                <select value={liveState.playingTeams[0]} onChange={(e) => setLiveState({...liveState, playingTeams: [e.target.value, liveState.playingTeams[1]]})} className={`w-28 border-2 text-white font-black text-3xl text-center py-6 rounded-2xl appearance-none shadow-xl outline-none ${liveState.playingTeams[0] === 'A' ? 'bg-slate-800 border-slate-400' : TEAM_COLORS[liveState.playingTeams[0]]}`}>
+                  {TEAM_LETTERS.slice(0, liveMatch.teamCount).map(t => <option key={t} value={t} className="bg-slate-900">{t}팀</option>)}
+                </select>
+                <span className="text-slate-600 font-black italic text-2xl">VS</span>
+                <select value={liveState.playingTeams[1]} onChange={(e) => setLiveState({...liveState, playingTeams: [liveState.playingTeams[0], e.target.value]})} className={`w-28 border-2 text-white font-black text-3xl text-center py-6 rounded-2xl appearance-none shadow-xl outline-none ${liveState.playingTeams[1] === 'A' ? 'bg-slate-800 border-slate-400' : TEAM_COLORS[liveState.playingTeams[1]]}`}>
+                  {TEAM_LETTERS.slice(0, liveMatch.teamCount).map(t => <option key={t} value={t} className="bg-slate-900">{t}팀</option>)}
+                </select>
+              </div>
+            )}
+            
+            <button onClick={() => {
+              if(!isAdmin) return setSystemAlert({isOpen: true, message: '쿼터 시작은 관리자만 할 수 있습니다.'});
+              setLiveState({...liveState, isQuarterActive: true});
+            }} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 rounded-xl text-xl shadow-lg transition">쿼터 시작하기</button>
+          </div>
+
+          {renderShareModal()}
+          {renderHiddenCaptureArea()}
+          
+          {assignmentModal.isOpen && assignmentModal.match && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-md border border-slate-700 max-h-[80vh] flex flex-col shadow-xl">
+                <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-700">
+                  <div><h2 className="text-lg font-bold text-white">참석자 팀 편성</h2></div>
+                  <button onClick={() => setAssignmentModal({isOpen: false, match: null})} className="text-white bg-blue-500 px-4 py-2 rounded-xl font-bold">완료</button>
+                </div>
+                <div className="flex-1 overflow-y-auto pr-2 space-y-2 hide-scrollbar">
+                  {currentTeamPlayers.filter(p => assignmentModal.match.attendees.includes(p.id)).map(p => {
+                    const currentTeam = assignmentModal.match.teamAssignments[p.id] || 'A';
+                    return (
+                      <div key={p.id} className="bg-slate-900 p-3 rounded-xl flex justify-between items-center border border-slate-700">
+                        <div className="font-bold text-white">{p.name} <span className="text-xs text-slate-500 ml-1">{p.birthYear}</span></div>
+                        <div className="flex bg-slate-800 rounded-lg p-1">
+                          {TEAM_LETTERS.slice(0, assignmentModal.match.teamCount).map(t => (
+                            <button 
+                              key={t} onClick={() => assignTeam(p.id, t)}
+                              className={`w-8 h-8 flex items-center justify-center text-xs font-black rounded-md transition ${currentTeam === t ? TEAM_COLORS[t] + ' shadow' : 'text-slate-500 hover:text-white'}`}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+          {renderGoalFlowModal()}
+          {renderLogEditModal()}
+          {renderSystemModals()}
+        </div>
+      );
+    }
+
+    const t1Letter = activeTeams[0];
+    const t2Letter = activeTeams[1];
+    
+    const currentQLogs = (liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter);
+    const t1QScore = currentQLogs.filter(l => l.teamLetter === t1Letter).length;
+    const t2QScore = currentQLogs.filter(l => l.teamLetter === t2Letter).length;
+    
+    return (
+      <div className="bg-slate-900 text-slate-200 font-sans p-5 sm:p-6 max-w-md mx-auto relative flex flex-col h-[100dvh] overflow-hidden animate-in fade-in">
+        {globalStyles}
+        {renderLiveHeader(`${liveState.currentQuarter}Q 라이브`)}
+
+        <div className="bg-slate-800 rounded-3xl p-6 flex justify-between items-center mb-6 border border-slate-700 shadow-xl relative overflow-hidden shrink-0">
+          <div className={`absolute top-0 left-0 w-1/2 h-1.5 bg-current ${TEAM_TEXT_COLORS[t1Letter]}`}></div>
+          <div className={`absolute top-0 right-0 w-1/2 h-1.5 bg-current ${TEAM_TEXT_COLORS[t2Letter]}`}></div>
+          
+          <div className="text-center w-[40%]">
+            <div className={`font-black text-[13px] mb-1 truncate ${TEAM_TEXT_COLORS[t1Letter]}`}>{getTeamDisplayName(liveMatch, t1Letter)}</div>
+            <div className="text-5xl font-black text-white">{t1QScore}</div>
+          </div>
+          <div className="text-xl font-black text-slate-600 italic">VS</div>
+          <div className="text-center w-[40%]">
+            <div className={`font-black text-[13px] mb-1 truncate ${TEAM_TEXT_COLORS[t2Letter]}`}>{getTeamDisplayName(liveMatch, t2Letter)}</div>
+            <div className="text-5xl font-black text-white">{t2QScore}</div>
+          </div>
+        </div>
+
+        <div className="flex gap-4 mb-6 shrink-0">
+          <button 
+            onClick={() => {
+              if(!isAdmin) return setSystemAlert({isOpen: true, message: '득점 기록은 관리자만 할 수 있습니다.'});
+              setGoalFlow({ isOpen: true, step: 1, matchId: null, quarter: null, teamLetter: t1Letter, scorer: null, isPK: false, remark: '', isMissingAdd: false });
+            }} 
+            className={`flex-1 border-2 py-6 rounded-3xl flex flex-col items-center justify-center gap-2 transition shadow-lg ${t1Letter === 'A' ? 'bg-slate-800 border-slate-400 text-white' : TEAM_COLORS[t1Letter]}`}
+          >
+            <Trophy size={28} className="fill-current"/>
+            <span className="font-black text-sm">{getTeamDisplayName(liveMatch, t1Letter)} 득점</span>
+          </button>
+          <button 
+            onClick={() => {
+              if(!isAdmin) return setSystemAlert({isOpen: true, message: '득점 기록은 관리자만 할 수 있습니다.'});
+              setGoalFlow({ isOpen: true, step: 1, matchId: null, quarter: null, teamLetter: t2Letter, scorer: null, isPK: false, remark: '', isMissingAdd: false });
+            }} 
+            className={`flex-1 border-2 py-6 rounded-3xl flex flex-col items-center justify-center gap-2 transition shadow-lg ${t2Letter === 'A' ? 'bg-slate-800 border-slate-400 text-white' : TEAM_COLORS[t2Letter]}`}
+          >
+            <Trophy size={28} className="fill-current"/>
+            <span className="font-black text-sm">{getTeamDisplayName(liveMatch, t2Letter)} 득점</span>
+          </button>
+        </div>
+
+        <div className="flex-1 bg-slate-800/40 border border-slate-700/50 rounded-3xl p-4 sm:p-5 pb-8 overflow-y-auto hide-scrollbar flex flex-col gap-4">
+          <div className="flex justify-between items-center mb-2 shrink-0">
+             <h3 className="text-sm font-bold text-slate-400 flex items-center gap-2"><List size={16}/> 쿼터별 기록 현황</h3>
+             <button onClick={() => {
+               if(!isAdmin) return setSystemAlert({isOpen: true, message: '쿼터 종료는 관리자만 할 수 있습니다.'});
+               requestEndQuarter();
+             }} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs transition border border-slate-600 shadow-sm">현재 쿼터 종료</button>
+          </div>
+          
+          {(liveMatch.quarterScores || []).map(qs => (
+            <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-800 mb-2 shrink-0">
+               <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
+                 <span className="absolute left-0 font-bold text-slate-500 text-sm">{qs.quarter}Q</span>
+                 <span className="font-bold text-white text-[15px]">
+                   <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(liveMatch, qs.team1)}</span>
+                   <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span> 
+                   <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(liveMatch, qs.team2)}</span>
+                 </span>
+               </div>
+               <div className="space-y-3">
+                 {(liveMatch.logs || []).filter(l => l.quarter === qs.quarter).map(l => {
+                    const isLeft = l.teamLetter === qs.team1;
+                    return (
+                      <div 
+                        key={l.id} 
+                        onClick={() => isAdmin && openLogEditModal(l, liveMatch)}
+                        className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5' : ''}`}
+                      >
+                        <span className="text-slate-600 text-[11px] w-8 shrink-0 text-center mt-1">{l.time}</span>
+                        <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
+                         <div className="text-white font-bold text-sm flex items-center gap-1.5">
+                           <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
+                           {l.isPK && <span className="text-[9px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
+                         </div>
+                         {l.remark && <div className="text-[12px] bg-slate-800/80 px-2 py-1 rounded text-slate-300 mt-1 inline-block border border-slate-700">{l.remark}</div>}
+                         {l.assistName && (
+                           <div className="text-slate-400 mt-1 flex items-center gap-1">
+                             <Footprints size={12} className="text-slate-500"/> <span className="text-[13px]">{l.assistName}</span>
+                           </div>
+                         )}
+                        </div>
+                      </div>
+                    )
+                 })}
+                 {(liveMatch.logs || []).filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 없음</div>}
+               </div>
+               {isAdmin && (
+                  <div className="flex justify-center mt-4 pt-3 border-t border-slate-800/50">
+                    <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: liveMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
+                      <Plus size={14}/> 누락된 득점 추가
+                    </button>
+                  </div>
+               )}
+            </div>
+          ))}
+
+          <div className="bg-slate-900 rounded-2xl p-4 border border-blue-500/30 shadow-lg relative overflow-hidden shrink-0">
+             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-transparent"></div>
+             <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-4">
+               <span className="absolute left-0 font-black text-blue-400 flex items-center gap-1">
+                 <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                 {liveState.currentQuarter}Q <span className="text-[10px] text-slate-400 font-normal ml-0.5">진행중</span>
+               </span>
+               <span className="font-bold text-white text-[15px]">
+                   <span className={TEAM_TEXT_COLORS[t1Letter]}>{getTeamDisplayName(liveMatch, t1Letter)}</span>
+                   <span className="text-slate-500 mx-3">{t1QScore} : {t2QScore}</span> 
+                   <span className={TEAM_TEXT_COLORS[t2Letter]}>{getTeamDisplayName(liveMatch, t2Letter)}</span>
+               </span>
+             </div>
+             <div className="space-y-4">
+               {currentQLogs.map(l => {
+                 const isLeft = l.teamLetter === t1Letter;
+                 return (
+                   <div 
+                     key={l.id} 
+                     onClick={() => isAdmin && openLogEditModal(l, liveMatch)}
+                     className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5' : ''}`}
+                   >
+                     <span className="text-slate-500 text-[11px] w-8 shrink-0 text-center mt-1">{l.time}</span>
+                     <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
+                       <div className="text-white font-bold text-sm flex items-center gap-1.5">
+                         <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
+                         {l.isPK && <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
+                       </div>
+                       {l.remark && <div className="text-[12px] bg-slate-800/80 px-2 py-1 rounded text-slate-300 mt-1 inline-block border border-slate-700">{l.remark}</div>}
+                       {l.assistName && (
+                         <div className="text-slate-400 mt-1 flex items-center gap-1">
+                           <Footprints size={12} className="text-slate-500"/> <span className="text-[13px]">{l.assistName}</span>
+                         </div>
+                       )}
+                     </div>
+                   </div>
+                 )
+               })}
+               {currentQLogs.length === 0 && <div className="text-sm text-slate-500 italic text-center py-4">아직 득점이 없습니다.</div>}
+             </div>
+          </div>
+          <div className="h-6 shrink-0 w-full"></div>
+        </div>
+        
+        {assignmentModal.isOpen && assignmentModal.match && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+            <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-md border border-slate-700 max-h-[80vh] flex flex-col shadow-xl">
+              <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-700">
+                <div><h2 className="text-lg font-bold text-white">참석자 팀 편성</h2></div>
+                <button onClick={() => setAssignmentModal({isOpen: false, match: null})} className="text-white bg-blue-500 px-4 py-2 rounded-xl font-bold">완료</button>
+              </div>
+              <div className="flex-1 overflow-y-auto pr-2 space-y-2 hide-scrollbar">
+                {currentTeamPlayers.filter(p => assignmentModal.match.attendees.includes(p.id)).map(p => {
+                  const currentTeam = assignmentModal.match.teamAssignments[p.id] || 'A';
+                  return (
+                    <div key={p.id} className="bg-slate-900 p-3 rounded-xl flex justify-between items-center border border-slate-700">
+                      <div className="font-bold text-white">{p.name} <span className="text-xs text-slate-500 ml-1">{p.birthYear}</span></div>
+                      <div className="flex bg-slate-800 rounded-lg p-1">
+                        {TEAM_LETTERS.slice(0, assignmentModal.match.teamCount).map(t => (
+                          <button 
+                            key={t} onClick={() => assignTeam(p.id, t)}
+                            className={`w-8 h-8 flex items-center justify-center text-xs font-black rounded-md transition ${currentTeam === t ? TEAM_COLORS[t] + ' shadow' : 'text-slate-500 hover:text-white'}`}
+                          >
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {renderGoalFlowModal()}
+        {renderLogEditModal()}
+        {renderSystemModals()}
+        {renderShareModal()}
+      </div>
+    );
+  }
+
+  // ==========================================
+  // 메인 (목록 및 탭) 화면
+  // ==========================================
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl">
       {globalStyles}
@@ -1518,16 +1840,18 @@ export default function App() {
                       <div className="text-lg font-bold text-white">{m.location}</div>
                     </div>
                     <div className="text-xs text-slate-400 mb-4 mt-1">
-                      {m.matchType === 'external' ? `우리 팀 VS ${m.opponentName}` : `총 ${m.teamCount}팀 파전`} • 총 {m.totalQuarters}쿼터 • 참석 {m.attendees.length}명
+                      {m.matchType === 'external' ? `우리 팀 VS ${m.opponentName}` : `총 ${m.teamCount}팀 파전`} • 총 {m.totalQuarters}쿼터 • 참석 {m.attendees?.length || 0}명
                     </div>
                     
                     <div className="flex gap-2">
-                      <button onClick={() => handleActionClick('assign', m)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl text-sm flex justify-center items-center gap-2 transition">
-                        <Users size={16}/> 편성
-                      </button>
+                      {m.matchType !== 'external' && (
+                        <button onClick={() => handleActionClick('assign', m)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl text-sm flex justify-center items-center gap-2 transition">
+                          <Users size={16}/> 편성
+                        </button>
+                      )}
                       <button onClick={() => handleActionClick('start', m)} className={`bg-blue-500 text-white font-bold py-3 rounded-xl text-sm flex justify-center items-center gap-2 shadow-lg hover:bg-blue-600 transition ${m.matchType === 'external' ? 'w-full' : 'flex-1'}`}>
-                        {m.logs.length > 0 ? <Activity size={16}/> : <Play size={16} className="fill-current"/>} 
-                        {m.logs.length > 0 ? '이어하기' : '기록 시작'}
+                        {m.logs?.length > 0 ? <Activity size={16}/> : <Play size={16} className="fill-current"/>} 
+                        {m.logs?.length > 0 ? '이어하기' : '기록 시작'}
                       </button>
                     </div>
                   </div>
@@ -1587,7 +1911,7 @@ export default function App() {
                           className="flex gap-3 overflow-x-auto hide-scrollbar pb-2 cursor-grab active:cursor-grabbing"
                           onWheel={(e) => { e.currentTarget.scrollLeft += e.deltaY; }}
                         >
-                          {m.quarterScores.map(qs => (
+                          {(m.quarterScores || []).map(qs => (
                             <div key={qs.quarter} className="flex-shrink-0 bg-slate-900 border border-slate-700/50 rounded-xl p-3 flex flex-col items-center justify-center shadow-inner min-w-[150px]">
                               <div className="text-[10px] font-black text-slate-500 mb-3 bg-slate-800 px-3 py-1 rounded-full">{qs.quarter}Q</div>
                               <div className="flex items-center justify-between w-full px-2 gap-3">
@@ -1603,7 +1927,7 @@ export default function App() {
                               </div>
                             </div>
                           ))}
-                          {m.quarterScores.length === 0 && <div className="text-xs text-slate-600 px-1">기록 없음</div>}
+                          {(m.quarterScores || []).length === 0 && <div className="text-xs text-slate-600 px-1">기록 없음</div>}
                         </div>
                       </div>
                     </div>
@@ -1773,7 +2097,7 @@ export default function App() {
                 </table>
               </div>
 
-              {detailMatch.quarterScores.map(qs => (
+              {(detailMatch.quarterScores || []).map(qs => (
                 <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700 pb-4">
                    <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
                      <span className="absolute left-0 font-black text-blue-400">{qs.quarter}Q</span>
@@ -1784,7 +2108,7 @@ export default function App() {
                      </span>
                    </div>
                    <div className="space-y-3">
-                     {detailMatch.logs.filter(l => l.quarter === qs.quarter).map(l => {
+                     {(detailMatch.logs || []).filter(l => l.quarter === qs.quarter).map(l => {
                        const isLeft = l.teamLetter === qs.team1;
                        return (
                          <div 
@@ -1808,7 +2132,7 @@ export default function App() {
                          </div>
                        )
                      })}
-                     {detailMatch.logs.filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>}
+                     {(detailMatch.logs || []).filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>}
                    </div>
                    {isAdmin && (
                       <div className="flex justify-center mt-4 pt-4 border-t border-slate-800/50">
@@ -2077,10 +2401,7 @@ export default function App() {
         </div>
       )}
 
-      {renderGoalFlowModal()}
-      {renderLogEditModal()}
-      {renderSystemModals()}
-      {renderShareModal()}
+      {/* 숨겨진 화면 캡처 전용 컴포넌트 */}
       {renderHiddenCaptureArea()}
     </div>
   );
