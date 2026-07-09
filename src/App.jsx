@@ -271,12 +271,13 @@ export default function App() {
     setMatchModal({ isOpen: true, match });
   };
 
-  // ✅ [수정됨] 크로스 브라우저 호환성 강화 및 조회모드 차단 로직
   const handleActionClick = (action, match) => {
+    // 모든 브라우저(Safari 포함)에서 안전하게 Date 객체를 생성하기 위한 방어 코드
     const safeDate = match.date.replace(/-/g, '/');
-    const matchDateTime = new Date(`${safeDate} ${match.time}`);
+    const matchDateTime = new Date(`${safeDate} ${match.time}:00`);
     const now = new Date();
 
+    // 관리자가 아니고, 아직 경기 시간이 되지 않았을 때만 차단
     if (!isAdmin && matchDateTime > now) {
       setSystemAlert({
         isOpen: true, 
@@ -285,14 +286,8 @@ export default function App() {
       return;
     }
 
-    if (action === 'assign') {
-      if (!isAdmin) {
-        setSystemAlert({isOpen: true, message: '참석자 팀 편성은 관리자만 수정할 수 있습니다.'});
-        return;
-      }
-      setAssignmentModal({ isOpen: true, match });
-    }
-    
+    // 경기 시간이 지났다면 조회모드에서도 자유롭게 편성 및 기록 시작 가능
+    if (action === 'assign') setAssignmentModal({ isOpen: true, match });
     if (action === 'start') startLiveMatch(match);
   };
 
@@ -498,7 +493,6 @@ export default function App() {
     }
   };
 
-  // ✅ [수정됨] Undefined 배열 접근 에러 방지 (과거 데이터 호환)
   const startLiveMatch = (match) => {
     const qScores = match.quarterScores || [];
     const mLogs = match.logs || [];
@@ -511,7 +505,8 @@ export default function App() {
 
     if (match.matchType === 'external') {
        playingTeams = ['A', 'B']; 
-       isQuarterActive = true; // 교류전은 항상 A vs B 이므로 매치업 화면 패스
+       // 외부 경기(교류전)는 항상 A vs B 이므로 매치업 화면 생략 가능
+       if (currentLogs.length > 0) isQuarterActive = true; 
     } else {
        if (currentLogs.length > 0) {
           const teamsInLogs = [...new Set(currentLogs.map(l => l.teamLetter))];
@@ -533,7 +528,6 @@ export default function App() {
     const gfRemark = goalFlow.remark;
     const gfIsMissingAdd = goalFlow.isMissingAdd;
 
-    // 팝업 즉시 닫기
     setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false });
 
     const targetMatchId = gfMatchId || liveMatchId;
@@ -575,7 +569,6 @@ export default function App() {
     const gfRemark = goalFlow.remark;
     const gfIsMissingAdd = goalFlow.isMissingAdd;
 
-    // 팝업 즉시 닫기
     setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false });
 
     const targetMatchId = gfMatchId || liveMatchId;
@@ -630,7 +623,6 @@ export default function App() {
       const gfRemark = goalFlow.remark;
       const gfIsMissingAdd = goalFlow.isMissingAdd;
 
-      // 팝업 즉시 닫기
       setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false });
 
       const targetMatchId = gfMatchId || liveMatchId;
@@ -686,7 +678,7 @@ export default function App() {
   };
 
   const openLogEditModal = (log, match) => {
-    if (!isAdmin) return;
+    // 이제 누구나 수정 창을 열 수 있음 (단, 본인이 저장 시 권한 검증 등은 서버단에서 처리 권장)
     const enrichedLog = { ...log };
     if (!enrichedLog.scorerId && enrichedLog.scorerName) {
          enrichedLog.scorerId = players.find(p => p.name === enrichedLog.scorerName)?.id;
@@ -938,7 +930,7 @@ export default function App() {
     if (!shareModal.isOpen) return null;
 
     return (
-      <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-50">
+      <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-[90]">
         <div className="w-full max-w-sm flex flex-col items-center max-h-[90vh]">
           {shareModal.step === 1 ? (
             <div className="bg-slate-800 border border-slate-700 p-6 rounded-3xl w-full shadow-xl flex flex-col items-center text-center animate-in zoom-in-95">
@@ -951,7 +943,7 @@ export default function App() {
               <h2 className="text-lg font-black text-white flex items-center gap-1 mb-4 shrink-0">
                 <MessageCircle size={18} className="text-blue-500"/> 이미지 리포트 생성 완료
               </h2>
-              <div className="w-full flex-1 overflow-y-auto rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50">
+              <div className="w-full flex-1 overflow-y-auto rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50 hide-scrollbar">
                 {shareModal.imgUrl && (
                    <img src={shareModal.imgUrl} alt="Preview" className="w-full h-auto rounded-lg shadow-sm" />
                 )}
@@ -1488,10 +1480,7 @@ export default function App() {
         <h2 className="text-lg font-black text-white">{title}</h2>
         <div className="flex items-center gap-2">
           {!isExternal && (
-            <button onClick={() => {
-              if(!isAdmin) return setSystemAlert({isOpen: true, message: '팀 편성은 관리자만 수정할 수 있습니다.'});
-              setAssignmentModal({isOpen: true, match: liveMatch});
-            }} className="text-xs bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg font-bold border border-slate-600 flex items-center gap-1 hover:bg-slate-700 transition">
+            <button onClick={() => setAssignmentModal({isOpen: true, match: liveMatch})} className="text-xs bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg font-bold border border-slate-600 flex items-center gap-1 hover:bg-slate-700 transition">
               <Users size={14}/> 편성
             </button>
           )}
@@ -1533,10 +1522,7 @@ export default function App() {
               </div>
             )}
             
-            <button onClick={() => {
-              if(!isAdmin) return setSystemAlert({isOpen: true, message: '쿼터 시작은 관리자만 할 수 있습니다.'});
-              setLiveState({...liveState, isQuarterActive: true});
-            }} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 rounded-xl text-xl shadow-lg transition">쿼터 시작하기</button>
+            <button onClick={() => setLiveState({...liveState, isQuarterActive: true})} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 rounded-xl text-xl shadow-lg transition">쿼터 시작하기</button>
           </div>
 
           {renderShareModal()}
@@ -1582,7 +1568,7 @@ export default function App() {
     const t1Letter = activeTeams[0];
     const t2Letter = activeTeams[1];
     
-    const currentQLogs = (liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter);
+    const currentQLogs = liveMatch.logs.filter(l => l.quarter === liveState.currentQuarter);
     const t1QScore = currentQLogs.filter(l => l.teamLetter === t1Letter).length;
     const t2QScore = currentQLogs.filter(l => l.teamLetter === t2Letter).length;
     
@@ -1608,20 +1594,14 @@ export default function App() {
 
         <div className="flex gap-4 mb-6 shrink-0">
           <button 
-            onClick={() => {
-              if(!isAdmin) return setSystemAlert({isOpen: true, message: '득점 기록은 관리자만 할 수 있습니다.'});
-              setGoalFlow({ isOpen: true, step: 1, matchId: null, quarter: null, teamLetter: t1Letter, scorer: null, isPK: false, remark: '', isMissingAdd: false });
-            }} 
+            onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: null, quarter: null, teamLetter: t1Letter, scorer: null, isPK: false, remark: '', isMissingAdd: false })} 
             className={`flex-1 border-2 py-6 rounded-3xl flex flex-col items-center justify-center gap-2 transition shadow-lg ${t1Letter === 'A' ? 'bg-slate-800 border-slate-400 text-white' : TEAM_COLORS[t1Letter]}`}
           >
             <Trophy size={28} className="fill-current"/>
             <span className="font-black text-sm">{getTeamDisplayName(liveMatch, t1Letter)} 득점</span>
           </button>
           <button 
-            onClick={() => {
-              if(!isAdmin) return setSystemAlert({isOpen: true, message: '득점 기록은 관리자만 할 수 있습니다.'});
-              setGoalFlow({ isOpen: true, step: 1, matchId: null, quarter: null, teamLetter: t2Letter, scorer: null, isPK: false, remark: '', isMissingAdd: false });
-            }} 
+            onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: null, quarter: null, teamLetter: t2Letter, scorer: null, isPK: false, remark: '', isMissingAdd: false })} 
             className={`flex-1 border-2 py-6 rounded-3xl flex flex-col items-center justify-center gap-2 transition shadow-lg ${t2Letter === 'A' ? 'bg-slate-800 border-slate-400 text-white' : TEAM_COLORS[t2Letter]}`}
           >
             <Trophy size={28} className="fill-current"/>
@@ -1632,13 +1612,10 @@ export default function App() {
         <div className="flex-1 bg-slate-800/40 border border-slate-700/50 rounded-3xl p-4 sm:p-5 pb-8 overflow-y-auto hide-scrollbar flex flex-col gap-4">
           <div className="flex justify-between items-center mb-2 shrink-0">
              <h3 className="text-sm font-bold text-slate-400 flex items-center gap-2"><List size={16}/> 쿼터별 기록 현황</h3>
-             <button onClick={() => {
-               if(!isAdmin) return setSystemAlert({isOpen: true, message: '쿼터 종료는 관리자만 할 수 있습니다.'});
-               requestEndQuarter();
-             }} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs transition border border-slate-600 shadow-sm">현재 쿼터 종료</button>
+             <button onClick={requestEndQuarter} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs transition border border-slate-600 shadow-sm">현재 쿼터 종료</button>
           </div>
           
-          {(liveMatch.quarterScores || []).map(qs => (
+          {liveMatch.quarterScores.map(qs => (
             <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-800 mb-2 shrink-0">
                <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
                  <span className="absolute left-0 font-bold text-slate-500 text-sm">{qs.quarter}Q</span>
@@ -1649,13 +1626,13 @@ export default function App() {
                  </span>
                </div>
                <div className="space-y-3">
-                 {(liveMatch.logs || []).filter(l => l.quarter === qs.quarter).map(l => {
+                 {liveMatch.logs.filter(l => l.quarter === qs.quarter).map(l => {
                     const isLeft = l.teamLetter === qs.team1;
                     return (
                       <div 
                         key={l.id} 
-                        onClick={() => isAdmin && openLogEditModal(l, liveMatch)}
-                        className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5' : ''}`}
+                        onClick={() => openLogEditModal(l, liveMatch)}
+                        className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5`}
                       >
                         <span className="text-slate-600 text-[11px] w-8 shrink-0 text-center mt-1">{l.time}</span>
                         <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
@@ -1673,15 +1650,13 @@ export default function App() {
                       </div>
                     )
                  })}
-                 {(liveMatch.logs || []).filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 없음</div>}
+                 {liveMatch.logs.filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 없음</div>}
                </div>
-               {isAdmin && (
-                  <div className="flex justify-center mt-4 pt-3 border-t border-slate-800/50">
-                    <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: liveMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
-                      <Plus size={14}/> 누락된 득점 추가
-                    </button>
-                  </div>
-               )}
+               <div className="flex justify-center mt-4 pt-3 border-t border-slate-800/50">
+                 <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: liveMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
+                   <Plus size={14}/> 누락된 득점 추가
+                 </button>
+               </div>
             </div>
           ))}
 
@@ -1704,8 +1679,8 @@ export default function App() {
                  return (
                    <div 
                      key={l.id} 
-                     onClick={() => isAdmin && openLogEditModal(l, liveMatch)}
-                     className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5' : ''}`}
+                     onClick={() => openLogEditModal(l, liveMatch)}
+                     className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5`}
                    >
                      <span className="text-slate-500 text-[11px] w-8 shrink-0 text-center mt-1">{l.time}</span>
                      <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
@@ -1768,9 +1743,6 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // 메인 (목록 및 탭) 화면
-  // ==========================================
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl">
       {globalStyles}
@@ -1844,11 +1816,9 @@ export default function App() {
                     </div>
                     
                     <div className="flex gap-2">
-                      {m.matchType !== 'external' && (
-                        <button onClick={() => handleActionClick('assign', m)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl text-sm flex justify-center items-center gap-2 transition">
-                          <Users size={16}/> 편성
-                        </button>
-                      )}
+                      <button onClick={() => handleActionClick('assign', m)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl text-sm flex justify-center items-center gap-2 transition">
+                        <Users size={16}/> 편성
+                      </button>
                       <button onClick={() => handleActionClick('start', m)} className={`bg-blue-500 text-white font-bold py-3 rounded-xl text-sm flex justify-center items-center gap-2 shadow-lg hover:bg-blue-600 transition ${m.matchType === 'external' ? 'w-full' : 'flex-1'}`}>
                         {m.logs?.length > 0 ? <Activity size={16}/> : <Play size={16} className="fill-current"/>} 
                         {m.logs?.length > 0 ? '이어하기' : '기록 시작'}
@@ -2049,6 +2019,7 @@ export default function App() {
       {/* MODALS (메인 화면) */}
       {/* ============================================================================ */}
       
+      {}
       {detailModal.isOpen && detailMatch && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50 animate-in fade-in">
           <div className="bg-slate-800 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
@@ -2097,7 +2068,7 @@ export default function App() {
                 </table>
               </div>
 
-              {(detailMatch.quarterScores || []).map(qs => (
+              {detailMatch.quarterScores.map(qs => (
                 <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700 pb-4">
                    <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
                      <span className="absolute left-0 font-black text-blue-400">{qs.quarter}Q</span>
@@ -2108,13 +2079,13 @@ export default function App() {
                      </span>
                    </div>
                    <div className="space-y-3">
-                     {(detailMatch.logs || []).filter(l => l.quarter === qs.quarter).map(l => {
+                     {detailMatch.logs.filter(l => l.quarter === qs.quarter).map(l => {
                        const isLeft = l.teamLetter === qs.team1;
                        return (
                          <div 
                            key={l.id} 
-                           onClick={() => isAdmin && openLogEditModal(l, detailMatch)}
-                           className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1 rounded-lg transition -mx-1 px-1' : ''}`}
+                           onClick={() => openLogEditModal(l, detailMatch)}
+                           className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5`}
                          >
                            <span className="text-slate-600 text-[10px] w-8 shrink-0 text-center mt-1">{l.time}</span>
                            <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
@@ -2132,15 +2103,13 @@ export default function App() {
                          </div>
                        )
                      })}
-                     {(detailMatch.logs || []).filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>}
+                     {detailMatch.logs.filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>}
                    </div>
-                   {isAdmin && (
-                      <div className="flex justify-center mt-4 pt-4 border-t border-slate-800/50">
-                        <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: detailMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
-                          <Plus size={12}/> 누락된 득점 추가
-                        </button>
-                      </div>
-                   )}
+                   <div className="flex justify-center mt-4 pt-4 border-t border-slate-800/50">
+                     <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: detailMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
+                       <Plus size={12}/> 누락된 득점 추가
+                     </button>
+                   </div>
                 </div>
               ))}
 
@@ -2401,7 +2370,10 @@ export default function App() {
         </div>
       )}
 
-      {/* 숨겨진 화면 캡처 전용 컴포넌트 */}
+      {renderGoalFlowModal()}
+      {renderLogEditModal()}
+      {renderSystemModals()}
+      {renderShareModal()}
       {renderHiddenCaptureArea()}
     </div>
   );
