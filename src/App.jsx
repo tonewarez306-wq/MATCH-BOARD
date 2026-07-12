@@ -1330,11 +1330,8 @@ export default function App() {
                       </div>
                       <div className="flex flex-wrap gap-2.5">
                         {teamPlayers.map(p => (
-                          <div key={p.id} className="bg-slate-800/80 pl-2 pr-4 py-2 rounded-full border border-slate-600/50 flex items-center gap-2.5 shadow-sm">
-                            <div className="w-6 h-6 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center font-black text-[11px] text-slate-400 shrink-0 shadow-inner">
-                              {p.birthYear}
-                            </div>
-                            <span className="font-bold text-white text-[13px] tracking-wide">{p.name}</span>
+                          <div key={p.id} className="bg-slate-800 px-4 py-2.5 rounded-full border border-slate-600/50 shadow-sm flex items-center">
+                            <span className="font-bold text-white text-[15px] tracking-wide">{p.name}</span>
                           </div>
                         ))}
                       </div>
@@ -1466,11 +1463,8 @@ export default function App() {
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {teamPlayers.map(p => (
-                          <div key={p.id} className="bg-slate-800/80 pl-1.5 pr-3 py-1.5 rounded-full border border-slate-600/50 flex items-center gap-2 shadow-sm">
-                            <div className="w-5 h-5 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center font-black text-[9px] text-slate-400 shrink-0 shadow-inner">
-                              {p.birthYear}
-                            </div>
-                            <span className="font-bold text-white text-[11px] tracking-wide">{p.name}</span>
+                          <div key={p.id} className="bg-slate-800 px-3.5 py-2 rounded-full border border-slate-600/50 shadow-sm flex items-center">
+                            <span className="font-bold text-white text-[13px] tracking-wide">{p.name}</span>
                           </div>
                         ))}
                       </div>
@@ -2560,22 +2554,22 @@ export default function App() {
                 return (
                   <>
                     <div className="grid grid-cols-3 gap-3">
-                      <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 flex flex-col items-center text-center shadow-sm">
+                      <div className="bg-slate-800 rounded-2xl p-3 border border-slate-700 flex flex-col items-center text-center shadow-sm">
                         <span className="text-[10px] font-bold text-slate-400 mb-2">이달의 득점왕</span>
                         <span className="text-2xl mb-1">⚽</span>
-                        <span className="text-sm font-black text-white truncate w-full">{topScorerText}</span>
+                        <span className="text-[13px] font-black text-white leading-tight break-keep mb-1 w-full px-0.5">{topScorerText}</span>
                         <span className="text-xs font-bold text-blue-400">{maxGoals > 0 ? `${maxGoals}골` : ''}</span>
                       </div>
-                      <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 flex flex-col items-center text-center shadow-sm">
+                      <div className="bg-slate-800 rounded-2xl p-3 border border-slate-700 flex flex-col items-center text-center shadow-sm">
                         <span className="text-[10px] font-bold text-slate-400 mb-2">이달의 도움왕</span>
                         <span className="text-2xl mb-1">👟</span>
-                        <span className="text-sm font-black text-white truncate w-full">{topAssistText}</span>
+                        <span className="text-[13px] font-black text-white leading-tight break-keep mb-1 w-full px-0.5">{topAssistText}</span>
                         <span className="text-xs font-bold text-blue-400">{maxAssists > 0 ? `${maxAssists}도움` : ''}</span>
                       </div>
-                      <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 flex flex-col items-center text-center shadow-sm">
+                      <div className="bg-slate-800 rounded-2xl p-3 border border-slate-700 flex flex-col items-center text-center shadow-sm">
                         <span className="text-[10px] font-bold text-slate-400 mb-2">이달의 참석왕</span>
                         <span className="text-2xl mb-1">🔥</span>
-                        <span className="text-sm font-black text-white truncate w-full">{topCapText}</span>
+                        <span className="text-[13px] font-black text-white leading-tight break-keep mb-1 w-full px-0.5">{topCapText}</span>
                         <span className="text-xs font-bold text-blue-400">{maxCaps > 0 ? `${maxCaps}회` : ''}</span>
                       </div>
                     </div>
