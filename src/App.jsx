@@ -1,11 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { 
   Calendar, Users, BarChart2, Plus, 
   MapPin, Clock, Trophy, Shield, Lock, 
-  ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings
+  ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings, Target, Undo, Redo
 } from 'lucide-react';
 
 // ==========================================
@@ -125,6 +125,29 @@ const getTodayString = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+const getInitialTacticsTokens = (pitchType) => {
+  const tokens = [];
+  if (pitchType === 'full') {
+    tokens.push({ id: 'A_GK', position: 'GK', name: '', x: 50, y: 92, team: 'A' });
+    tokens.push({ id: 'A_LB', position: 'LB', name: '', x: 20, y: 75, team: 'A' }, { id: 'A_CB1', position: 'CB', name: '', x: 40, y: 75, team: 'A' }, { id: 'A_CB2', position: 'CB', name: '', x: 60, y: 75, team: 'A' }, { id: 'A_RB', position: 'RB', name: '', x: 80, y: 75, team: 'A' });
+    tokens.push({ id: 'A_LM', position: 'WF', name: '', x: 20, y: 60, team: 'A' }, { id: 'A_CM1', position: 'CM', name: '', x: 40, y: 60, team: 'A' }, { id: 'A_CM2', position: 'CM', name: '', x: 60, y: 60, team: 'A' }, { id: 'A_RM', position: 'WF', name: '', x: 80, y: 60, team: 'A' });
+    tokens.push({ id: 'A_FW1', position: 'FW', name: '', x: 35, y: 45, team: 'A' }, { id: 'A_FW2', position: 'FW', name: '', x: 65, y: 45, team: 'A' });
+
+    tokens.push({ id: 'B_GK', position: 'GK', name: '', x: 50, y: 8, team: 'B' });
+    tokens.push({ id: 'B_LB', position: 'LB', name: '', x: 20, y: 25, team: 'B' }, { id: 'B_CB1', position: 'CB', name: '', x: 40, y: 25, team: 'B' }, { id: 'B_CB2', position: 'CB', name: '', x: 60, y: 25, team: 'B' }, { id: 'B_RB', position: 'RB', name: '', x: 80, y: 25, team: 'B' });
+    tokens.push({ id: 'B_LM', position: 'WF', name: '', x: 20, y: 40, team: 'B' }, { id: 'B_CM1', position: 'CM', name: '', x: 40, y: 40, team: 'B' }, { id: 'B_CM2', position: 'CM', name: '', x: 60, y: 40, team: 'B' }, { id: 'B_RM', position: 'WF', name: '', x: 80, y: 40, team: 'B' });
+    tokens.push({ id: 'B_FW1', position: 'FW', name: '', x: 35, y: 55, team: 'B' }, { id: 'B_FW2', position: 'FW', name: '', x: 65, y: 55, team: 'B' });
+    
+    tokens.push({ id: 'ball', label: '⚽', x: 50, y: 50, team: 'ball' });
+  } else {
+    tokens.push({ id: 'A_GK', position: 'GK', name: '', x: 50, y: 80, team: 'A' });
+    for(let i=1; i<=5; i++) tokens.push({ id: `A_p${i}`, position: 'CM', name: '', x: 15 + i*12, y: 65, team: 'A' });
+    for(let i=1; i<=6; i++) tokens.push({ id: `B_p${i}`, position: 'CM', name: '', x: 15 + i*10, y: 35, team: 'B' });
+    tokens.push({ id: 'ball', label: '⚽', x: 50, y: 50, team: 'ball' });
+  }
+  return tokens;
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [appState, setAppState] = useState('login'); 
@@ -175,6 +198,17 @@ export default function App() {
   
   const [logEditModal, setLogEditModal] = useState({ isOpen: false, match: null, log: null });
 
+  const [pitchType, setPitchType] = useState('full'); 
+  const [tacticTokens, setTacticTokens] = useState(getInitialTacticsTokens('full'));
+  const [pastTokens, setPastTokens] = useState([]);
+  const [futureTokens, setFutureTokens] = useState([]);
+  const [draggingToken, setDraggingToken] = useState(null);
+  const [tokenEditModal, setTokenEditModal] = useState({ isOpen: false, token: null });
+  
+  const boardRef = useRef(null);
+  const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 });
+  const dragStartTokensRef = useRef(null);
+
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
@@ -191,6 +225,7 @@ export default function App() {
         -ms-overflow-style: none !important;
         scrollbar-width: none !important;
       }
+      .tactic-board { touch-action: none; }
     `}</style>
   );
 
@@ -240,11 +275,7 @@ export default function App() {
   };
 
   const viewYearMonth = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
-  
-  const monthlyMatches = useMemo(() => {
-    return currentTeamMatches.filter(m => m.date.startsWith(viewYearMonth));
-  }, [currentTeamMatches, viewYearMonth]);
-
+  const monthlyMatches = useMemo(() => currentTeamMatches.filter(m => m.date.startsWith(viewYearMonth)), [currentTeamMatches, viewYearMonth]);
   const scheduledThisMonth = useMemo(() => monthlyMatches.filter(m => m.status === 'scheduled').sort((a,b) => a.date.localeCompare(b.date)), [monthlyMatches]);
   
   const completedThisMonthWithStandings = useMemo(() => {
@@ -272,21 +303,25 @@ export default function App() {
   };
 
   const handleActionClick = (action, match) => {
-    // 모든 브라우저(Safari 포함)에서 안전하게 Date 객체를 생성하기 위한 방어 코드
     const safeDate = match.date.replace(/-/g, '/');
-    const matchDateTime = new Date(`${safeDate} ${match.time}:00`);
+    const matchDateTime = new Date(`${safeDate} ${match.time}`);
     const now = new Date();
 
-    // 관리자가 아니고, 아직 경기 시간이 되지 않았을 때만 차단
-    if (!isAdmin && matchDateTime > now) {
-      setSystemAlert({
-        isOpen: true, 
-        message: `해당 기능은 경기 시작 전에는 이용할 수 없습니다.\n(경기 시간: ${match.date} ${formatTimeAmPm(match.time)})\n\n미리 기록 및 편성을 원하시면 우측 상단의\n[관리자 전환]을 이용해 주세요.`
-      });
+    if (!isAdmin) {
+      if (matchDateTime > now) {
+        setSystemAlert({
+          isOpen: true, 
+          message: `해당 기능은 경기 시작 전에는 이용할 수 없습니다.\n(경기 시간: ${match.date} ${formatTimeAmPm(match.time)})\n\n미리 기록 및 편성을 원하시면 우측 상단의\n[관리자 전환]을 이용해 주세요.`
+        });
+      } else {
+        setSystemAlert({
+          isOpen: true, 
+          message: `해당 기능은 조회 모드에서는 이용할 수 없습니다.\n\n기록 및 편성을 원하시면 우측 상단의\n[관리자 전환]을 이용해 주세요.`
+        });
+      }
       return;
     }
 
-    // 경기 시간이 지났다면 조회모드에서도 자유롭게 편성 및 기록 시작 가능
     if (action === 'assign') setAssignmentModal({ isOpen: true, match });
     if (action === 'start') startLiveMatch(match);
   };
@@ -505,7 +540,6 @@ export default function App() {
 
     if (match.matchType === 'external') {
        playingTeams = ['A', 'B']; 
-       // 외부 경기(교류전)는 항상 A vs B 이므로 매치업 화면 생략 가능
        if (currentLogs.length > 0) isQuarterActive = true; 
     } else {
        if (currentLogs.length > 0) {
@@ -678,7 +712,10 @@ export default function App() {
   };
 
   const openLogEditModal = (log, match) => {
-    // 이제 누구나 수정 창을 열 수 있음 (단, 본인이 저장 시 권한 검증 등은 서버단에서 처리 권장)
+    if (!isAdmin) {
+      setSystemAlert({isOpen: true, message: '기록 수정은 팀 관리자만 가능합니다.'});
+      return;
+    }
     const enrichedLog = { ...log };
     if (!enrichedLog.scorerId && enrichedLog.scorerName) {
          enrichedLog.scorerId = players.find(p => p.name === enrichedLog.scorerName)?.id;
@@ -860,6 +897,33 @@ export default function App() {
     }, 500); 
   };
 
+  const triggerTacticShare = () => {
+    if (!boardRef.current) return;
+    setShareModal({ isOpen: true, step: 1, data: null, file: null, imgUrl: null });
+
+    setTimeout(async () => {
+      try {
+        const html2canvas = await loadHtml2Canvas();
+        const canvas = await html2canvas(boardRef.current, {
+          scale: 2, 
+          useCORS: true, 
+          backgroundColor: '#047857' 
+        });
+
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const file = new File([blob], 'matchboard_tactic.png', { type: 'image/png' });
+          const imgUrl = URL.createObjectURL(blob);
+          setShareModal(prev => ({ ...prev, step: 2, file, imgUrl }));
+        }, 'image/png');
+      } catch (err) {
+        console.error('전술판 캡처 에러:', err);
+        setSystemAlert({ isOpen: true, message: '이미지 생성 중 오류가 발생했습니다.' });
+        setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null });
+      }
+    }, 500); 
+  };
+
   const doActualShare = async () => {
     const file = shareModal.file;
     if (!file) return;
@@ -879,7 +943,7 @@ export default function App() {
 
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
-        await navigator.share({ title: 'MATCHBOARD 경기 결과', files: [file] });
+        await navigator.share({ title: 'MATCHBOARD 이미지', files: [file] });
       } catch (error) {
         if (error.name !== 'AbortError') fallbackAlert();
       }
@@ -888,7 +952,7 @@ export default function App() {
         if (navigator.clipboard && window.isSecureContext) {
           const clipboardItem = new ClipboardItem({ 'image/png': file });
           await navigator.clipboard.write([clipboardItem]);
-          setSystemAlert({ isOpen: true, message: '결과 이미지가 클립보드에 복사되었습니다!\n채팅창에 붙여넣기(Ctrl+V) 해주세요.' });
+          setSystemAlert({ isOpen: true, message: '이미지가 클립보드에 복사되었습니다!\n채팅창에 붙여넣기(Ctrl+V) 해주세요.' });
         } else {
           throw new Error('Clipboard API 미지원');
         }
@@ -900,8 +964,126 @@ export default function App() {
   };
 
   // ==========================================
+  // 전술 보드 기능
+  // ==========================================
+  const saveHistory = (newTokens) => {
+    setPastTokens(prev => [...prev, tacticTokens].slice(-20)); // 최근 20개 저장
+    setFutureTokens([]);
+    setTacticTokens(newTokens);
+  };
+
+  const handleUndo = () => {
+    if (pastTokens.length === 0) return;
+    const previous = pastTokens[pastTokens.length - 1];
+    setPastTokens(prev => prev.slice(0, -1));
+    setFutureTokens(prev => [tacticTokens, ...prev]);
+    setTacticTokens(previous);
+  };
+
+  const handleRedo = () => {
+    if (futureTokens.length === 0) return;
+    const next = futureTokens[0];
+    setFutureTokens(prev => prev.slice(1));
+    setPastTokens(prev => [...prev, tacticTokens]);
+    setTacticTokens(next);
+  };
+
+  const handleAddPlayer = (teamLetter) => {
+    const newId = `${teamLetter}_${Date.now()}`;
+    const yPos = pitchType === 'full' ? (teamLetter === 'A' ? 80 : 20) : (teamLetter === 'A' ? 65 : 35);
+    const newToken = { id: newId, position: 'CM', name: '', x: 50, y: yPos, team: teamLetter };
+    saveHistory([...tacticTokens, newToken]);
+  };
+
+  const handleBoardPointerDown = (e, token) => {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    pointerDownInfo.current = { x: e.clientX, y: e.clientY, time: Date.now() };
+    dragStartTokensRef.current = [...tacticTokens];
+    setDraggingToken(token.id);
+  };
+
+  const handleBoardPointerMove = (e) => {
+    if (!draggingToken || !boardRef.current) return;
+    const rect = boardRef.current.getBoundingClientRect();
+    let x = ((e.clientX - rect.left) / rect.width) * 100;
+    let y = ((e.clientY - rect.top) / rect.height) * 100;
+    
+    x = Math.max(0, Math.min(100, x));
+    y = Math.max(0, Math.min(100, y));
+
+    setTacticTokens(prev => prev.map(t => t.id === draggingToken ? { ...t, x, y } : t));
+  };
+
+  const handleBoardPointerUp = (e) => {
+    if (draggingToken) {
+      const downInfo = pointerDownInfo.current;
+      const dist = Math.sqrt(Math.pow(e.clientX - downInfo.x, 2) + Math.pow(e.clientY - downInfo.y, 2));
+      const timeDiff = Date.now() - downInfo.time;
+      
+      if (dist < 5 && timeDiff < 250) {
+         if (draggingToken !== 'ball') {
+           setTokenEditModal({ isOpen: true, token: tacticTokens.find(t => t.id === draggingToken) });
+         }
+         setTacticTokens(dragStartTokensRef.current);
+      } else {
+         setPastTokens(prev => [...prev, dragStartTokensRef.current].slice(-20));
+         setFutureTokens([]);
+      }
+      setDraggingToken(null);
+    }
+  };
+
+  const handleTokenEditSave = (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const pos = fd.get('position');
+    const name = fd.get('name');
+    
+    const newTokens = tacticTokens.map(t => 
+       t.id === tokenEditModal.token.id ? { ...t, position: pos, name: name } : t
+    );
+    saveHistory(newTokens);
+    setTokenEditModal({ isOpen: false, token: null });
+  };
+
+  const handleTokenDelete = () => {
+    const newTokens = tacticTokens.filter(t => t.id !== tokenEditModal.token.id);
+    saveHistory(newTokens);
+    setTokenEditModal({ isOpen: false, token: null });
+  };
+
+
+  // ==========================================
   // 재사용 가능한 렌더링 헬퍼 함수들
   // ==========================================
+  const renderCalendarDays = () => {
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    const days = [];
+    for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="p-2" />);
+    
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const dayMatches = matchesByDate[dateStr] || [];
+      
+      days.push(
+        <div key={day} className="p-2 aspect-square border border-slate-700/50 rounded-xl relative flex flex-col items-center bg-slate-800/30">
+          <span className="text-xs font-bold text-slate-300">{day}</span>
+          <div className="flex gap-1 mt-1">
+            {dayMatches.map((m, idx) => (
+              <div key={idx} className={`w-1.5 h-1.5 rounded-full ${m.status === 'completed' ? 'bg-slate-500' : 'bg-blue-400'}`} />
+            ))}
+          </div>
+        </div>
+      );
+    }
+    return days;
+  };
+
   const renderSystemModals = () => (
     <>
       {systemAlert.isOpen && (
@@ -941,7 +1123,7 @@ export default function App() {
           ) : (
             <div className="bg-slate-800 border border-slate-700 p-5 rounded-3xl w-full shadow-xl flex flex-col items-center text-center flex-1 min-h-0 animate-in fade-in">
               <h2 className="text-lg font-black text-white flex items-center gap-1 mb-4 shrink-0">
-                <MessageCircle size={18} className="text-blue-500"/> 이미지 리포트 생성 완료
+                <MessageCircle size={18} className="text-blue-500"/> 이미지 캡처 완료
               </h2>
               <div className="w-full flex-1 overflow-y-auto rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50 hide-scrollbar">
                 {shareModal.imgUrl && (
@@ -1084,33 +1266,6 @@ export default function App() {
         </div>
       </div>
     );
-  };
-
-  const renderCalendarDays = () => {
-    const year = viewDate.getFullYear();
-    const month = viewDate.getMonth();
-    const firstDay = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    
-    const days = [];
-    for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="p-2" />);
-    
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const dayMatches = matchesByDate[dateStr] || [];
-      
-      days.push(
-        <div key={day} className="p-2 aspect-square border border-slate-700/50 rounded-xl relative flex flex-col items-center bg-slate-800/30">
-          <span className="text-xs font-bold text-slate-300">{day}</span>
-          <div className="flex gap-1 mt-1">
-            {dayMatches.map((m, idx) => (
-              <div key={idx} className={`w-1.5 h-1.5 rounded-full ${m.status === 'completed' ? 'bg-slate-500' : 'bg-blue-400'}`} />
-            ))}
-          </div>
-        </div>
-      );
-    }
-    return days;
   };
 
   const renderLogEditModal = () => {
@@ -1609,7 +1764,7 @@ export default function App() {
           </button>
         </div>
 
-        <div className="flex-1 bg-slate-800/40 border border-slate-700/50 rounded-3xl p-4 sm:p-5 pb-8 overflow-y-auto hide-scrollbar flex flex-col gap-4">
+        <div className="flex-1 bg-slate-800/40 border border-slate-700/50 rounded-3xl p-4 sm:p-5 pb-8 overflow-y-auto flex flex-col gap-4 hide-scrollbar">
           <div className="flex justify-between items-center mb-2 shrink-0">
              <h3 className="text-sm font-bold text-slate-400 flex items-center gap-2"><List size={16}/> 쿼터별 기록 현황</h3>
              <button onClick={requestEndQuarter} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs transition border border-slate-600 shadow-sm">현재 쿼터 종료</button>
@@ -1631,8 +1786,8 @@ export default function App() {
                     return (
                       <div 
                         key={l.id} 
-                        onClick={() => openLogEditModal(l, liveMatch)}
-                        className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5`}
+                        onClick={() => isAdmin && openLogEditModal(l, liveMatch)}
+                        className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5' : ''}`}
                       >
                         <span className="text-slate-600 text-[11px] w-8 shrink-0 text-center mt-1">{l.time}</span>
                         <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
@@ -1652,11 +1807,13 @@ export default function App() {
                  })}
                  {liveMatch.logs.filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 없음</div>}
                </div>
-               <div className="flex justify-center mt-4 pt-3 border-t border-slate-800/50">
-                 <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: liveMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
-                   <Plus size={14}/> 누락된 득점 추가
-                 </button>
-               </div>
+               {isAdmin && (
+                  <div className="flex justify-center mt-4 pt-3 border-t border-slate-800/50">
+                    <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: liveMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
+                      <Plus size={14}/> 누락된 득점 추가
+                    </button>
+                  </div>
+               )}
             </div>
           ))}
 
@@ -1679,8 +1836,8 @@ export default function App() {
                  return (
                    <div 
                      key={l.id} 
-                     onClick={() => openLogEditModal(l, liveMatch)}
-                     className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5`}
+                     onClick={() => isAdmin && openLogEditModal(l, liveMatch)}
+                     className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5' : ''}`}
                    >
                      <span className="text-slate-500 text-[11px] w-8 shrink-0 text-center mt-1">{l.time}</span>
                      <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
@@ -1743,6 +1900,9 @@ export default function App() {
     );
   }
 
+  // ==========================================
+  // 메인 (목록 및 탭) 화면
+  // ==========================================
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl">
       {globalStyles}
@@ -1959,7 +2119,111 @@ export default function App() {
           </div>
         )}
 
-        {/* === 3. 명단 Tab === */}
+        {/* === 3. 전술 Tab === */}
+        {activeTab === 'tactics' && (
+          <div className="space-y-4 animate-in fade-in h-[calc(100dvh-180px)] flex flex-col">
+            <div className="flex justify-between items-center shrink-0">
+              <h2 className="text-xl font-black text-white">전술 보드</h2>
+              <div className="flex gap-2">
+                <button onClick={handleUndo} disabled={pastTokens.length === 0} className="p-1.5 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Undo size={16}/></button>
+                <button onClick={handleRedo} disabled={futureTokens.length === 0} className="p-1.5 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Redo size={16}/></button>
+                <button onClick={() => { setPitchType('full'); saveHistory(getInitialTacticsTokens('full')); }} className="text-[11px] bg-slate-800 text-slate-400 px-3 py-1.5 rounded-lg font-bold border border-slate-700 hover:bg-slate-700 transition">
+                  초기화
+                </button>
+                <button onClick={triggerTacticShare} className="text-[11px] bg-yellow-500/20 text-yellow-500 px-3 py-1.5 rounded-lg font-bold border border-yellow-500/30 hover:bg-yellow-500/30 transition flex items-center gap-1">
+                  <Share2 size={12}/> 공유
+                </button>
+              </div>
+            </div>
+
+            <div className="flex bg-slate-800 rounded-xl p-1 shrink-0">
+               <button onClick={() => { setPitchType('full'); saveHistory(getInitialTacticsTokens('full')); }} className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${pitchType === 'full' ? 'bg-slate-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>
+                 전체 코트
+               </button>
+               <button onClick={() => { setPitchType('half'); saveHistory(getInitialTacticsTokens('half')); }} className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${pitchType === 'half' ? 'bg-slate-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>
+                 하프 코트
+               </button>
+            </div>
+
+            <div className="flex gap-2 shrink-0">
+               <button onClick={() => handleAddPlayer('A')} className="flex-1 py-2.5 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-400 text-xs font-bold rounded-xl flex items-center justify-center gap-1 transition">
+                 <Plus size={14}/> A팀 선수 추가
+               </button>
+               <button onClick={() => handleAddPlayer('B')} className="flex-1 py-2.5 bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 text-blue-400 text-xs font-bold rounded-xl flex items-center justify-center gap-1 transition">
+                 <Plus size={14}/> B팀 선수 추가
+               </button>
+            </div>
+
+            <div className="flex-1 w-full flex justify-center items-center min-h-0 relative pb-6">
+              <div 
+                ref={boardRef}
+                style={{ maxHeight: '100%', maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3' }}
+                onPointerMove={handleBoardPointerMove}
+                onPointerUp={handleBoardPointerUp}
+                onPointerLeave={handleBoardPointerUp}
+                className={`relative bg-emerald-700 border-2 border-white/80 overflow-hidden shadow-inner tactic-board touch-none select-none w-full mx-auto`}
+              >
+                {/* --- Pitch Drawings --- */}
+                {pitchType === 'full' && (
+                  <>
+                    <div className="absolute top-1/2 left-0 w-full border-t-2 border-white/60"></div>
+                    <div className="absolute top-1/2 left-1/2 w-20 h-20 sm:w-28 sm:h-28 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
+                    <div className="absolute top-1/2 left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
+                    
+                    {/* Top Penalty Area */}
+                    <div className="absolute top-0 left-1/2 w-3/5 h-[15%] border-2 border-t-0 border-white/60 -translate-x-1/2"></div>
+                    <div className="absolute top-0 left-1/2 w-[25%] h-[6%] border-2 border-t-0 border-white/60 -translate-x-1/2"></div>
+                    <div className="absolute top-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2"></div>
+                    <div className="absolute top-[15%] left-1/2 w-12 h-6 border-b-2 border-white/60 rounded-b-full -translate-x-1/2"></div>
+
+                    {/* Bottom Penalty Area */}
+                    <div className="absolute bottom-0 left-1/2 w-3/5 h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2"></div>
+                    <div className="absolute bottom-0 left-1/2 w-[25%] h-[6%] border-2 border-b-0 border-white/60 -translate-x-1/2"></div>
+                    <div className="absolute bottom-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2"></div>
+                    <div className="absolute bottom-[15%] left-1/2 w-12 h-6 border-t-2 border-white/60 rounded-t-full -translate-x-1/2"></div>
+                  </>
+                )}
+
+                {pitchType === 'half' && (
+                  <>
+                    <div className="absolute top-0 left-0 w-full border-t-2 border-white/60"></div>
+                    <div className="absolute top-0 left-1/2 w-32 h-32 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
+
+                    <div className="absolute bottom-0 left-1/2 w-[70%] h-[40%] border-2 border-b-0 border-white/60 -translate-x-1/2"></div>
+                    <div className="absolute bottom-0 left-1/2 w-[35%] h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2"></div>
+                    <div className="absolute bottom-[30%] left-1/2 w-2 h-2 bg-white/80 rounded-full -translate-x-1/2"></div>
+                    <div className="absolute bottom-[40%] left-1/2 w-20 h-10 border-t-2 border-white/60 rounded-t-full -translate-x-1/2"></div>
+                  </>
+                )}
+
+                {/* --- Tokens --- */}
+                {tacticTokens.map(t => (
+                  <div
+                    key={t.id}
+                    onPointerDown={(e) => handleBoardPointerDown(e, t)}
+                    style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
+                    className={`absolute rounded-full flex flex-col items-center justify-center font-black transition-transform duration-75 text-[11px] sm:text-xs 
+                      ${draggingToken === t.id ? 'scale-125 z-50 opacity-90 cursor-grabbing' : 'scale-100 z-30 cursor-grab'}
+                      ${t.team === 'A' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-red-600 text-white border border-red-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
+                      ${t.team === 'B' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 text-white border border-blue-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
+                      ${t.team === 'ball' ? 'w-6 h-6 sm:w-7 sm:h-7 bg-white text-black shadow-[inset_0_-1px_3px_rgba(0,0,0,0.3),_0_3px_6px_rgba(0,0,0,0.6)] text-[16px]' : ''}
+                    `}
+                  >
+                    <span>{t.team === 'ball' ? t.label : t.position}</span>
+                    {t.name && (
+                      <span className="absolute top-[120%] text-[10px] sm:text-[11px] font-bold text-white bg-black/80 px-2 py-0.5 rounded-full shadow-md whitespace-nowrap z-40 pointer-events-none tracking-tight border border-white/20">
+                        {t.name}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <p className="text-center text-[10px] text-slate-500 mt-2 shrink-0">선수를 터치하여 정보를 변경할 수 있습니다.</p>
+          </div>
+        )}
+
+        {/* === 4. 명단 Tab === */}
         {activeTab === 'roster' && (
           <div className="space-y-4 animate-in fade-in">
             <div className="flex justify-between items-center">
@@ -2009,6 +2273,10 @@ export default function App() {
           <Calendar size={20} className="mb-1" />
           <span className="text-[10px] font-bold">스케쥴</span>
         </button>
+        <button onClick={() => setActiveTab('tactics')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'tactics' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}>
+          <Target size={20} className="mb-1" />
+          <span className="text-[10px] font-bold">전술</span>
+        </button>
         <button onClick={() => setActiveTab('roster')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'roster' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}>
           <Users size={20} className="mb-1" />
           <span className="text-[10px] font-bold">명단</span>
@@ -2019,7 +2287,6 @@ export default function App() {
       {/* MODALS (메인 화면) */}
       {/* ============================================================================ */}
       
-      {}
       {detailModal.isOpen && detailMatch && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50 animate-in fade-in">
           <div className="bg-slate-800 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
@@ -2084,8 +2351,8 @@ export default function App() {
                        return (
                          <div 
                            key={l.id} 
-                           onClick={() => openLogEditModal(l, detailMatch)}
-                           className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5`}
+                           onClick={() => isAdmin && openLogEditModal(l, detailMatch)}
+                           className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1 rounded-lg transition -mx-1 px-1' : ''}`}
                          >
                            <span className="text-slate-600 text-[10px] w-8 shrink-0 text-center mt-1">{l.time}</span>
                            <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
@@ -2105,11 +2372,13 @@ export default function App() {
                      })}
                      {detailMatch.logs.filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>}
                    </div>
-                   <div className="flex justify-center mt-4 pt-4 border-t border-slate-800/50">
-                     <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: detailMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
-                       <Plus size={12}/> 누락된 득점 추가
-                     </button>
-                   </div>
+                   {isAdmin && (
+                      <div className="flex justify-center mt-4 pt-4 border-t border-slate-800/50">
+                        <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: detailMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
+                          <Plus size={12}/> 누락된 득점 추가
+                        </button>
+                      </div>
+                   )}
                 </div>
               ))}
 
@@ -2158,6 +2427,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Match Form Modal */}
       {matchModal.isOpen && (
         <div className="fixed inset-0 bg-black/80 flex items-end justify-center z-50">
           <div className="bg-slate-800 p-6 rounded-t-3xl w-full max-w-md border-t border-slate-700 animate-in slide-in-from-bottom max-h-[90vh] flex flex-col shadow-xl">
@@ -2370,10 +2640,37 @@ export default function App() {
         </div>
       )}
 
-      {renderGoalFlowModal()}
-      {renderLogEditModal()}
+      {/* 팝업 렌더링 영역 복구 */}
       {renderSystemModals()}
       {renderShareModal()}
+      {renderGoalFlowModal()}
+      {renderLogEditModal()}
+      {tokenEditModal.isOpen && tokenEditModal.token && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[70] animate-in fade-in">
+          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
+            <h2 className="text-xl font-bold text-white mb-4 text-center">선수 정보 설정</h2>
+            <form onSubmit={handleTokenEditSave} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-2">포지션 선택</label>
+                <select name="position" defaultValue={tokenEditModal.token.position} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
+                  {['FW', 'WF', 'AM', 'CM', 'DM', 'RB', 'LB', 'CB', 'GK'].map(pos => (
+                    <option key={pos} value={pos}>{pos}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-2">이름 등록 (선택)</label>
+                <input type="text" name="name" defaultValue={tokenEditModal.token.name} placeholder="예: 손흥민" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={() => setTokenEditModal({isOpen: false, token: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
+                <button type="submit" className="flex-[2] py-3 bg-blue-500 text-white rounded-xl font-bold">저장</button>
+              </div>
+              <button type="button" onClick={handleTokenDelete} className="w-full py-3 mt-2 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl font-bold text-sm">선수 완전히 삭제</button>
+            </form>
+          </div>
+        </div>
+      )}
       {renderHiddenCaptureArea()}
     </div>
   );
