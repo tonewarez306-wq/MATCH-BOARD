@@ -6,9 +6,12 @@ import {
   Calendar, Users, BarChart2, Plus, 
   MapPin, Clock, Trophy, Shield, Lock, 
   ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings, Target, Undo, Redo,
-  MousePointer2, MoveUpRight, Spline, Square, Eraser, Video, PlayCircle, Layers, RotateCcw
+  MousePointer, ArrowUpRight, TrendingUp, Square, XCircle, Video, PlayCircle, Layers, RotateCcw
 } from 'lucide-react';
 
+// ==========================================
+// Firebase 설정
+// ==========================================
 const firebaseConfig = {
   apiKey: "AIzaSyCO99Km34_p0paqFM8wbWD0odUU8UJ9ph4",
   authDomain: "matchboard-d010e.firebaseapp.com",
@@ -23,6 +26,9 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// ==========================================
+// 상수 및 헬퍼 함수
+// ==========================================
 const TEAM_LETTERS = ['A', 'B', 'C', 'D'];
 const TEAM_COLORS = {
   'A': 'text-red-400 bg-red-500/10 border-red-500/30',
@@ -42,6 +48,7 @@ const resizeImage = (file, maxWidth = 300, maxHeight = 300) => {
         const canvas = document.createElement('canvas');
         let width = img.width;
         let height = img.height;
+
         if (width > height) {
           if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
         } else {
@@ -124,6 +131,9 @@ const getInitialTacticsTokens = (pitchType) => {
   return tokens;
 };
 
+// ==========================================
+// 메인 App 컴포넌트
+// ==========================================
 export default function App() {
   const [user, setUser] = useState(null);
   const [appState, setAppState] = useState('login'); 
@@ -181,14 +191,20 @@ export default function App() {
   const [draggingToken, setDraggingToken] = useState(null);
   const [tokenEditModal, setTokenEditModal] = useState({ isOpen: false, token: null });
   
+  // 애니메이션 관련 State
   const [animationFrames, setAnimationFrames] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAutoRecording, setIsAutoRecording] = useState(false); 
-  
   const playbackRef = useRef(null);
   const boardRef = useRef(null);
   const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 });
   const dragStartTokensRef = useRef(null);
+
+  // ★ 빠른 그리기(Lag 제거)를 위한 직접 DOM 조작 Ref
+  const svgArrowRef = useRef(null);
+  const svgPassRef = useRef(null);
+  const svgZoneRef = useRef(null);
+  const activeDrawingData = useRef(null);
 
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
@@ -242,7 +258,6 @@ export default function App() {
     <style>{`
       *::-webkit-scrollbar { display: none !important; width: 0 !important; }
       * { -ms-overflow-style: none !important; scrollbar-width: none !important; }
-      .tactic-board { touch-action: none; }
       input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
       input[type="number"] { -moz-appearance: textfield; }
       .will-change-transform { will-change: transform, left, top; }
@@ -270,10 +285,7 @@ export default function App() {
   }, [activeTeamId]);
 
   useEffect(() => {
-    return () => { 
-      if (playbackRef.current) cancelAnimationFrame(playbackRef.current);
-      if (playbackRef.current) clearTimeout(playbackRef.current);
-    };
+    return () => { if (playbackRef.current) clearTimeout(playbackRef.current); };
   }, []);
 
   const getTeamDisplayName = (match, letter) => {
@@ -619,41 +631,26 @@ export default function App() {
     }, 500); 
   };
 
-  const triggerTacticShare = () => {
-    if (!boardRef.current) return;
-    setShareModal({ isOpen: true, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
-    setTimeout(async () => {
-      try {
-        const html2canvas = await loadHtml2Canvas();
-        const canvas = await html2canvas(boardRef.current, { scale: 2, useCORS: true, backgroundColor: '#047857' });
-        canvas.toBlob((blob) => {
-          if (!blob) return;
-          const file = new File([blob], 'matchboard_tactic.png', { type: 'image/png' });
-          const imgUrl = URL.createObjectURL(blob);
-          setShareModal(prev => ({ ...prev, step: 2, file, imgUrl, isVideo: false }));
-        }, 'image/png');
-      } catch (err) { setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' }); setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false }); }
-    }, 500); 
-  };
-
-  const downloadFallback = (file, url) => {
-    const a = document.createElement('a'); a.href = url; a.download = file.name; a.click();
-    setSystemAlert({ isOpen: true, message: '파일이 기기에 다운로드 되었습니다.' });
-  }
-
   const doActualShare = async () => {
     const file = shareModal.file; if (!file) return;
     const isKakaotalk = navigator.userAgent.toLowerCase().includes('kakaotalk');
     if (isKakaotalk) {
-      setSystemAlert({ isOpen: true, message: '🚨 카카오톡 브라우저에서는 공유가 제한됩니다.\n하단 ⠇ 메뉴 > "다른 브라우저로 열기"를 선택하세요.' });
+      setSystemAlert({ isOpen: true, message: '🚨 카카오톡 브라우저에서는 공유가 제한됩니다.\n하단 ⠇ 메뉴 > "다른 브라우저로 열기"를 선택하세요.\n(이미지는 길게 눌러 바로 저장할 수 있습니다)' });
       return;
     }
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ title: 'MATCHBOARD', files: [file] }); } catch (error) { if (error.name !== 'AbortError') downloadFallback(file, shareModal.imgUrl); }
-    } else { downloadFallback(file, shareModal.imgUrl); }
+      try { await navigator.share({ title: 'MATCHBOARD', files: [file] }); } catch (error) { 
+        if (error.name !== 'AbortError') {
+          const a = document.createElement('a'); a.href = shareModal.imgUrl; a.download = file.name; a.click();
+          setSystemAlert({ isOpen: true, message: '파일이 기기에 다운로드 되었습니다.' });
+        }
+      }
+    } else { 
+      const a = document.createElement('a'); a.href = shareModal.imgUrl; a.download = file.name; a.click();
+      setSystemAlert({ isOpen: true, message: '파일이 기기에 다운로드 되었습니다.' });
+    }
   };
 
-  // --- 전술 보드 애니메이션 기능 ---
   const saveHistory = (newTokens, newDrawings = drawings) => {
     setPastState(prev => [...prev, { tokens: tacticTokens, drawings }].slice(-20)); 
     setFutureState([]);
@@ -713,7 +710,20 @@ export default function App() {
     const rect = boardRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100; const y = ((e.clientY - rect.top) / rect.height) * 100;
     if (currentTool === 'arrow' || currentTool === 'pass' || currentTool === 'zone') {
-       setActiveDrawing({ id: Date.now(), type: currentTool, start: {x, y}, end: {x, y} });
+       activeDrawingData.current = { id: Date.now(), type: currentTool, start: {x, y}, end: {x, y} };
+       if (currentTool === 'arrow' && svgArrowRef.current) {
+          svgArrowRef.current.style.display = 'block';
+          svgArrowRef.current.setAttribute('x1', `${x}%`); svgArrowRef.current.setAttribute('y1', `${y}%`);
+          svgArrowRef.current.setAttribute('x2', `${x}%`); svgArrowRef.current.setAttribute('y2', `${y}%`);
+       } else if (currentTool === 'pass' && svgPassRef.current) {
+          svgPassRef.current.style.display = 'block';
+          svgPassRef.current.setAttribute('x1', `${x}%`); svgPassRef.current.setAttribute('y1', `${y}%`);
+          svgPassRef.current.setAttribute('x2', `${x}%`); svgPassRef.current.setAttribute('y2', `${y}%`);
+       } else if (currentTool === 'zone' && svgZoneRef.current) {
+          svgZoneRef.current.style.display = 'block';
+          svgZoneRef.current.setAttribute('x', `${x}%`); svgZoneRef.current.setAttribute('y', `${y}%`);
+          svgZoneRef.current.setAttribute('width', `0%`); svgZoneRef.current.setAttribute('height', `0%`);
+       }
     }
   };
 
@@ -725,8 +735,20 @@ export default function App() {
 
     if (currentTool === 'move' && draggingToken) {
       setTacticTokens(prev => prev.map(t => t.id === draggingToken ? { ...t, x, y } : t));
-    } else if (activeDrawing) {
-      setActiveDrawing(prev => ({ ...prev, end: {x, y} }));
+    } else if (activeDrawingData.current) {
+      const { type, start } = activeDrawingData.current;
+      activeDrawingData.current.end = { x, y };
+      
+      if (type === 'arrow' && svgArrowRef.current) {
+          svgArrowRef.current.setAttribute('x2', `${x}%`); svgArrowRef.current.setAttribute('y2', `${y}%`);
+      } else if (type === 'pass' && svgPassRef.current) {
+          svgPassRef.current.setAttribute('x2', `${x}%`); svgPassRef.current.setAttribute('y2', `${y}%`);
+      } else if (type === 'zone' && svgZoneRef.current) {
+          const rx = Math.min(start.x, x); const ry = Math.min(start.y, y);
+          const rw = Math.abs(start.x - x); const rh = Math.abs(start.y - y);
+          svgZoneRef.current.setAttribute('x', `${rx}%`); svgZoneRef.current.setAttribute('y', `${ry}%`);
+          svgZoneRef.current.setAttribute('width', `${rw}%`); svgZoneRef.current.setAttribute('height', `${rh}%`);
+      }
     }
   };
 
@@ -740,10 +762,14 @@ export default function App() {
          setTacticTokens(dragStartTokensRef.current);
       } else { saveHistory(tacticTokens); }
       setDraggingToken(null);
-    } else if (activeDrawing) {
-      const dist = Math.sqrt(Math.pow(activeDrawing.start.x - activeDrawing.end.x, 2) + Math.pow(activeDrawing.start.y - activeDrawing.end.y, 2));
-      if (dist > 2) { const newDrawings = [...drawings, activeDrawing]; saveHistory(tacticTokens, newDrawings); }
-      setActiveDrawing(null);
+    } else if (activeDrawingData.current) {
+      const ad = activeDrawingData.current;
+      const dist = Math.sqrt(Math.pow(ad.start.x - ad.end.x, 2) + Math.pow(ad.start.y - ad.end.y, 2));
+      if (dist > 2) { const newDrawings = [...drawings, ad]; saveHistory(tacticTokens, newDrawings); }
+      activeDrawingData.current = null;
+      if (svgArrowRef.current) svgArrowRef.current.style.display = 'none';
+      if (svgPassRef.current) svgPassRef.current.style.display = 'none';
+      if (svgZoneRef.current) svgZoneRef.current.style.display = 'none';
     }
   };
 
@@ -777,14 +803,9 @@ export default function App() {
 
   const clearFrames = () => { setAnimationFrames([]); setIsPlaying(false); setIsAutoRecording(false); if (playbackRef.current) clearTimeout(playbackRef.current); };
 
-  // ★ 뚝뚝 끊기지 않는 60fps 부드러운 애니메이션 엔진 (React DOM 우회)
   const playAnimation = () => {
     if (animationFrames.length < 2) { setSystemAlert({ isOpen: true, message: '최소 2장면이 필요합니다.' }); return; }
-    setIsPlaying(true); 
-    
-    let currentFrameIdx = 0;
-    let startTime = null;
-    const transitionDuration = 800; // 이동 속도
+    setIsPlaying(true); let currentFrameIdx = 0; let startTime = null; const transitionDuration = 800; 
 
     setTacticTokens(animationFrames[0].tokens);
     setDrawings(animationFrames[0].drawings);
@@ -812,16 +833,10 @@ export default function App() {
         currentFrameIdx++;
         setTacticTokens(animationFrames[currentFrameIdx].tokens);
         setDrawings(animationFrames[currentFrameIdx].drawings);
-        
-        if (currentFrameIdx >= animationFrames.length - 1) {
-           setIsPlaying(false);
-        } else {
-           startTime = null;
-           playbackRef.current = setTimeout(() => { playbackRef.current = requestAnimationFrame(animate); }, 300); // 프레임 사이 멈춤 0.3초
-        }
+        if (currentFrameIdx >= animationFrames.length - 1) { setIsPlaying(false); } 
+        else { startTime = null; playbackRef.current = setTimeout(() => { playbackRef.current = requestAnimationFrame(animate); }, 300); }
       }
     };
-    
     playbackRef.current = setTimeout(() => { playbackRef.current = requestAnimationFrame(animate); }, 300);
   };
 
@@ -831,20 +846,14 @@ export default function App() {
 
     const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = pitchType === 'full' ? 900 : 800;
     const ctx = canvas.getContext('2d');
-    
-    // 더미 프레임 강제 주입
-    ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    let mimeType = 'video/mp4';
-    if (!MediaRecorder.isTypeSupported('video/mp4')) mimeType = 'video/webm';
-    
+    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
     const stream = canvas.captureStream(30); 
     const recorder = new MediaRecorder(stream, { mimeType });
     const chunks = [];
-    recorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
     
     recorder.onstop = () => {
-        const ext = 'mp4'; // 카카오톡 강제 호환
+        const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
         const blob = new Blob(chunks, { type: mimeType });
         const file = new File([blob], `tactic_animation.${ext}`, { type: mimeType });
         const url = URL.createObjectURL(blob);
@@ -889,9 +898,8 @@ export default function App() {
             } else {
                 ctx.fillStyle = t1.team === 'A' ? '#DC2626' : '#2563EB'; ctx.beginPath(); ctx.arc(px, py, 22, 0, Math.PI*2); ctx.fill();
                 ctx.strokeStyle = t1.team === 'A' ? '#991B1B' : '#1E40AF'; ctx.lineWidth = 3; ctx.stroke();
-                ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t1.position || '', px, py);
                 
-                // 이름 잘림 현상 방지 동적 계산 배지
+                ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t1.name ? t1.name.slice(0,2) : t1.position, px, py);
                 if (t1.name) {
                   ctx.font = 'bold 12px sans-serif';
                   const textWidth = ctx.measureText(t1.name).width; const rectWidth = textWidth + 16; const rectHeight = 20; const rectY = py + 32;
@@ -983,7 +991,7 @@ export default function App() {
               <div className="w-full flex-1 overflow-y-auto rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50 hide-scrollbar flex justify-center items-center">
                 {shareModal.imgUrl && (
                    shareModal.isVideo ? (
-                     <video src={shareModal.imgUrl} autoPlay loop playsInline controls className="w-full h-auto rounded-lg shadow-sm" />
+                     <video src={shareModal.imgUrl} autoPlay loop playsInline className="w-full h-auto rounded-lg shadow-sm" />
                    ) : (
                      <img src={shareModal.imgUrl} alt="Preview" className="w-full h-auto rounded-lg shadow-sm" />
                    )
@@ -1266,6 +1274,7 @@ export default function App() {
                 })}
               </div>
             </div>
+
           </div>
         </div>
       </div>
@@ -1780,9 +1789,8 @@ export default function App() {
     );
   }
 
-
   // ==========================================
-  // 6. 메인 컴포넌트 JSX 렌더링 분기 시작
+  // 메인 화면 분기
   // ==========================================
 
   if (appState === 'login') {
@@ -2099,7 +2107,7 @@ export default function App() {
   }
 
   // ==========================================
-  // 7. 메인 탭 반환 (matches, schedule, stats, tactics, roster)
+  // 7. 메인 탭 화면 반환 (matches, schedule, stats, tactics, roster)
   // ==========================================
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl flex flex-col">
@@ -2436,15 +2444,15 @@ export default function App() {
 
             <div className="flex justify-between items-center bg-slate-900 rounded-2xl p-1 border border-slate-700 shrink-0 mb-1 gap-1">
                <button onClick={() => setCurrentTool('move')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'move' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
-                 <MousePointer2 size={15}/>
+                 <MousePointer size={15}/>
                  <span className="text-[11px] font-bold">이동</span>
                </button>
                <button onClick={() => setCurrentTool('arrow')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'arrow' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
-                 <MoveUpRight size={15}/>
+                 <ArrowUpRight size={15}/>
                  <span className="text-[11px] font-bold">화살표</span>
                </button>
                <button onClick={() => setCurrentTool('pass')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'pass' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
-                 <Spline size={15}/>
+                 <TrendingUp size={15}/>
                  <span className="text-[11px] font-bold">패스</span>
                </button>
                <button onClick={() => setCurrentTool('zone')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'zone' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
@@ -2452,7 +2460,7 @@ export default function App() {
                  <span className="text-[11px] font-bold">지역</span>
                </button>
                <button onClick={() => setCurrentTool('erase')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'erase' ? 'bg-red-500 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
-                 <Eraser size={15}/>
+                 <XCircle size={15}/>
                  <span className="text-[11px] font-bold">지우기</span>
                </button>
             </div>
@@ -2460,7 +2468,7 @@ export default function App() {
             <div className="flex-1 w-full flex justify-center items-center min-h-0 relative pb-6 mt-1">
               <div 
                 ref={boardRef}
-                style={{ maxHeight: '100%', maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: (currentTool !== 'move' || isPlaying || isAutoRecording || draggingToken) ? 'none' : 'auto' }}
+                style={{ maxHeight: '100%', maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: currentTool === 'move' ? 'auto' : 'none' }}
                 onPointerDown={handleBoardPointerDown}
                 onPointerMove={handleBoardPointerMove}
                 onPointerUp={handleBoardPointerUp}
@@ -2474,13 +2482,11 @@ export default function App() {
                     <div className="absolute top-1/2 left-1/2 w-20 h-20 sm:w-28 sm:h-28 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
                     <div className="absolute top-1/2 left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
                     
-                    {/* Top Penalty Area */}
                     <div className="absolute top-0 left-1/2 w-3/5 h-[15%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-0 left-1/2 w-[25%] h-[6%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-[15%] left-1/2 w-12 h-6 border-b-2 border-white/60 rounded-b-full -translate-x-1/2 pointer-events-none"></div>
 
-                    {/* Bottom Penalty Area */}
                     <div className="absolute bottom-0 left-1/2 w-3/5 h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute bottom-0 left-1/2 w-[25%] h-[6%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute bottom-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
@@ -2500,7 +2506,6 @@ export default function App() {
                   </>
                 )}
 
-                {/* --- User Drawings (Lines, Passes, Zones) --- */}
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
                   <defs>
                     <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -2511,7 +2516,6 @@ export default function App() {
                     </marker>
                   </defs>
                   
-                  {/* 직접 DOM 조작용 레퍼런스 요소 */}
                   <line ref={svgArrowRef} stroke="#FACC15" strokeWidth="4" markerEnd="url(#arrowhead)" style={{display: 'none'}} />
                   <line ref={svgPassRef} stroke="#60A5FA" strokeWidth="4" strokeDasharray="8,8" markerEnd="url(#passhead)" style={{display: 'none'}} />
                   <rect ref={svgZoneRef} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="3" style={{display: 'none'}} />
@@ -2538,15 +2542,14 @@ export default function App() {
                   })}
                 </svg>
 
-                {/* --- Tokens --- */}
                 {tacticTokens.map(t => (
                   <div
                     key={t.id}
                     id={`token-${t.id}`}
                     onPointerDown={(e) => handleTokenPointerDown(e, t)}
                     style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
-                    className={`absolute rounded-full flex flex-col items-center justify-center font-black transition-transform duration-75 text-[10px] sm:text-[11px] will-change-transform 
-                      ${isPlaying ? 'pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
+                    className={`absolute rounded-full flex flex-col items-center justify-center font-black text-[10px] sm:text-[11px] will-change-transform 
+                      ${isPlaying ? '' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
                       ${currentTool !== 'move' && !isPlaying ? 'pointer-events-none z-20' : ''}
                       ${t.team === 'A' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-red-600 text-white border border-red-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
                       ${t.team === 'B' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 text-white border border-blue-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
@@ -2570,7 +2573,6 @@ export default function App() {
               </div>
             </div>
             
-            {/* ★ 애니메이션 프레임 제어 및 A/B팀 선수 조절 */}
             <div className="flex flex-col gap-2 shrink-0 border-t border-slate-800 pt-2">
                {animationFrames.length === 0 && !isAutoRecording && (
                  <p className="text-[10px] text-yellow-400 font-bold text-center animate-pulse tracking-wide my-1">💡 [자동 녹화]를 켜고 선수를 움직이면 자동으로 저장됩니다!</p>
@@ -2580,7 +2582,7 @@ export default function App() {
                )}
                <div className="flex items-center gap-2 bg-slate-900 rounded-2xl p-1 border border-slate-700">
                  <div className="bg-slate-800 px-2 py-2 rounded-xl text-xs font-black text-slate-300 border border-slate-700 shadow-inner flex items-center gap-1 shrink-0 w-[55px] justify-center">
-                    {animationFrames.length}컷
+                    <Layers size={14} className="text-slate-400"/> {animationFrames.length}컷
                  </div>
                  <button onClick={toggleAutoRecord} disabled={isPlaying} className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50 ${isAutoRecording ? 'bg-slate-700 text-red-400 border border-red-500/50 animate-pulse' : 'bg-red-500 hover:bg-red-400 text-white'}`}>
                     <Video size={14}/> {isAutoRecording ? '녹화 중지' : '자동 녹화'}
