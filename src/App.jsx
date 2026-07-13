@@ -133,7 +133,6 @@ const getInitialTacticsTokens = (pitchType) => {
     tokens.push({ id: 'A_LB', position: 'LB', name: '', x: 20, y: 75, team: 'A' }, { id: 'A_CB1', position: 'CB', name: '', x: 40, y: 75, team: 'A' }, { id: 'A_CB2', position: 'CB', name: '', x: 60, y: 75, team: 'A' }, { id: 'A_RB', position: 'RB', name: '', x: 80, y: 75, team: 'A' });
     tokens.push({ id: 'A_LM', position: 'WF', name: '', x: 20, y: 60, team: 'A' }, { id: 'A_CM1', position: 'CM', name: '', x: 40, y: 60, team: 'A' }, { id: 'A_CM2', position: 'CM', name: '', x: 60, y: 60, team: 'A' }, { id: 'A_RM', position: 'WF', name: '', x: 80, y: 60, team: 'A' });
     tokens.push({ id: 'A_FW1', position: 'FW', name: '', x: 35, y: 45, team: 'A' }, { id: 'A_FW2', position: 'FW', name: '', x: 65, y: 45, team: 'A' });
-    
     tokens.push({ id: 'ball', label: '⚽', x: 50, y: 50, team: 'ball' });
   } else {
     tokens.push({ id: 'A_GK', position: 'GK', name: '', x: 50, y: 80, team: 'A' });
@@ -219,6 +218,10 @@ export default function App() {
   const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 });
   const dragStartTokensRef = useRef(null);
 
+  const svgArrowRef = useRef(null);
+  const svgPassRef = useRef(null);
+  const svgZoneRef = useRef(null);
+
   // --- 2. 데이터 메모이제이션 (Memo) ---
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
@@ -231,7 +234,7 @@ export default function App() {
   const scheduledThisMonth = useMemo(() => monthlyMatches.filter(m => m.status === 'scheduled').sort((a,b) => a.date.localeCompare(b.date)), [monthlyMatches]);
   
   const completedThisMonthWithStandings = useMemo(() => {
-    return [...monthlyMatches]
+    return monthlyMatches
       .filter(m => m.status === 'completed')
       .sort((a,b) => b.date.localeCompare(a.date))
       .map(m => ({ ...m, standings: calculateStandings(m) }));
@@ -245,6 +248,27 @@ export default function App() {
     });
     return map;
   }, [monthlyMatches]);
+
+  const calculatedPlayersList = useMemo(() => {
+    const stats = {};
+    currentTeamPlayers.forEach(p => {
+       stats[p.id] = { ...p, trueCaps: 0, trueGoals: 0, trueAssists: 0 };
+    });
+    const completedMatches = currentTeamMatches.filter(m => m.status === 'completed');
+    completedMatches.forEach(m => {
+      (m.attendees || []).forEach(pid => {
+        if (stats[pid]) stats[pid].trueCaps += 1;
+      });
+      (m.logs || []).forEach(log => {
+        if (log.scorerId && stats[log.scorerId]) stats[log.scorerId].trueGoals += 1;
+        if (log.assistId && stats[log.assistId]) stats[log.assistId].trueAssists += 1;
+      });
+    });
+    return Object.values(stats).sort((a,b) => {
+       if (b.trueCaps !== a.trueCaps) return b.trueCaps - a.trueCaps;
+       return b.trueGoals - a.trueGoals;
+    });
+  }, [currentTeamPlayers, currentTeamMatches]);
 
   const monthlyStats = useMemo(() => {
     const statsMap = {}; 
@@ -294,17 +318,10 @@ export default function App() {
       else signInAnonymously(auth).catch(err => console.error(err));
     });
 
-    const unsubTeams = onSnapshot(
-      collection(db, 'teams'), 
-      snap => {
-        setTeams(snap.docs.map(d => d.data()));
-        setIsLoaded(true); 
-      },
-      error => {
-        console.error("Firebase load error:", error);
-        setIsLoaded(true); 
-      }
-    );
+    const unsubTeams = onSnapshot(collection(db, 'teams'), snap => {
+      setTeams(snap.docs.map(d => d.data()));
+      setIsLoaded(true); 
+    });
 
     return () => {
       unsubscribeAuth();
@@ -337,7 +354,7 @@ export default function App() {
     };
   }, []);
 
-  // --- 4. 이벤트 핸들러 및 헬퍼 로직 ---
+  // --- 4. 이벤트 핸들러 및 로직 ---
   const getTeamDisplayName = (match, letter) => {
     if (!match) return `${letter}팀`;
     if (match.matchType === 'external') {
@@ -504,7 +521,6 @@ export default function App() {
 
       const matchId = matchModal.match?.id || 'm' + Date.now().toString();
       
-      // ★ 종료된 경기의 명단을 수정한 경우 Caps 동기화 로직
       if (matchModal.match?.status === 'completed') {
         const oldAttendees = matchModal.match.attendees || [];
         const newAttendees = attendees;
@@ -592,28 +608,6 @@ export default function App() {
         await deleteDoc(doc(db, 'players', id));
         setRosterModal({ isOpen: false, player: null });
         setIsProcessing(false);
-      }
-    });
-  };
-
-  const requestResetStats = () => {
-    setSystemConfirm({
-      isOpen: true,
-      message: '🚨 정말 모든 선수의 누적 스탯(참석, 득점, 도움)을 0으로 초기화하시겠습니까?\n(테스트 데이터를 지우거나 새 시즌을 시작할 때 사용)\n\n※ 이 작업은 되돌릴 수 없습니다.',
-      onConfirm: async () => {
-        if(isProcessing) return; setIsProcessing(true);
-        try {
-          const updatePromises = currentTeamPlayers.map(p => 
-            setDoc(doc(db, 'players', p.id), { ...p, caps: 0, goals: 0, assists: 0 })
-          );
-          await Promise.all(updatePromises);
-          setSystemAlert({ isOpen: true, message: '모든 스탯이 성공적으로 초기화되었습니다.' });
-        } catch(err) {
-          console.error(err);
-          setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' });
-        } finally {
-          setIsProcessing(false);
-        }
       }
     });
   };
@@ -1119,7 +1113,6 @@ export default function App() {
     }
   };
 
-  // --- 전술 보드 관련 핸들러 ---
   const saveHistory = (newTokens, newDrawings = drawings) => {
     setPastState(prev => [...prev, { tokens: tacticTokens, drawings }].slice(-20)); 
     setFutureState([]);
@@ -1309,10 +1302,158 @@ export default function App() {
     playNext();
   };
 
+  const exportAnimationToVideo = async () => {
+    if (animationFrames.length < 2) return;
+    setSystemAlert({ isOpen: true, message: '🎬 애니메이션 비디오를 렌더링하고 있습니다.\n(약 3~5초 소요. 화면을 유지해주세요)' });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 600;
+    canvas.height = pitchType === 'full' ? 900 : 800;
+    const ctx = canvas.getContext('2d');
+    
+    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+    const stream = canvas.captureStream(30); 
+    const recorder = new MediaRecorder(stream, { mimeType });
+    const chunks = [];
+    recorder.ondataavailable = e => chunks.push(e.data);
+    
+    recorder.onstop = async () => {
+        setSystemAlert({ isOpen: false, message: '' });
+        const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+        const blob = new Blob(chunks, { type: mimeType });
+        const file = new File([blob], `tactic_animation.${ext}`, { type: mimeType });
+        
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+           try {
+              await navigator.share({ title: '전술 애니메이션', files: [file] });
+           } catch (e) {
+              if(e.name !== 'AbortError') setSystemAlert({ isOpen: true, message: '비디오가 생성되었으나 공유가 지원되지 않습니다.' });
+           }
+        } else {
+           const url = URL.createObjectURL(blob);
+           const a = document.createElement('a');
+           a.href = url;
+           a.download = `tactic_animation.${ext}`;
+           a.click();
+           setSystemAlert({ isOpen: true, message: '비디오가 다운로드 폴더(갤러리)에 저장되었습니다!' });
+        }
+    };
+
+    recorder.start();
+    
+    let frameIdx = 0;
+    let progress = 0;
+    const stepsPerFrame = 30; 
+    
+    const draw = () => {
+        ctx.fillStyle = '#047857';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height/2); ctx.lineTo(canvas.width, canvas.height/2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(canvas.width/2, canvas.height/2, 60, 0, Math.PI*2);
+        ctx.stroke();
+
+        const currentFrame = animationFrames[frameIdx];
+        const nextFrame = animationFrames[Math.min(frameIdx + 1, animationFrames.length - 1)];
+        
+        currentFrame.drawings.forEach(d => {
+            if(d.type === 'arrow' || d.type === 'pass') {
+               ctx.strokeStyle = d.type === 'arrow' ? '#FACC15' : '#60A5FA';
+               ctx.lineWidth = 5;
+               if(d.type==='pass') ctx.setLineDash([12, 12]); else ctx.setLineDash([]);
+               ctx.beginPath();
+               ctx.moveTo((d.start.x/100)*canvas.width, (d.start.y/100)*canvas.height);
+               ctx.lineTo((d.end.x/100)*canvas.width, (d.end.y/100)*canvas.height);
+               ctx.stroke();
+               ctx.setLineDash([]);
+            } else if(d.type === 'zone') {
+               ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
+               ctx.strokeStyle = '#3B82F6';
+               ctx.lineWidth = 3;
+               const x = Math.min(d.start.x, d.end.x)/100 * canvas.width;
+               const y = Math.min(d.start.y, d.end.y)/100 * canvas.height;
+               const w = Math.abs(d.start.x - d.end.x)/100 * canvas.width;
+               const h = Math.abs(d.start.y - d.end.y)/100 * canvas.height;
+               ctx.fillRect(x,y,w,h);
+               ctx.strokeRect(x,y,w,h);
+            }
+        });
+
+        currentFrame.tokens.forEach(t1 => {
+            const t2 = nextFrame.tokens.find(t => t.id === t1.id) || t1;
+            const t = progress / stepsPerFrame;
+            const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+            
+            const x = t1.x + (t2.x - t1.x) * ease;
+            const y = t1.y + (t2.y - t1.y) * ease;
+            
+            const px = (x / 100) * canvas.width;
+            const py = (y / 100) * canvas.height;
+
+            if(t1.team === 'ball') {
+                ctx.fillStyle = '#FFFFFF';
+                ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#000000';
+                ctx.font = '18px sans-serif';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText('⚽', px, py);
+            } else {
+                ctx.fillStyle = t1.team === 'A' ? '#DC2626' : '#2563EB';
+                ctx.beginPath(); ctx.arc(px, py, 22, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = t1.team === 'A' ? '#991B1B' : '#1E40AF';
+                ctx.lineWidth = 3; ctx.stroke();
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = 'bold 13px sans-serif';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(t1.name ? t1.name.slice(0,2) : t1.position, px, py);
+            }
+        });
+
+        progress++;
+        if (progress > stepsPerFrame) {
+            progress = 0;
+            frameIdx++;
+        }
+
+        if (frameIdx < animationFrames.length - 1 || (frameIdx === animationFrames.length - 1 && progress < 15)) {
+            requestAnimationFrame(draw);
+        } else {
+            recorder.stop();
+        }
+    };
+    draw();
+  };
+
+  const requestResetStats = () => {
+    setSystemConfirm({
+      isOpen: true,
+      message: '🚨 정말 모든 선수의 누적 스탯(참석, 득점, 도움)을 0으로 초기화하시겠습니까?\n(테스트 데이터를 지우거나 새 시즌을 시작할 때 사용)\n\n※ 이 작업은 되돌릴 수 없습니다.',
+      onConfirm: async () => {
+        if(isProcessing) return; setIsProcessing(true);
+        try {
+          const updatePromises = currentTeamPlayers.map(p => 
+            setDoc(doc(db, 'players', p.id), { ...p, caps: 0, goals: 0, assists: 0 })
+          );
+          await Promise.all(updatePromises);
+          setSystemAlert({ isOpen: true, message: '모든 스탯이 성공적으로 초기화되었습니다.' });
+        } catch(err) {
+          console.error(err);
+          setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' });
+        } finally {
+          setIsProcessing(false);
+        }
+      }
+    });
+  };
+
   // ==========================================
-  // 5. 팝업(모달) 렌더링 함수 모음
+  // 5. 팝업 모달 렌더링 함수 모음 (안전한 스코프로 이동)
   // ==========================================
-  
   const renderCalendarDays = () => {
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
@@ -1388,7 +1529,7 @@ export default function App() {
           ) : (
             <div className="bg-slate-800 border border-slate-700 p-5 rounded-3xl w-full shadow-xl flex flex-col items-center text-center flex-1 min-h-0 animate-in fade-in">
               <h2 className="text-lg font-black text-white flex items-center gap-1 mb-4 shrink-0">
-                <MessageCircle size={18} className="text-blue-500"/> 이미지 캡처 완료
+                <MessageCircle size={18} className="text-blue-500"/> 캡처 완료
               </h2>
               <div className="w-full flex-1 overflow-y-auto rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50 hide-scrollbar">
                 {shareModal.imgUrl && (
@@ -2190,7 +2331,7 @@ export default function App() {
   };
 
   // ==========================================
-  // 6. 메인 화면 렌더링 분기
+  // 6. 메인 화면 분기
   // ==========================================
 
   if (appState === 'login') {
@@ -2506,9 +2647,7 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // 7. 메인 탭 화면 반환 (matches, schedule, stats, tactics, roster)
-  // ==========================================
+  // 메인 탭 반환 (matches, schedule, stats, tactics, roster)
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl flex flex-col">
       {globalStyles}
@@ -2839,192 +2978,188 @@ export default function App() {
                 <button onClick={handleUndo} disabled={pastState.length === 0 || isPlaying} className="p-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Undo size={14}/></button>
                 <button onClick={handleRedo} disabled={futureState.length === 0 || isPlaying} className="p-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Redo size={14}/></button>
                 <button onClick={() => { setPitchType(pitchType); saveHistory(getInitialTacticsTokens(pitchType), []); clearFrames(); }} className="px-2.5 py-1.5 bg-slate-800 text-slate-400 rounded-lg font-bold text-[11px] border border-slate-700 hover:bg-slate-700 transition">초기화</button>
-                <button onClick={triggerTacticShare} className="px-2.5 py-1.5 bg-yellow-500/20 text-yellow-500 rounded-lg font-bold text-[11px] border border-yellow-500/30 hover:bg-yellow-500/30 transition flex items-center gap-1"><Share2 size={12}/> 공유</button>
+                <button onClick={triggerTacticShare} className="px-2.5 py-1.5 bg-yellow-500/20 text-yellow-500 rounded-lg font-bold text-[11px] border border-yellow-500/30 hover:bg-yellow-500/30 transition flex items-center gap-1"><Share2 size={12}/> 캡처</button>
               </div>
             </div>
 
-            <div className="flex-1 w-full relative min-h-0 bg-slate-950 rounded-2xl border border-slate-700 flex flex-col shadow-xl overflow-hidden">
-               
-               {/* 툴바 오버레이 (경기장 내부 우측 상단 플로팅) */}
-               <div className="absolute top-2 right-2 bg-slate-900/80 backdrop-blur-md p-1.5 rounded-xl border border-slate-600 shadow-xl flex flex-col gap-1.5 z-40">
-                 <button onClick={() => setCurrentTool('move')} className={`p-2 rounded-lg transition-colors ${currentTool === 'move' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-                   <MousePointer2 size={16}/>
-                 </button>
-                 <button onClick={() => setCurrentTool('arrow')} className={`p-2 rounded-lg transition-colors ${currentTool === 'arrow' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-                   <MoveUpRight size={16}/>
-                 </button>
-                 <button onClick={() => setCurrentTool('pass')} className={`p-2 rounded-lg transition-colors ${currentTool === 'pass' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-                   <Spline size={16}/>
-                 </button>
-                 <button onClick={() => setCurrentTool('zone')} className={`p-2 rounded-lg transition-colors ${currentTool === 'zone' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-                   <Square size={16}/>
-                 </button>
-                 <button onClick={() => setCurrentTool('erase')} className={`p-2 rounded-lg transition-colors ${currentTool === 'erase' ? 'bg-red-500 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-                   <Eraser size={16}/>
-                 </button>
-               </div>
+            {/* 드로잉 툴바 */}
+            <div className="flex justify-between items-center bg-slate-900 rounded-2xl p-1 border border-slate-700 shrink-0 mb-1 gap-1">
+               <button onClick={() => setCurrentTool('move')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'move' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
+                 <MousePointer2 size={15}/>
+                 <span className="text-[11px] font-bold">이동</span>
+               </button>
+               <button onClick={() => setCurrentTool('arrow')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'arrow' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
+                 <MoveUpRight size={15}/>
+                 <span className="text-[11px] font-bold">화살표</span>
+               </button>
+               <button onClick={() => setCurrentTool('pass')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'pass' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
+                 <Spline size={15}/>
+                 <span className="text-[11px] font-bold">패스</span>
+               </button>
+               <button onClick={() => setCurrentTool('zone')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'zone' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
+                 <Square size={15}/>
+                 <span className="text-[11px] font-bold">지역</span>
+               </button>
+               <button onClick={() => setCurrentTool('erase')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'erase' ? 'bg-red-500 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
+                 <Eraser size={15}/>
+                 <span className="text-[11px] font-bold">지우기</span>
+               </button>
+            </div>
 
-               {/* 애니메이션 오버레이 (경기장 내부 하단 플로팅) */}
-               <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-[92%] bg-slate-900/90 backdrop-blur-md p-2 rounded-2xl border border-slate-600 shadow-2xl z-40 flex flex-col gap-2">
-                 {animationFrames.length === 0 && !isAutoRecording && (
-                   <p className="text-[10px] text-yellow-400 font-bold text-center animate-pulse tracking-wide mt-1">💡 [자동 녹화]를 켜고 선수를 움직이면 애니메이션이 만들어집니다!</p>
-                 )}
-                 {isAutoRecording && (
-                   <p className="text-[10px] text-red-400 font-bold text-center animate-pulse tracking-wide mt-1">🔴 녹화 중입니다. 선수를 이동하거나 선을 그리세요!</p>
-                 )}
-                 <div className="flex items-center gap-2">
-                   <div className="bg-slate-800 px-2 py-1.5 rounded-xl text-xs font-black text-slate-300 border border-slate-700 shadow-inner flex items-center gap-1 shrink-0">
-                      <Layers size={14}/> {animationFrames.length}컷
-                   </div>
-                   <button onClick={toggleAutoRecord} disabled={isPlaying} className={`flex-1 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 shadow disabled:opacity-50 ${isAutoRecording ? 'bg-slate-700 text-red-400 border border-red-500/50 animate-pulse' : 'bg-red-500 hover:bg-red-400 text-white'}`}>
-                      <Video size={14}/> {isAutoRecording ? '녹화 중지' : '자동 녹화'}
-                   </button>
-                   <button onClick={playAnimation} disabled={isPlaying || animationFrames.length < 2 || isAutoRecording} className="flex-1 py-2 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 shadow disabled:opacity-50">
-                      <PlayCircle size={14}/> 재생
-                   </button>
-                   <button onClick={clearFrames} disabled={isPlaying || animationFrames.length === 0} className="w-10 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl flex items-center justify-center transition disabled:opacity-50 shrink-0">
-                      <Trash2 size={14}/>
-                   </button>
-                 </div>
-               </div>
+            <div className="flex-1 w-full flex justify-center items-center min-h-0 relative pb-6 mt-1">
+              <div 
+                ref={boardRef}
+                style={{ maxHeight: '100%', maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: 'none' }}
+                onPointerDown={handleBoardPointerDown}
+                onPointerMove={handleBoardPointerMove}
+                onPointerUp={handleBoardPointerUp}
+                onPointerLeave={handleBoardPointerUp}
+                className={`relative bg-emerald-700 border-2 ${isAutoRecording ? 'border-red-500 shadow-[inset_0_0_20px_rgba(239,68,68,0.7)]' : isPlaying ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'border-white/80 shadow-inner'} overflow-hidden tactic-board select-none w-full mx-auto transition-colors duration-300`}
+              >
+                {/* --- Pitch Drawings --- */}
+                {pitchType === 'full' && (
+                  <>
+                    <div className="absolute top-1/2 left-0 w-full border-t-2 border-white/60 pointer-events-none"></div>
+                    <div className="absolute top-1/2 left-1/2 w-20 h-20 sm:w-28 sm:h-28 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
+                    <div className="absolute top-1/2 left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
+                    
+                    {/* Top Penalty Area */}
+                    <div className="absolute top-0 left-1/2 w-3/5 h-[15%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
+                    <div className="absolute top-0 left-1/2 w-[25%] h-[6%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
+                    <div className="absolute top-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
+                    <div className="absolute top-[15%] left-1/2 w-12 h-6 border-b-2 border-white/60 rounded-b-full -translate-x-1/2 pointer-events-none"></div>
 
-              {/* 경기장 (Board) 캡처 영역 */}
-              <div className="flex-1 w-full flex justify-center items-center overflow-hidden">
-                <div 
-                  ref={boardRef}
-                  style={{ maxHeight: '100%', maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: 'none' }}
-                  onPointerDown={handleBoardPointerDown}
-                  onPointerMove={handleBoardPointerMove}
-                  onPointerUp={handleBoardPointerUp}
-                  onPointerLeave={handleBoardPointerUp}
-                  className={`relative bg-emerald-700 w-full mx-auto shadow-inner tactic-board select-none transition-all duration-300 border-2 ${isAutoRecording ? 'border-red-500 shadow-[inset_0_0_20px_rgba(239,68,68,0.5)]' : isPlaying ? 'border-blue-500 shadow-[inset_0_0_20px_rgba(59,130,246,0.5)]' : 'border-white/80'}`}
-                >
-                  {/* --- Pitch Drawings --- */}
-                  {pitchType === 'full' && (
-                    <>
-                      <div className="absolute top-1/2 left-0 w-full border-t-2 border-white/60 pointer-events-none"></div>
-                      <div className="absolute top-1/2 left-1/2 w-20 h-20 sm:w-28 sm:h-28 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
-                      <div className="absolute top-1/2 left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
-                      
-                      {/* Top Penalty Area */}
-                      <div className="absolute top-0 left-1/2 w-3/5 h-[15%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
-                      <div className="absolute top-0 left-1/2 w-[25%] h-[6%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
-                      <div className="absolute top-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
-                      <div className="absolute top-[15%] left-1/2 w-12 h-6 border-b-2 border-white/60 rounded-b-full -translate-x-1/2 pointer-events-none"></div>
+                    {/* Bottom Penalty Area */}
+                    <div className="absolute bottom-0 left-1/2 w-3/5 h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
+                    <div className="absolute bottom-0 left-1/2 w-[25%] h-[6%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
+                    <div className="absolute bottom-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
+                    <div className="absolute bottom-[15%] left-1/2 w-12 h-6 border-t-2 border-white/60 rounded-t-full -translate-x-1/2 pointer-events-none"></div>
+                  </>
+                )}
 
-                      {/* Bottom Penalty Area */}
-                      <div className="absolute bottom-0 left-1/2 w-3/5 h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
-                      <div className="absolute bottom-0 left-1/2 w-[25%] h-[6%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
-                      <div className="absolute bottom-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
-                      <div className="absolute bottom-[15%] left-1/2 w-12 h-6 border-t-2 border-white/60 rounded-t-full -translate-x-1/2 pointer-events-none"></div>
-                    </>
-                  )}
+                {pitchType === 'half' && (
+                  <>
+                    <div className="absolute top-0 left-0 w-full border-t-2 border-white/60 pointer-events-none"></div>
+                    <div className="absolute top-0 left-1/2 w-32 h-32 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
 
-                  {pitchType === 'half' && (
-                    <>
-                      <div className="absolute top-0 left-0 w-full border-t-2 border-white/60 pointer-events-none"></div>
-                      <div className="absolute top-0 left-1/2 w-32 h-32 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
+                    <div className="absolute bottom-0 left-1/2 w-[70%] h-[40%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
+                    <div className="absolute bottom-0 left-1/2 w-[35%] h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
+                    <div className="absolute bottom-[30%] left-1/2 w-2 h-2 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
+                    <div className="absolute bottom-[40%] left-1/2 w-20 h-10 border-t-2 border-white/60 rounded-t-full -translate-x-1/2 pointer-events-none"></div>
+                  </>
+                )}
 
-                      <div className="absolute bottom-0 left-1/2 w-[70%] h-[40%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
-                      <div className="absolute bottom-0 left-1/2 w-[35%] h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
-                      <div className="absolute bottom-[30%] left-1/2 w-2 h-2 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
-                      <div className="absolute bottom-[40%] left-1/2 w-20 h-10 border-t-2 border-white/60 rounded-t-full -translate-x-1/2 pointer-events-none"></div>
-                    </>
-                  )}
+                {/* --- User Drawings (Lines, Passes, Zones) --- */}
+                <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
+                  <defs>
+                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                      <polygon points="0 0, 10 3.5, 0 7" fill="#FACC15" />
+                    </marker>
+                    <marker id="passhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                      <polygon points="0 0, 10 3.5, 0 7" fill="#60A5FA" />
+                    </marker>
+                  </defs>
+                  
+                  {/* 직접 DOM 조작용 레퍼런스 요소 */}
+                  <line ref={svgArrowRef} stroke="#FACC15" strokeWidth="4" markerEnd="url(#arrowhead)" style={{display: 'none'}} />
+                  <line ref={svgPassRef} stroke="#60A5FA" strokeWidth="4" strokeDasharray="8,8" markerEnd="url(#passhead)" style={{display: 'none'}} />
+                  <rect ref={svgZoneRef} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="3" style={{display: 'none'}} />
 
-                  {/* --- User Drawings --- */}
-                  <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
-                    <defs>
-                      <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                        <polygon points="0 0, 10 3.5, 0 7" fill="#FACC15" />
-                      </marker>
-                      <marker id="passhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                        <polygon points="0 0, 10 3.5, 0 7" fill="#60A5FA" />
-                      </marker>
-                    </defs>
-                    {[...drawings, activeDrawing].filter(Boolean).map(d => {
-                      const isEraseMode = currentTool === 'erase' && !isPlaying;
-                      const pointerClass = isEraseMode ? 'pointer-events-auto cursor-pointer hover:stroke-red-500 hover:stroke-[5px] transition-all' : 'transition-all duration-1000';
-                      
-                      if (d.type === 'arrow') {
-                        return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#FACC15" strokeWidth="3" markerEnd="url(#arrowhead)" className={pointerClass} onPointerDown={(e) => handleEraseDrawing(e, d.id)} />
-                      }
-                      if (d.type === 'pass') {
-                        return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#60A5FA" strokeWidth="3" strokeDasharray="6,6" markerEnd="url(#passhead)" className={pointerClass} onPointerDown={(e) => handleEraseDrawing(e, d.id)} />
-                      }
-                      if (d.type === 'zone') {
-                        const x = Math.min(d.start.x, d.end.x);
-                        const y = Math.min(d.start.y, d.end.y);
-                        const w = Math.abs(d.start.x - d.end.x);
-                        const h = Math.abs(d.start.y - d.end.y);
-                        const rectClass = isEraseMode ? 'pointer-events-auto cursor-pointer hover:fill-red-500/30 hover:stroke-red-500 transition-all' : 'transition-all duration-1000';
-                        return <rect key={d.id} x={`${x}%`} y={`${y}%`} width={`${w}%`} height={`${h}%`} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="2" className={rectClass} onPointerDown={(e) => handleEraseDrawing(e, d.id)} />
-                      }
-                      return null;
-                    })}
-                  </svg>
+                  {drawings.filter(Boolean).map(d => {
+                    const isEraseMode = currentTool === 'erase' && !isPlaying;
+                    const pointerClass = isEraseMode ? 'pointer-events-auto cursor-pointer hover:stroke-red-500 hover:stroke-[5px] transition-all' : 'transition-all duration-1000';
+                    
+                    if (d.type === 'arrow') {
+                      return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#FACC15" strokeWidth="4" markerEnd="url(#arrowhead)" className={pointerClass} onPointerDown={(e) => handleEraseDrawing(e, d.id)} />
+                    }
+                    if (d.type === 'pass') {
+                      return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#60A5FA" strokeWidth="4" strokeDasharray="8,8" markerEnd="url(#passhead)" className={pointerClass} onPointerDown={(e) => handleEraseDrawing(e, d.id)} />
+                    }
+                    if (d.type === 'zone') {
+                      const x = Math.min(d.start.x, d.end.x);
+                      const y = Math.min(d.start.y, d.end.y);
+                      const w = Math.abs(d.start.x - d.end.x);
+                      const h = Math.abs(d.start.y - d.end.y);
+                      const rectClass = isEraseMode ? 'pointer-events-auto cursor-pointer hover:fill-red-500/30 hover:stroke-red-500 transition-all' : 'transition-all duration-1000';
+                      return <rect key={d.id} x={`${x}%`} y={`${y}%`} width={`${w}%`} height={`${h}%`} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="3" className={rectClass} onPointerDown={(e) => handleEraseDrawing(e, d.id)} />
+                    }
+                    return null;
+                  })}
+                </svg>
 
-                  {/* --- Tokens --- */}
-                  {tacticTokens.map(t => (
-                    <div
-                      key={t.id}
-                      onPointerDown={(e) => handleTokenPointerDown(e, t)}
-                      style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
-                      className={`absolute rounded-full flex flex-col items-center justify-center font-black text-[10px] sm:text-[11px] 
-                        ${isPlaying ? 'transition-all duration-1000 ease-in-out pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
-                        ${currentTool !== 'move' && !isPlaying ? 'pointer-events-none z-20' : ''}
-                        ${t.team === 'A' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-red-600 text-white border border-red-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
-                        ${t.team === 'B' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 text-white border border-blue-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
-                        ${t.team === 'ball' ? 'w-6 h-6 sm:w-7 sm:h-7 bg-white text-black shadow-[inset_0_-1px_3px_rgba(0,0,0,0.3),_0_3px_6px_rgba(0,0,0,0.6)] text-[16px]' : ''}
-                      `}
-                    >
-                      <span>{t.team === 'ball' ? t.label : t.position}</span>
-                      {t.name && (
-                        <span className="absolute top-[120%] text-[10px] sm:text-[11px] font-bold text-white bg-black/80 px-2 py-0.5 rounded-full shadow-md whitespace-nowrap z-40 pointer-events-none tracking-tight border border-white/20">
-                          {t.name}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                {/* --- Tokens --- */}
+                {tacticTokens.map(t => (
+                  <div
+                    key={t.id}
+                    onPointerDown={(e) => handleTokenPointerDown(e, t)}
+                    style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
+                    className={`absolute rounded-full flex flex-col items-center justify-center font-black transition-transform duration-75 text-[10px] sm:text-[11px] 
+                      ${isPlaying ? 'transition-all duration-1000 ease-in-out pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
+                      ${currentTool !== 'move' && !isPlaying ? 'pointer-events-none z-20' : ''}
+                      ${t.team === 'A' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-red-600 text-white border border-red-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
+                      ${t.team === 'B' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 text-white border border-blue-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
+                      ${t.team === 'ball' ? 'w-6 h-6 sm:w-7 sm:h-7 bg-white text-black shadow-[inset_0_-1px_3px_rgba(0,0,0,0.3),_0_3px_6px_rgba(0,0,0,0.6)] text-[16px]' : ''}
+                    `}
+                  >
+                    <span>{t.team === 'ball' ? t.label : t.position}</span>
+                    {t.name && (
+                      <span className="absolute top-[120%] text-[10px] sm:text-[11px] font-bold text-white bg-black/80 px-2 py-0.5 rounded-full shadow-md whitespace-nowrap z-40 pointer-events-none tracking-tight border border-white/20">
+                        {t.name}
+                      </span>
+                    )}
+                  </div>
+                ))}
+                
+                {isPlaying && (
+                  <div className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded-md animate-pulse z-30 shadow-md flex items-center gap-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-white animate-ping"></div> 재생 중
+                  </div>
+                )}
               </div>
             </div>
             
-            {/* ★ A팀/B팀 선수 증감 및 수동 입력 UI */}
-            <div className="flex gap-2 shrink-0 border-t border-slate-800 pt-3">
-               <div className="flex-1 flex items-center justify-between bg-red-500/5 border border-red-500/20 rounded-xl p-1.5 pl-3">
-                 <span className="text-[11px] font-bold text-red-400">A팀 선수</span>
-                 <div className="flex items-center gap-1">
-                   <button onClick={() => handleUpdatePlayerCount('A', tacticTokens.filter(t=>t.team==='A').length - 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition font-black text-sm disabled:opacity-50">-</button>
-                   <input 
-                     type="number" 
-                     value={tacticTokens.filter(t=>t.team==='A').length === 0 ? '' : tacticTokens.filter(t=>t.team==='A').length} 
-                     onChange={(e) => {
-                        const val = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
-                        handleUpdatePlayerCount('A', val);
-                     }} 
-                     disabled={isPlaying}
-                     className="w-8 text-center bg-transparent text-white text-xs font-bold outline-none disabled:opacity-50" 
-                   />
-                   <button onClick={() => handleUpdatePlayerCount('A', tacticTokens.filter(t=>t.team==='A').length + 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition font-black text-sm disabled:opacity-50">+</button>
+            {/* ★ 애니메이션 프레임 제어 및 A/B팀 선수 조절 */}
+            <div className="flex flex-col gap-2 shrink-0 border-t border-slate-800 pt-2">
+               {animationFrames.length === 0 && !isAutoRecording && (
+                 <p className="text-[10px] text-yellow-400 font-bold text-center animate-pulse tracking-wide my-1">💡 [자동 녹화]를 켜고 선수를 움직이면 자동으로 저장됩니다!</p>
+               )}
+               {isAutoRecording && (
+                 <p className="text-[10px] text-red-400 font-bold text-center animate-pulse tracking-wide my-1">🔴 녹화 중입니다. 선수를 이동하거나 선을 그리세요!</p>
+               )}
+               <div className="flex items-center gap-2 bg-slate-900 rounded-2xl p-1 border border-slate-700">
+                 <div className="bg-slate-800 px-2 py-2 rounded-xl text-xs font-black text-slate-300 border border-slate-700 shadow-inner flex items-center gap-1 shrink-0 w-[55px] justify-center">
+                    {animationFrames.length}컷
                  </div>
+                 <button onClick={toggleAutoRecord} disabled={isPlaying} className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50 ${isAutoRecording ? 'bg-slate-700 text-red-400 border border-red-500/50 animate-pulse' : 'bg-red-500 hover:bg-red-400 text-white'}`}>
+                    <Video size={14}/> {isAutoRecording ? '녹화 중지' : '자동 녹화'}
+                 </button>
+                 <button onClick={playAnimation} disabled={isPlaying || animationFrames.length < 2 || isAutoRecording} className="flex-1 py-2.5 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50">
+                    <PlayCircle size={14}/> 재생
+                 </button>
+                 <button onClick={exportAnimationToVideo} disabled={isPlaying || animationFrames.length < 2 || isAutoRecording} className="flex-1 py-2.5 bg-[#FEE500] hover:bg-[#FEE500]/90 text-slate-900 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50">
+                    <Share2 size={14}/> 영상공유
+                 </button>
+                 <button onClick={clearFrames} disabled={isPlaying || animationFrames.length === 0} className="w-10 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl flex items-center justify-center transition disabled:opacity-50 shrink-0">
+                    <Trash2 size={14}/>
+                 </button>
                </div>
-               
-               <div className="flex-1 flex items-center justify-between bg-blue-500/5 border border-blue-500/20 rounded-xl p-1.5 pl-3">
-                 <span className="text-[11px] font-bold text-blue-400">B팀 선수</span>
-                 <div className="flex items-center gap-1">
-                   <button onClick={() => handleUpdatePlayerCount('B', tacticTokens.filter(t=>t.team==='B').length - 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition font-black text-sm disabled:opacity-50">-</button>
-                   <input 
-                     type="number" 
-                     value={tacticTokens.filter(t=>t.team==='B').length === 0 ? '' : tacticTokens.filter(t=>t.team==='B').length} 
-                     onChange={(e) => {
-                        const val = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
-                        handleUpdatePlayerCount('B', val);
-                     }} 
-                     disabled={isPlaying}
-                     className="w-8 text-center bg-transparent text-white text-xs font-bold outline-none disabled:opacity-50" 
-                   />
-                   <button onClick={() => handleUpdatePlayerCount('B', tacticTokens.filter(t=>t.team==='B').length + 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition font-black text-sm disabled:opacity-50">+</button>
+
+               <div className="flex gap-2">
+                 <div className="flex-1 flex items-center justify-between bg-red-500/5 border border-red-500/20 rounded-xl p-1 pl-3">
+                   <span className="text-[11px] font-bold text-red-400">A팀 선수</span>
+                   <div className="flex items-center gap-0.5">
+                     <button onClick={() => handleUpdatePlayerCount('A', tacticTokens.filter(t=>t.team==='A').length - 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-slate-700/50 text-red-400 rounded-lg hover:bg-slate-600 transition font-black text-sm disabled:opacity-50">-</button>
+                     <input type="number" value={tacticTokens.filter(t=>t.team==='A').length === 0 ? '' : tacticTokens.filter(t=>t.team==='A').length} onChange={(e) => handleUpdatePlayerCount('A', e.target.value === '' ? 0 : parseInt(e.target.value, 10))} disabled={isPlaying} className="w-7 text-center bg-transparent text-white text-[13px] font-black outline-none disabled:opacity-50" />
+                     <button onClick={() => handleUpdatePlayerCount('A', tacticTokens.filter(t=>t.team==='A').length + 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-slate-700/50 text-red-400 rounded-lg hover:bg-slate-600 transition font-black text-sm disabled:opacity-50">+</button>
+                   </div>
+                 </div>
+                 <div className="flex-1 flex items-center justify-between bg-blue-500/5 border border-blue-500/20 rounded-xl p-1 pl-3">
+                   <span className="text-[11px] font-bold text-blue-400">B팀 선수</span>
+                   <div className="flex items-center gap-0.5">
+                     <button onClick={() => handleUpdatePlayerCount('B', tacticTokens.filter(t=>t.team==='B').length - 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-slate-700/50 text-blue-400 rounded-lg hover:bg-slate-600 transition font-black text-sm disabled:opacity-50">-</button>
+                     <input type="number" value={tacticTokens.filter(t=>t.team==='B').length === 0 ? '' : tacticTokens.filter(t=>t.team==='B').length} onChange={(e) => handleUpdatePlayerCount('B', e.target.value === '' ? 0 : parseInt(e.target.value, 10))} disabled={isPlaying} className="w-7 text-center bg-transparent text-white text-[13px] font-black outline-none disabled:opacity-50" />
+                     <button onClick={() => handleUpdatePlayerCount('B', tacticTokens.filter(t=>t.team==='B').length + 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-slate-700/50 text-blue-400 rounded-lg hover:bg-slate-600 transition font-black text-sm disabled:opacity-50">+</button>
+                   </div>
                  </div>
                </div>
             </div>
@@ -3047,20 +3182,20 @@ export default function App() {
                 </div>
               )}
             </div>
-            {currentTeamPlayers.length === 0 && (
+            {calculatedPlayersList.length === 0 && (
               <div className="text-center py-8 text-slate-500 border border-slate-800 rounded-2xl text-sm">등록된 선수가 없습니다.</div>
             )}
             <div className="space-y-2">
-              {currentTeamPlayers.map(p => (
+              {calculatedPlayersList.map(p => (
                 <div key={p.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex justify-between items-center group shadow-sm">
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-600 flex items-center justify-center font-black text-slate-400">{p.birthYear}</div>
                     <div>
                       <div className="font-bold text-white text-lg">{p.name}</div>
                       <div className="flex items-center gap-2 mt-1.5">
-                        <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">누적 참석 <strong className="text-blue-400">{p.caps || 0}</strong></span>
-                        <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">⚽ <strong className="text-white">{p.goals || 0}</strong></span>
-                        <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">👟 <strong className="text-white">{p.assists || 0}</strong></span>
+                        <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">누적 참석 <strong className="text-blue-400">{p.trueCaps || 0}</strong></span>
+                        <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">⚽ <strong className="text-white">{p.trueGoals || 0}</strong></span>
+                        <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">👟 <strong className="text-white">{p.trueAssists || 0}</strong></span>
                       </div>
                     </div>
                   </div>
