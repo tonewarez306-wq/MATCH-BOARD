@@ -105,7 +105,8 @@ const formatTimeAmPm = (timeStr) => {
   const [h, m] = timeStr.split(':');
   const hour = parseInt(h, 10);
   const ampm = hour >= 12 ? '오후' : '오전';
-  return `${ampm} ${hour % 12 || 12}:${m}`;
+  const formattedHour = hour % 12 || 12;
+  return `${ampm} ${formattedHour}:${m}`;
 };
 
 const getTodayString = () => {
@@ -113,7 +114,7 @@ const getTodayString = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-// ★ 초기 전술 보드 설정: A팀(우리 팀)과 공만 보이도록 설정
+// ★ 초기 전술 보드: A팀(우리 팀)과 공만 보이도록 설정
 const getInitialTacticsTokens = (pitchType) => {
   const tokens = [];
   if (pitchType === 'full') {
@@ -147,7 +148,6 @@ export default function App() {
   const [activeTeamId, setActiveTeamId] = useState(null);
   const [players, setPlayers] = useState([]);
   const [matches, setMatches] = useState([]);
-
   const [viewDate, setViewDate] = useState(new Date());
 
   const [systemAlert, setSystemAlert] = useState({ isOpen: false, message: '' });
@@ -185,23 +185,23 @@ export default function App() {
   const [currentTool, setCurrentTool] = useState('move'); 
   const [tacticTokens, setTacticTokens] = useState(getInitialTacticsTokens('full'));
   const [drawings, setDrawings] = useState([]);
-  const [activeDrawing, setActiveDrawing] = useState(null);
   const [pastState, setPastState] = useState([]);
   const [futureState, setFutureState] = useState([]);
   const [draggingToken, setDraggingToken] = useState(null);
   const [tokenEditModal, setTokenEditModal] = useState({ isOpen: false, token: null });
   
-  // 애니메이션 관련 State
+  // --- 애니메이션 관련 State ---
   const [animationFrames, setAnimationFrames] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAutoRecording, setIsAutoRecording] = useState(false); 
-
   const playbackRef = useRef(null);
+
+  // --- DOM 제어용 Refs ---
   const boardRef = useRef(null);
   const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 });
   const dragStartTokensRef = useRef(null);
+  const activeDrawingData = useRef(null); // 빠른 그리기 데이터 연산용
 
-  // 빠른 그리기를 위한 직접 조작 DOM Refs
   const svgArrowRef = useRef(null);
   const svgPassRef = useRef(null);
   const svgZoneRef = useRef(null);
@@ -212,16 +212,6 @@ export default function App() {
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
   const liveMatch = useMemo(() => matches.find(m => m.id === liveMatchId), [matches, liveMatchId]);
   const detailMatch = useMemo(() => matches.find(m => m.id === detailModalMatchId), [matches, detailModalMatchId]);
-
-  // ★ 누락되었던 팀 이름 추출 함수 복구
-  const getTeamDisplayName = (match, letter) => {
-    if (!match) return `${letter}팀`;
-    if (match.matchType === 'external') {
-      if (letter === 'A') return activeTeam?.name || '우리 팀';
-      if (letter === 'B') return match.opponentName || '상대 팀';
-    }
-    return `${letter}팀`;
-  };
 
   const viewYearMonth = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
   const monthlyMatches = useMemo(() => currentTeamMatches.filter(m => m.date.startsWith(viewYearMonth)), [currentTeamMatches, viewYearMonth]);
@@ -269,7 +259,7 @@ export default function App() {
     <style>{`
       *::-webkit-scrollbar { display: none !important; width: 0 !important; }
       * { -ms-overflow-style: none !important; scrollbar-width: none !important; }
-      /* 전술보드 터치 스크롤 허용 처리는 인라인 스타일로 제어 */
+      .tactic-board { touch-action: none; }
       input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
       input[type="number"] { -moz-appearance: textfield; }
       .will-change-transform { will-change: transform, left, top; }
@@ -301,7 +291,16 @@ export default function App() {
     return () => { if (playbackRef.current) clearTimeout(playbackRef.current); };
   }, []);
 
-  // --- 일반 이벤트 핸들러 ---
+  // --- 이벤트 핸들러 ---
+  const getTeamDisplayName = (match, letter) => {
+    if (!match) return `${letter}팀`;
+    if (match.matchType === 'external') {
+      if (letter === 'A') return activeTeam?.name || '우리 팀';
+      if (letter === 'B') return match.opponentName || '상대 팀';
+    }
+    return `${letter}팀`;
+  };
+
   const prevMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
   const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
 
@@ -388,8 +387,6 @@ export default function App() {
       attendees.forEach(pId => { if (matchType === 'external') newAssignments[pId] = 'A'; });
 
       const matchId = matchModal.match?.id || 'm' + Date.now().toString();
-      
-      // 종료된 경기 명단 수정 시 선수 캡스 연동
       if (matchModal.match?.status === 'completed') {
         const oldAttendees = matchModal.match.attendees || [];
         const added = attendees.filter(id => !oldAttendees.includes(id));
@@ -620,7 +617,6 @@ export default function App() {
     } catch (err) { setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' }); } finally { setIsProcessing(false); }
   };
 
-  // --- 리포트/캡처 공유 ---
   const triggerShare = (data) => {
     setShareModal({ isOpen: true, step: 1, data, file: null, imgUrl: null, isVideo: false });
     setTimeout(async () => {
@@ -673,7 +669,6 @@ export default function App() {
     } else { downloadFallback(file, shareModal.imgUrl); }
   };
 
-  // --- 전술 보드 조작 ---
   const saveHistory = (newTokens, newDrawings = drawings) => {
     setPastState(prev => [...prev, { tokens: tacticTokens, drawings }].slice(-20)); 
     setFutureState([]);
@@ -733,10 +728,7 @@ export default function App() {
     const rect = boardRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100; const y = ((e.clientY - rect.top) / rect.height) * 100;
     if (currentTool === 'arrow' || currentTool === 'pass' || currentTool === 'zone') {
-       if (currentTool === 'arrow' && svgArrowRef.current) { svgArrowRef.current.style.display = 'block'; svgArrowRef.current.setAttribute('x1', `${x}%`); svgArrowRef.current.setAttribute('y1', `${y}%`); svgArrowRef.current.setAttribute('x2', `${x}%`); svgArrowRef.current.setAttribute('y2', `${y}%`); }
-       if (currentTool === 'pass' && svgPassRef.current) { svgPassRef.current.style.display = 'block'; svgPassRef.current.setAttribute('x1', `${x}%`); svgPassRef.current.setAttribute('y1', `${y}%`); svgPassRef.current.setAttribute('x2', `${x}%`); svgPassRef.current.setAttribute('y2', `${y}%`); }
-       if (currentTool === 'zone' && svgZoneRef.current) { svgZoneRef.current.style.display = 'block'; svgZoneRef.current.setAttribute('x', `${x}%`); svgZoneRef.current.setAttribute('y', `${y}%`); svgZoneRef.current.setAttribute('width', `0%`); svgZoneRef.current.setAttribute('height', `0%`); }
-       activeDrawingData.current = { id: Date.now(), type: currentTool, start: {x, y}, end: {x, y} };
+       setActiveDrawing({ id: Date.now(), type: currentTool, start: {x, y}, end: {x, y} });
     }
   };
 
@@ -748,15 +740,8 @@ export default function App() {
 
     if (currentTool === 'move' && draggingToken) {
       setTacticTokens(prev => prev.map(t => t.id === draggingToken ? { ...t, x, y } : t));
-    } else if (activeDrawingData.current) {
-      activeDrawingData.current.end = {x, y};
-      if (activeDrawingData.current.type === 'arrow' && svgArrowRef.current) { svgArrowRef.current.setAttribute('x2', `${x}%`); svgArrowRef.current.setAttribute('y2', `${y}%`); }
-      if (activeDrawingData.current.type === 'pass' && svgPassRef.current) { svgPassRef.current.setAttribute('x2', `${x}%`); svgPassRef.current.setAttribute('y2', `${y}%`); }
-      if (activeDrawingData.current.type === 'zone' && svgZoneRef.current) {
-         const sx = activeDrawingData.current.start.x; const sy = activeDrawingData.current.start.y;
-         svgZoneRef.current.setAttribute('x', `${Math.min(sx, x)}%`); svgZoneRef.current.setAttribute('y', `${Math.min(sy, y)}%`);
-         svgZoneRef.current.setAttribute('width', `${Math.abs(sx - x)}%`); svgZoneRef.current.setAttribute('height', `${Math.abs(sy - y)}%`);
-      }
+    } else if (activeDrawing) {
+      setActiveDrawing(prev => ({ ...prev, end: {x, y} }));
     }
   };
 
@@ -770,13 +755,10 @@ export default function App() {
          setTacticTokens(dragStartTokensRef.current);
       } else { saveHistory(tacticTokens); }
       setDraggingToken(null);
-    } else if (activeDrawingData.current) {
-      const dist = Math.sqrt(Math.pow(activeDrawingData.current.start.x - activeDrawingData.current.end.x, 2) + Math.pow(activeDrawingData.current.start.y - activeDrawingData.current.end.y, 2));
-      if (dist > 2) { const newDrawings = [...drawings, activeDrawingData.current]; saveHistory(tacticTokens, newDrawings); }
-      activeDrawingData.current = null;
-      if (svgArrowRef.current) svgArrowRef.current.style.display = 'none';
-      if (svgPassRef.current) svgPassRef.current.style.display = 'none';
-      if (svgZoneRef.current) svgZoneRef.current.style.display = 'none';
+    } else if (activeDrawing) {
+      const dist = Math.sqrt(Math.pow(activeDrawing.start.x - activeDrawing.end.x, 2) + Math.pow(activeDrawing.start.y - activeDrawing.end.y, 2));
+      if (dist > 2) { const newDrawings = [...drawings, activeDrawing]; saveHistory(tacticTokens, newDrawings); }
+      setActiveDrawing(null);
     }
   };
 
@@ -796,7 +778,6 @@ export default function App() {
     saveHistory(newTokens); setTokenEditModal({ isOpen: false, token: null });
   };
 
-  // --- 전술 영상 (애니메이션) 처리 ---
   const toggleAutoRecord = () => {
     if (!isAutoRecording) {
       setAnimationFrames([{ tokens: JSON.parse(JSON.stringify(tacticTokens)), drawings: JSON.parse(JSON.stringify(drawings)) }]);
@@ -950,7 +931,7 @@ export default function App() {
     return (
       <>
         {systemAlert.isOpen && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[210] p-4">
             <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
               <p className="text-white font-bold mb-6 whitespace-pre-line">{systemAlert.message}</p>
               <button onClick={() => setSystemAlert({isOpen: false, message: ''})} className="w-full py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
@@ -958,7 +939,7 @@ export default function App() {
           </div>
         )}
         {systemConfirm.isOpen && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[210] p-4">
             <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
               <p className="text-white font-bold mb-6 whitespace-pre-line">{systemConfirm.message}</p>
               <div className="flex gap-3">
@@ -983,13 +964,13 @@ export default function App() {
   function renderShareModal() {
     if (!shareModal.isOpen) return null;
     return (
-      <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-[90]">
+      <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-[150]">
         <div className="w-full max-w-sm flex flex-col items-center max-h-[90vh]">
           {shareModal.step === 1 ? (
             <div className="bg-slate-800 border border-slate-700 p-6 rounded-3xl w-full shadow-xl flex flex-col items-center text-center animate-in zoom-in-95">
               <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4 mt-8"></div>
               <h2 className="text-lg font-black text-white mb-1">리포트 미디어 생성 중...</h2>
-              <p className="text-sm text-slate-400 font-medium mb-8">화면을 렌더링하고 있습니다.</p>
+              <p className="text-sm text-slate-400 font-medium mb-8">화면을 캡처하고 있습니다.</p>
             </div>
           ) : (
             <div className="bg-slate-800 border border-slate-700 p-5 rounded-3xl w-full shadow-xl flex flex-col items-center text-center flex-1 min-h-0 animate-in fade-in">
@@ -1428,7 +1409,7 @@ export default function App() {
             </div>
             <div className="flex gap-3 pt-4">
               <button type="button" onClick={() => setRosterModal({isOpen: false, player: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold transition hover:bg-slate-600">취소</button>
-              <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold transition hover:bg-blue-400 shadow-lg">저하기</button>
+              <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold transition hover:bg-blue-400 shadow-lg">저장하기</button>
             </div>
           </form>
         </div>
@@ -1719,7 +1700,7 @@ export default function App() {
   function renderTokenEditModal() {
     if (!tokenEditModal.isOpen || !tokenEditModal.token) return null;
     return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[70] animate-in fade-in">
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100] animate-in fade-in">
         <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
           <h2 className="text-xl font-bold text-white mb-4 text-center">선수 정보 설정</h2>
           <form onSubmit={handleTokenEditSave} className="space-y-4">
@@ -1796,6 +1777,7 @@ export default function App() {
       </div>
     );
   }
+
 
   // ==========================================
   // JSX 메인 컴포넌트 구조
@@ -2102,6 +2084,7 @@ export default function App() {
           <div className="h-6 shrink-0 w-full"></div>
         </div>
         
+        {/* 팝업 렌더링 영역 */}
         {renderAssignmentModal()}
         {renderShareModal()}
         {renderHiddenCaptureArea()}
@@ -2112,9 +2095,7 @@ export default function App() {
     );
   }
 
-  // ==========================================
   // 메인 탭 반환 (matches, schedule, stats, tactics, roster)
-  // ==========================================
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl flex flex-col">
       {globalStyles}
@@ -2445,21 +2426,20 @@ export default function App() {
                 <button onClick={handleUndo} disabled={pastState.length === 0 || isPlaying} className="p-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Undo size={14}/></button>
                 <button onClick={handleRedo} disabled={futureState.length === 0 || isPlaying} className="p-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Redo size={14}/></button>
                 <button onClick={() => { setPitchType(pitchType); saveHistory(getInitialTacticsTokens(pitchType), []); clearFrames(); }} className="px-2.5 py-1.5 bg-slate-800 text-slate-400 rounded-lg font-bold text-[11px] border border-slate-700 hover:bg-slate-700 transition">초기화</button>
-                <button onClick={triggerTacticShare} className="px-2.5 py-1.5 bg-yellow-500/20 text-yellow-500 rounded-lg font-bold text-[11px] border border-yellow-500/30 hover:bg-yellow-500/30 transition flex items-center gap-1"><Share2 size={12}/> 캡처</button>
               </div>
             </div>
 
             <div className="flex justify-between items-center bg-slate-900 rounded-2xl p-1 border border-slate-700 shrink-0 mb-1 gap-1">
                <button onClick={() => setCurrentTool('move')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'move' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
-                 <MousePointer2 size={15}/>
+                 <MousePointer size={15}/>
                  <span className="text-[11px] font-bold">이동</span>
                </button>
                <button onClick={() => setCurrentTool('arrow')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'arrow' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
-                 <MoveUpRight size={15}/>
+                 <ArrowUpRight size={15}/>
                  <span className="text-[11px] font-bold">화살표</span>
                </button>
                <button onClick={() => setCurrentTool('pass')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'pass' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
-                 <Spline size={15}/>
+                 <TrendingUp size={15}/>
                  <span className="text-[11px] font-bold">패스</span>
                </button>
                <button onClick={() => setCurrentTool('zone')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'zone' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
@@ -2467,7 +2447,7 @@ export default function App() {
                  <span className="text-[11px] font-bold">지역</span>
                </button>
                <button onClick={() => setCurrentTool('erase')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'erase' ? 'bg-red-500 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
-                 <Eraser size={15}/>
+                 <XCircle size={15}/>
                  <span className="text-[11px] font-bold">지우기</span>
                </button>
             </div>
@@ -2515,7 +2495,7 @@ export default function App() {
                   </>
                 )}
 
-                {/* --- User Drawings --- */}
+                {/* --- User Drawings (Lines, Passes, Zones) --- */}
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
                   <defs>
                     <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -2526,6 +2506,7 @@ export default function App() {
                     </marker>
                   </defs>
                   
+                  {/* 직접 DOM 조작용 레퍼런스 요소 */}
                   <line ref={svgArrowRef} stroke="#FACC15" strokeWidth="4" markerEnd="url(#arrowhead)" style={{display: 'none'}} />
                   <line ref={svgPassRef} stroke="#60A5FA" strokeWidth="4" strokeDasharray="8,8" markerEnd="url(#passhead)" style={{display: 'none'}} />
                   <rect ref={svgZoneRef} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="3" style={{display: 'none'}} />
@@ -2556,10 +2537,11 @@ export default function App() {
                 {tacticTokens.map(t => (
                   <div
                     key={t.id}
+                    id={`token-${t.id}`}
                     onPointerDown={(e) => handleTokenPointerDown(e, t)}
                     style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
                     className={`absolute rounded-full flex flex-col items-center justify-center font-black transition-transform duration-75 text-[10px] sm:text-[11px] will-change-transform 
-                      ${isPlaying ? 'transition-[left,top] duration-1000 ease-in-out pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
+                      ${isPlaying ? 'pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
                       ${currentTool !== 'move' && !isPlaying ? 'pointer-events-none z-20' : ''}
                       ${t.team === 'A' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-red-600 text-white border border-red-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
                       ${t.team === 'B' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 text-white border border-blue-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
@@ -2701,7 +2683,7 @@ export default function App() {
       </nav>
 
       {/* ============================================================================ */}
-      {/* 팝업 모달 영역 (가장 안전한 위치에서 렌더링) */}
+      {/* 팝업 모달 영역 */}
       {/* ============================================================================ */}
       {renderDetailModal()}
       {renderMatchModalForm()}
