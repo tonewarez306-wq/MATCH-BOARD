@@ -76,7 +76,7 @@ const loadHtml2Canvas = () => {
 
 const calculateStandings = (match) => {
   const stats = {};
-  TEAM_LETTERS.slice(0, match.teamCount).forEach(t => {
+  TEAM_LETTERS.slice(0, match.teamCount || 2).forEach(t => {
     stats[t] = { team: t, matches: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 };
   });
 
@@ -114,7 +114,6 @@ const getTodayString = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-// ★ 초기 전술 보드: A팀(우리 팀)과 공만 보이도록 설정
 const getInitialTacticsTokens = (pitchType) => {
   const tokens = [];
   if (pitchType === 'full') {
@@ -148,6 +147,7 @@ export default function App() {
   const [activeTeamId, setActiveTeamId] = useState(null);
   const [players, setPlayers] = useState([]);
   const [matches, setMatches] = useState([]);
+
   const [viewDate, setViewDate] = useState(new Date());
 
   const [systemAlert, setSystemAlert] = useState({ isOpen: false, message: '' });
@@ -180,38 +180,46 @@ export default function App() {
   const [goalFlow, setGoalFlow] = useState({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false });
   const [logEditModal, setLogEditModal] = useState({ isOpen: false, match: null, log: null });
 
-  // --- 전술 보드 관련 State ---
+  // 전술 보드 관련 State
   const [pitchType, setPitchType] = useState('full'); 
   const [currentTool, setCurrentTool] = useState('move'); 
   const [tacticTokens, setTacticTokens] = useState(getInitialTacticsTokens('full'));
   const [drawings, setDrawings] = useState([]);
+  const [activeDrawing, setActiveDrawing] = useState(null);
   const [pastState, setPastState] = useState([]);
   const [futureState, setFutureState] = useState([]);
   const [draggingToken, setDraggingToken] = useState(null);
   const [tokenEditModal, setTokenEditModal] = useState({ isOpen: false, token: null });
   
-  // --- 애니메이션 관련 State ---
+  // 애니메이션 관련 State
   const [animationFrames, setAnimationFrames] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAutoRecording, setIsAutoRecording] = useState(false); 
   const playbackRef = useRef(null);
-
-  // --- DOM 제어용 Refs ---
   const boardRef = useRef(null);
   const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 });
   const dragStartTokensRef = useRef(null);
-  const activeDrawingData = useRef(null); // 빠른 그리기 데이터 연산용
 
+  // 직접 조작 DOM Refs
   const svgArrowRef = useRef(null);
   const svgPassRef = useRef(null);
   const svgZoneRef = useRef(null);
 
-  // --- 메모이제이션 데이터 ---
+  // 데이터 메모이제이션
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
   const liveMatch = useMemo(() => matches.find(m => m.id === liveMatchId), [matches, liveMatchId]);
   const detailMatch = useMemo(() => matches.find(m => m.id === detailModalMatchId), [matches, detailModalMatchId]);
+
+  const getTeamDisplayName = (match, letter) => {
+    if (!match) return `${letter}팀`;
+    if (match.matchType === 'external') {
+      if (letter === 'A') return activeTeam?.name || '우리 팀';
+      if (letter === 'B') return match.opponentName || '상대 팀';
+    }
+    return `${letter}팀`;
+  };
 
   const viewYearMonth = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
   const monthlyMatches = useMemo(() => currentTeamMatches.filter(m => m.date.startsWith(viewYearMonth)), [currentTeamMatches, viewYearMonth]);
@@ -292,15 +300,6 @@ export default function App() {
   }, []);
 
   // --- 이벤트 핸들러 ---
-  const getTeamDisplayName = (match, letter) => {
-    if (!match) return `${letter}팀`;
-    if (match.matchType === 'external') {
-      if (letter === 'A') return activeTeam?.name || '우리 팀';
-      if (letter === 'B') return match.opponentName || '상대 팀';
-    }
-    return `${letter}팀`;
-  };
-
   const prevMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
   const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
 
@@ -728,7 +727,10 @@ export default function App() {
     const rect = boardRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100; const y = ((e.clientY - rect.top) / rect.height) * 100;
     if (currentTool === 'arrow' || currentTool === 'pass' || currentTool === 'zone') {
-       setActiveDrawing({ id: Date.now(), type: currentTool, start: {x, y}, end: {x, y} });
+       if (currentTool === 'arrow' && svgArrowRef.current) { svgArrowRef.current.style.display = 'block'; svgArrowRef.current.setAttribute('x1', `${x}%`); svgArrowRef.current.setAttribute('y1', `${y}%`); svgArrowRef.current.setAttribute('x2', `${x}%`); svgArrowRef.current.setAttribute('y2', `${y}%`); }
+       if (currentTool === 'pass' && svgPassRef.current) { svgPassRef.current.style.display = 'block'; svgPassRef.current.setAttribute('x1', `${x}%`); svgPassRef.current.setAttribute('y1', `${y}%`); svgPassRef.current.setAttribute('x2', `${x}%`); svgPassRef.current.setAttribute('y2', `${y}%`); }
+       if (currentTool === 'zone' && svgZoneRef.current) { svgZoneRef.current.style.display = 'block'; svgZoneRef.current.setAttribute('x', `${x}%`); svgZoneRef.current.setAttribute('y', `${y}%`); svgZoneRef.current.setAttribute('width', `0%`); svgZoneRef.current.setAttribute('height', `0%`); }
+       activeDrawingData.current = { id: Date.now(), type: currentTool, start: {x, y}, end: {x, y} };
     }
   };
 
@@ -740,8 +742,15 @@ export default function App() {
 
     if (currentTool === 'move' && draggingToken) {
       setTacticTokens(prev => prev.map(t => t.id === draggingToken ? { ...t, x, y } : t));
-    } else if (activeDrawing) {
-      setActiveDrawing(prev => ({ ...prev, end: {x, y} }));
+    } else if (activeDrawingData.current) {
+      activeDrawingData.current.end = {x, y};
+      if (activeDrawingData.current.type === 'arrow' && svgArrowRef.current) { svgArrowRef.current.setAttribute('x2', `${x}%`); svgArrowRef.current.setAttribute('y2', `${y}%`); }
+      if (activeDrawingData.current.type === 'pass' && svgPassRef.current) { svgPassRef.current.setAttribute('x2', `${x}%`); svgPassRef.current.setAttribute('y2', `${y}%`); }
+      if (activeDrawingData.current.type === 'zone' && svgZoneRef.current) {
+         const sx = activeDrawingData.current.start.x; const sy = activeDrawingData.current.start.y;
+         svgZoneRef.current.setAttribute('x', `${Math.min(sx, x)}%`); svgZoneRef.current.setAttribute('y', `${Math.min(sy, y)}%`);
+         svgZoneRef.current.setAttribute('width', `${Math.abs(sx - x)}%`); svgZoneRef.current.setAttribute('height', `${Math.abs(sy - y)}%`);
+      }
     }
   };
 
@@ -755,10 +764,13 @@ export default function App() {
          setTacticTokens(dragStartTokensRef.current);
       } else { saveHistory(tacticTokens); }
       setDraggingToken(null);
-    } else if (activeDrawing) {
-      const dist = Math.sqrt(Math.pow(activeDrawing.start.x - activeDrawing.end.x, 2) + Math.pow(activeDrawing.start.y - activeDrawing.end.y, 2));
-      if (dist > 2) { const newDrawings = [...drawings, activeDrawing]; saveHistory(tacticTokens, newDrawings); }
-      setActiveDrawing(null);
+    } else if (activeDrawingData.current) {
+      const dist = Math.sqrt(Math.pow(activeDrawingData.current.start.x - activeDrawingData.current.end.x, 2) + Math.pow(activeDrawingData.current.start.y - activeDrawingData.current.end.y, 2));
+      if (dist > 2) { const newDrawings = [...drawings, activeDrawingData.current]; saveHistory(tacticTokens, newDrawings); }
+      activeDrawingData.current = null;
+      if (svgArrowRef.current) svgArrowRef.current.style.display = 'none';
+      if (svgPassRef.current) svgPassRef.current.style.display = 'none';
+      if (svgZoneRef.current) svgZoneRef.current.style.display = 'none';
     }
   };
 
@@ -835,718 +847,673 @@ export default function App() {
 
     const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = pitchType === 'full' ? 900 : 800;
     const ctx = canvas.getContext('2d');
-    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
-    const stream = canvas.captureStream(30); 
-    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
-    const chunks = [];
-    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
     
-    recorder.onstop = () => {
-        const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
-        const blob = new Blob(chunks, { type: mimeType });
-        const file = new File([blob], `tactic_animation.${ext}`, { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        setShareModal(prev => ({ ...prev, step: 2, file, imgUrl: url, isVideo: true }));
-    };
-    recorder.start();
-    let frameIdx = 0; let progress = 0; const fps = 30; const stepsPerFrame = fps * 1.0; 
-    
-    const draw = () => {
-        ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.moveTo(0, canvas.height/2); ctx.lineTo(canvas.width, canvas.height/2); ctx.stroke();
-        ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height/2, 60, 0, Math.PI*2); ctx.stroke();
+    let mimeType = '';
+    try {
+      mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+      const stream = canvas.captureStream(30); 
+      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
+      const chunks = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      
+      recorder.onstop = () => {
+          const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+          const blob = new Blob(chunks, { type: mimeType });
+          const file = new File([blob], `tactic_animation.${ext}`, { type: mimeType });
+          const url = URL.createObjectURL(blob);
+          setShareModal(prev => ({ ...prev, step: 2, file, imgUrl: url, isVideo: true }));
+      };
+      recorder.start();
+      let frameIdx = 0; let progress = 0; const fps = 30; const stepsPerFrame = fps * 1.0; 
+      
+      const draw = () => {
+          ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 4;
+          ctx.beginPath(); ctx.moveTo(0, canvas.height/2); ctx.lineTo(canvas.width, canvas.height/2); ctx.stroke();
+          ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height/2, 60, 0, Math.PI*2); ctx.stroke();
 
-        const currentFrame = animationFrames[frameIdx];
-        const nextFrame = animationFrames[Math.min(frameIdx + 1, animationFrames.length - 1)];
-        
-        currentFrame.drawings.forEach(d => {
-            if(d.type === 'arrow' || d.type === 'pass') {
-               ctx.strokeStyle = d.type === 'arrow' ? '#FACC15' : '#60A5FA'; ctx.lineWidth = 5;
-               if(d.type==='pass') ctx.setLineDash([12, 12]); else ctx.setLineDash([]);
-               ctx.beginPath(); ctx.moveTo((d.start.x/100)*canvas.width, (d.start.y/100)*canvas.height); ctx.lineTo((d.end.x/100)*canvas.width, (d.end.y/100)*canvas.height); ctx.stroke(); ctx.setLineDash([]);
-            } else if(d.type === 'zone') {
-               ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; ctx.strokeStyle = '#3B82F6'; ctx.lineWidth = 3;
-               const x = Math.min(d.start.x, d.end.x)/100 * canvas.width; const y = Math.min(d.start.y, d.end.y)/100 * canvas.height;
-               const w = Math.abs(d.start.x - d.end.x)/100 * canvas.width; const h = Math.abs(d.start.y - d.end.y)/100 * canvas.height;
-               ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h);
-            }
-        });
+          const currentFrame = animationFrames[frameIdx];
+          const nextFrame = animationFrames[Math.min(frameIdx + 1, animationFrames.length - 1)];
+          
+          currentFrame.drawings.forEach(d => {
+              if(d.type === 'arrow' || d.type === 'pass') {
+                 ctx.strokeStyle = d.type === 'arrow' ? '#FACC15' : '#60A5FA'; ctx.lineWidth = 5;
+                 if(d.type==='pass') ctx.setLineDash([12, 12]); else ctx.setLineDash([]);
+                 ctx.beginPath(); ctx.moveTo((d.start.x/100)*canvas.width, (d.start.y/100)*canvas.height); ctx.lineTo((d.end.x/100)*canvas.width, (d.end.y/100)*canvas.height); ctx.stroke(); ctx.setLineDash([]);
+              } else if(d.type === 'zone') {
+                 ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; ctx.strokeStyle = '#3B82F6'; ctx.lineWidth = 3;
+                 const x = Math.min(d.start.x, d.end.x)/100 * canvas.width; const y = Math.min(d.start.y, d.end.y)/100 * canvas.height;
+                 const w = Math.abs(d.start.x - d.end.x)/100 * canvas.width; const h = Math.abs(d.start.y - d.end.y)/100 * canvas.height;
+                 ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h);
+              }
+          });
 
-        currentFrame.tokens.forEach(t1 => {
-            const t2 = nextFrame.tokens.find(t => t.id === t1.id) || t1;
-            const t = progress / stepsPerFrame;
-            const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-            const x = t1.x + (t2.x - t1.x) * ease; const y = t1.y + (t2.y - t1.y) * ease;
-            const px = (x / 100) * canvas.width; const py = (y / 100) * canvas.height;
+          currentFrame.tokens.forEach(t1 => {
+              const t2 = nextFrame.tokens.find(t => t.id === t1.id) || t1;
+              const t = progress / stepsPerFrame;
+              const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+              const x = t1.x + (t2.x - t1.x) * ease; const y = t1.y + (t2.y - t1.y) * ease;
+              const px = (x / 100) * canvas.width; const py = (y / 100) * canvas.height;
 
-            if(t1.team === 'ball') {
-                ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI*2); ctx.fill();
-                ctx.fillStyle = '#000000'; ctx.font = '18px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('⚽', px, py);
-            } else {
-                ctx.fillStyle = t1.team === 'A' ? '#DC2626' : '#2563EB'; ctx.beginPath(); ctx.arc(px, py, 22, 0, Math.PI*2); ctx.fill();
-                ctx.strokeStyle = t1.team === 'A' ? '#991B1B' : '#1E40AF'; ctx.lineWidth = 3; ctx.stroke();
-                
-                ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t1.position || '', px, py);
+              if(t1.team === 'ball') {
+                  ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI*2); ctx.fill();
+                  ctx.fillStyle = '#000000'; ctx.font = '18px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('⚽', px, py);
+              } else {
+                  ctx.fillStyle = t1.team === 'A' ? '#DC2626' : '#2563EB'; ctx.beginPath(); ctx.arc(px, py, 22, 0, Math.PI*2); ctx.fill();
+                  ctx.strokeStyle = t1.team === 'A' ? '#991B1B' : '#1E40AF'; ctx.lineWidth = 3; ctx.stroke();
+                  ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t1.position || '', px, py);
+                  
+                  if (t1.name) {
+                    ctx.font = 'bold 12px sans-serif';
+                    const textWidth = ctx.measureText(t1.name).width; const rectWidth = textWidth + 16; const rectHeight = 20; const rectY = py + 32;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.beginPath();
+                    if (ctx.roundRect) ctx.roundRect(px - rectWidth/2, rectY - rectHeight/2, rectWidth, rectHeight, 10); else ctx.rect(px - rectWidth/2, rectY - rectHeight/2, rectWidth, rectHeight);
+                    ctx.fill(); ctx.fillStyle = '#FFFFFF'; ctx.fillText(t1.name, px, rectY);
+                  }
+              }
+          });
 
-                if (t1.name) {
-                  ctx.font = 'bold 12px sans-serif';
-                  const textWidth = ctx.measureText(t1.name).width; const rectWidth = textWidth + 16; const rectHeight = 20; const rectY = py + 32;
-                  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.beginPath();
-                  if (ctx.roundRect) ctx.roundRect(px - rectWidth/2, rectY - rectHeight/2, rectWidth, rectHeight, 10); else ctx.rect(px - rectWidth/2, rectY - rectHeight/2, rectWidth, rectHeight);
-                  ctx.fill(); ctx.fillStyle = '#FFFFFF'; ctx.fillText(t1.name, px, rectY);
-                }
-            }
-        });
-
-        progress++; if (progress > stepsPerFrame) { progress = 0; frameIdx++; }
-        if (frameIdx < animationFrames.length - 1 || (frameIdx === animationFrames.length - 1 && progress < fps * 0.5)) { setTimeout(draw, 1000 / fps); } else { setTimeout(() => recorder.stop(), 200); }
-    };
-    setTimeout(draw, 100);
+          progress++; if (progress > stepsPerFrame) { progress = 0; frameIdx++; }
+          if (frameIdx < animationFrames.length - 1 || (frameIdx === animationFrames.length - 1 && progress < fps * 0.5)) { setTimeout(draw, 1000 / fps); } else { setTimeout(() => recorder.stop(), 200); }
+      };
+      setTimeout(draw, 100);
+    } catch (e) {
+      setSystemAlert({ isOpen: true, message: '현재 브라우저 버전에서는 비디오 추출을 지원하지 않습니다.\n대신 [캡처] 버튼을 이용해주세요.' });
+      setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
+    }
   };
 
   // ==========================================
-  // 5. 팝업(모달) 렌더링 함수 모음 (안전 구역 선언)
+  // 5. 팝업(모달) 렌더링 변수 (안전 구역 선언)
   // ==========================================
-  function renderCalendarDays() {
-    const year = viewDate.getFullYear(); const month = viewDate.getMonth(); const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const days = [];
-    for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="p-2" />);
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const dayMatches = matchesByDate[dateStr] || [];
-      days.push(
-        <div key={day} className="p-2 aspect-square border border-slate-700/50 rounded-xl relative flex flex-col items-center bg-slate-800/30">
-          <span className="text-xs font-bold text-slate-300">{day}</span>
-          <div className="flex gap-1 mt-1">
-            {dayMatches.map((m, idx) => (<div key={idx} className={`w-1.5 h-1.5 rounded-full ${m.status === 'completed' ? 'bg-slate-500' : 'bg-blue-400'}`} />))}
+  
+  const systemModalsJSX = (
+    <>
+      {systemAlert.isOpen && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[210] p-4">
+          <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
+            <p className="text-white font-bold mb-6 whitespace-pre-line">{systemAlert.message}</p>
+            <button onClick={() => setSystemAlert({isOpen: false, message: ''})} className="w-full py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
           </div>
         </div>
-      );
-    }
-    return days;
-  }
-
-  function renderSystemModals() {
-    return (
-      <>
-        {systemAlert.isOpen && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[210] p-4">
-            <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
-              <p className="text-white font-bold mb-6 whitespace-pre-line">{systemAlert.message}</p>
-              <button onClick={() => setSystemAlert({isOpen: false, message: ''})} className="w-full py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
+      )}
+      {systemConfirm.isOpen && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[210] p-4">
+          <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
+            <p className="text-white font-bold mb-6 whitespace-pre-line">{systemConfirm.message}</p>
+            <div className="flex gap-3">
+              <button onClick={() => setSystemConfirm({isOpen: false, message: '', onConfirm: null})} className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 transition text-white rounded-xl font-bold">취소</button>
+              <button onClick={() => { systemConfirm.onConfirm(); setSystemConfirm({isOpen: false, message: '', onConfirm: null}); }} className="flex-1 py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
             </div>
           </div>
         )}
-        {systemConfirm.isOpen && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[210] p-4">
-            <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
-              <p className="text-white font-bold mb-6 whitespace-pre-line">{systemConfirm.message}</p>
-              <div className="flex gap-3">
-                <button onClick={() => setSystemConfirm({isOpen: false, message: '', onConfirm: null})} className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 transition text-white rounded-xl font-bold">취소</button>
-                <button onClick={() => { systemConfirm.onConfirm(); setSystemConfirm({isOpen: false, message: '', onConfirm: null}); }} className="flex-1 py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
+      {isProcessing && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200]">
+          <div className="bg-slate-800 p-6 rounded-3xl flex flex-col items-center shadow-xl border border-slate-700 animate-in fade-in zoom-in-95">
+            <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+            <p className="text-white font-bold text-sm tracking-wide">데이터 처리 중...</p>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  const shareModalJSX = shareModal.isOpen && (
+    <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-[150]">
+      <div className="w-full max-w-sm flex flex-col items-center max-h-[90vh]">
+        {shareModal.step === 1 ? (
+          <div className="bg-slate-800 border border-slate-700 p-6 rounded-3xl w-full shadow-xl flex flex-col items-center text-center animate-in zoom-in-95">
+            <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4 mt-8"></div>
+            <h2 className="text-lg font-black text-white mb-1">리포트 미디어 생성 중...</h2>
+            <p className="text-sm text-slate-400 font-medium mb-8">화면을 렌더링하고 있습니다.</p>
+          </div>
+        ) : (
+          <div className="bg-slate-800 border border-slate-700 p-5 rounded-3xl w-full shadow-xl flex flex-col items-center text-center flex-1 min-h-0 animate-in fade-in">
+            <h2 className="text-lg font-black text-white flex items-center gap-1 mb-4 shrink-0">
+              <MessageCircle size={18} className="text-blue-500"/> 미디어 생성 완료
+            </h2>
+            <div className="w-full flex-1 overflow-y-auto rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50 hide-scrollbar flex justify-center items-center">
+              {shareModal.imgUrl && (
+                 shareModal.isVideo ? (
+                   <video src={shareModal.imgUrl} autoPlay loop playsInline className="w-full h-auto rounded-lg shadow-sm" />
+                 ) : (
+                   <img src={shareModal.imgUrl} alt="Preview" className="w-full h-auto rounded-lg shadow-sm" />
+                 )
+              )}
+            </div>
+            <div className="w-full mt-5 space-y-3 shrink-0">
+              <button onClick={doActualShare} className="w-full py-4 bg-[#FEE500] text-slate-900 rounded-2xl font-black text-lg hover:bg-[#FEE500]/90 transition shadow-lg flex items-center justify-center gap-2">
+                <Share2 size={20} /> 공유 및 저장
+              </button>
+              <button onClick={() => setShareModal({isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false})} className="w-full py-3 text-slate-400 font-bold hover:text-white transition bg-slate-700/50 rounded-xl border border-slate-700">
+                닫기
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const hiddenCaptureAreaJSX = (shareModal.isOpen && shareModal.data && !shareModal.isVideo) && (
+    <div className="fixed top-0 left-0 w-[500px] opacity-0 pointer-events-none z-[-100] overflow-visible">
+      <div id="capture-area-hidden" className="bg-slate-900 p-8 w-full flex flex-col items-center text-left text-slate-200 border-none pb-12">
+        <div className="mb-6 w-full pb-5 border-b border-slate-700">
+          <h3 className="font-black text-white text-[28px] leading-tight mb-2">
+             {shareModal.data.matchType === 'external' ? `[교류전] vs ${shareModal.data.opponentName}` : `[자체전] ${shareModal.data.location}`}
+          </h3>
+          <p className="text-slate-400 text-[15px] font-medium">
+             {new Date(shareModal.data.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} {formatTimeAmPm(shareModal.data.time)} · 참석 {(shareModal.data.attendees || []).length}명
+          </p>
+        </div>
+
+        <div className="w-full bg-slate-800 rounded-2xl p-6 mb-6 border border-slate-700/50 shadow-md">
+           <div className="font-black text-slate-400 text-[15px] border-b border-slate-700/50 pb-3 mb-4">순위표</div>
+           <table className="w-full text-[15px] text-center">
+             <thead>
+               <tr className="text-slate-500 font-bold">
+                 <th className="pb-4">순위</th><th className="pb-4 text-left">팀</th><th className="pb-4">승점</th><th className="pb-4">승</th><th className="pb-4">무</th><th className="pb-4">패</th><th className="pb-4">득</th><th className="pb-4">실</th><th className="pb-4">득실</th>
+               </tr>
+             </thead>
+             <tbody>
+               {calculateStandings(shareModal.data).map((st, i) => (
+                 <tr key={st.team} className="border-t border-slate-700/30 text-slate-300">
+                   <td className={`py-4 font-black ${i === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{i + 1}</td>
+                   <td className={`py-4 font-bold text-left ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareModal.data, st.team)}</td>
+                   <td className="py-4 text-blue-400 font-black">{st.pts}</td>
+                   <td className="py-4 text-white">{st.w}</td>
+                   <td className="py-4 text-slate-400">{st.d}</td>
+                   <td className="py-4 text-slate-400">{st.l}</td>
+                   <td className="py-4 text-white">{st.gf}</td>
+                   <td className="py-4 text-slate-400">{st.ga}</td>
+                   <td className="py-4 text-white">{st.gd > 0 ? '+'+st.gd : st.gd}</td>
+                 </tr>
+               ))}
+             </tbody>
+           </table>
+        </div>
+
+        <div className="w-full space-y-5 mb-6">
+             {(shareModal.data.quarterScores || []).length > 0 ? (shareModal.data.quarterScores || []).map(qs => {
+               const qLogs = (shareModal.data.logs || []).filter(l => l.quarter === qs.quarter);
+               return (
+                 <div key={qs.quarter} className="w-full bg-slate-800 rounded-2xl p-6 border border-slate-700/50 shadow-md">
+                    <div className="relative flex justify-center items-center border-b border-slate-700/50 pb-4 mb-4">
+                      <span className="absolute left-0 font-black text-blue-400 text-[18px]">{qs.quarter}Q</span>
+                      <span className="font-black text-white text-[20px] text-center flex items-center">
+                        <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(shareModal.data, qs.team1)}</span> 
+                        <span className="text-slate-500 mx-5">{qs.score1} : {qs.score2}</span> 
+                        <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(shareModal.data, qs.team2)}</span>
+                      </span>
+                    </div>
+                    <div className="space-y-4">
+                      {qLogs.length > 0 ? qLogs.map(l => {
+                        const isLeft = l.teamLetter === qs.team1;
+                        return (
+                          <div key={l.id} className={`flex items-start gap-4 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
+                            <span className="text-slate-500 text-[12px] w-12 shrink-0 text-center">{l.time}</span>
+                            <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
+                              <div className="text-slate-100 font-bold text-[15px] flex items-center gap-2">
+                                <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
+                                {l.isPK && <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
+                              </div>
+                              {l.remark && <div className="text-[13px] bg-slate-900/80 px-2.5 py-1.5 rounded text-slate-300 mt-1.5 inline-block border border-slate-700/50">{l.remark}</div>}
+                              {l.assistName && (
+                                <div className="text-slate-500 mt-1 flex items-center gap-1.5">
+                                  <Footprints size={14} className="text-slate-500"/> <span className="text-[13px]">{l.assistName}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      }) : <div className="text-[14px] text-slate-500 text-center py-4 italic">득점 기록이 없습니다.</div>}
+                    </div>
+                 </div>
+               )
+             }) : (
+               <div className="text-[14px] text-slate-500 text-center py-6 bg-slate-800 rounded-2xl border border-slate-700/50 shadow-md">아직 기록이 없습니다.</div>
+             )}
+        </div>
+
+        <div className="w-full bg-slate-800 rounded-2xl p-6 border border-slate-700/50 shadow-md">
+            <div className="text-[15px] text-slate-400 mb-5 font-black border-b border-slate-700/50 pb-3 flex justify-between items-end">
+                <span>참석자 최종 편성 명단</span>
+            </div>
+            <div className="space-y-6">
+              {TEAM_LETTERS.slice(0, shareModal.data.teamCount).map(teamLetter => {
+                const teamPlayers = players.filter(p => (shareModal.data.attendees || []).includes(p.id) && ((shareModal.data.teamAssignments || {})[p.id]) === teamLetter);
+                if(teamPlayers.length === 0) return null;
+                return (
+                  <div key={teamLetter}>
+                    <div className={`text-[14px] font-black mb-3 ${TEAM_TEXT_COLORS[teamLetter]}`}>
+                      {getTeamDisplayName(shareModal.data, teamLetter)}
+                    </div>
+                    <div className="flex flex-wrap gap-2.5">
+                      {teamPlayers.map(p => (
+                        <div key={p.id} className="bg-slate-900 px-3.5 py-2.5 rounded-full border border-slate-600/50 shadow-sm flex items-center">
+                          <span className="font-bold text-white text-[14px] tracking-wide">{p.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const detailModalJSX = (detailModal.isOpen && detailMatch) && (
+    <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-[100] animate-in fade-in">
+      <div className="bg-slate-800 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
+        <div className="p-6 border-b border-slate-700 bg-slate-900 shrink-0">
+          <div className="flex justify-between items-start mb-2">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${detailMatch.matchType === 'external' ? 'bg-purple-500/20 text-purple-400' : 'bg-green-500/20 text-green-400'}`}>
+                  {detailMatch.matchType === 'external' ? '교류전' : '자체전'}
+                </span>
+                <h2 className="text-lg font-black text-white">{detailMatch.date} 결과</h2>
               </div>
+              <p className="text-sm text-slate-400"><MapPin size={12} className="inline mr-1"/>{detailMatch.location}</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => triggerShare(detailMatch)} className="text-yellow-500 bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"><Share2 size={20}/></button>
+              <button onClick={() => { setDetailModal({isOpen: false, match: null}); setDetailModalMatchId(null); }} className="text-slate-400 bg-slate-800 p-2 rounded-full hover:text-white transition"><X size={20}/></button>
             </div>
           </div>
-        )}
-        {isProcessing && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200]">
-            <div className="bg-slate-800 p-6 rounded-3xl flex flex-col items-center shadow-xl border border-slate-700 animate-in fade-in zoom-in-95">
-              <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
-              <p className="text-white font-bold text-sm tracking-wide">데이터 처리 중...</p>
-            </div>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-6 hide-scrollbar space-y-6">
+          <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
+            <div className="text-xs text-slate-400 mb-3 font-bold border-b border-slate-800 pb-2">순위표</div>
+            <table className="w-full text-xs text-center">
+              <thead>
+                <tr className="text-slate-500 font-bold">
+                  <th className="pb-2">순위</th><th className="pb-2 text-left">팀</th><th className="pb-2">승점</th><th className="pb-2">승</th><th className="pb-2">무</th><th className="pb-2">패</th><th className="pb-2">득</th><th className="pb-2">실</th><th className="pb-2">득실</th>
+                </tr>
+              </thead>
+              <tbody>
+                {calculateStandings(detailMatch).map((st, index) => (
+                  <tr key={st.team} className="border-t border-slate-800">
+                    <td className={`py-2 font-black ${index === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{index + 1}</td>
+                    <td className={`py-2 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(detailMatch, st.team)}</td>
+                    <td className="py-2 text-blue-400 font-black">{st.pts}</td>
+                    <td className="py-2 text-white">{st.w}</td>
+                    <td className="py-2 text-slate-400">{st.d}</td>
+                    <td className="py-2 text-slate-400">{st.l}</td>
+                    <td className="py-2 text-white">{st.gf}</td>
+                    <td className="py-2 text-slate-400">{st.ga}</td>
+                    <td className="py-2 text-white">{st.gd > 0 ? `+${st.gd}` : st.gd}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        )}
-      </>
-    );
-  }
 
-  function renderShareModal() {
-    if (!shareModal.isOpen) return null;
-    return (
-      <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-[150]">
-        <div className="w-full max-w-sm flex flex-col items-center max-h-[90vh]">
-          {shareModal.step === 1 ? (
-            <div className="bg-slate-800 border border-slate-700 p-6 rounded-3xl w-full shadow-xl flex flex-col items-center text-center animate-in zoom-in-95">
-              <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4 mt-8"></div>
-              <h2 className="text-lg font-black text-white mb-1">리포트 미디어 생성 중...</h2>
-              <p className="text-sm text-slate-400 font-medium mb-8">화면을 캡처하고 있습니다.</p>
-            </div>
-          ) : (
-            <div className="bg-slate-800 border border-slate-700 p-5 rounded-3xl w-full shadow-xl flex flex-col items-center text-center flex-1 min-h-0 animate-in fade-in">
-              <h2 className="text-lg font-black text-white flex items-center gap-1 mb-4 shrink-0">
-                <MessageCircle size={18} className="text-blue-500"/> 미디어 생성 완료
-              </h2>
-              <div className="w-full flex-1 overflow-y-auto rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50 hide-scrollbar flex justify-center items-center">
-                {shareModal.imgUrl && (
-                   shareModal.isVideo ? (
-                     <video src={shareModal.imgUrl} autoPlay loop playsInline className="w-full h-auto rounded-lg shadow-sm" />
-                   ) : (
-                     <img src={shareModal.imgUrl} alt="Preview" className="w-full h-auto rounded-lg shadow-sm" />
+          {(detailMatch.quarterScores || []).map(qs => (
+            <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700 pb-4">
+               <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
+                 <span className="absolute left-0 font-black text-blue-400">{qs.quarter}Q</span>
+                 <span className="font-bold text-white text-lg text-center">
+                   <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(detailMatch, qs.team1)}</span> 
+                   <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span> 
+                   <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(detailMatch, qs.team2)}</span>
+                 </span>
+               </div>
+               <div className="space-y-3">
+                 {(detailMatch.logs || []).filter(l => l.quarter === qs.quarter).map(l => {
+                   const isLeft = l.teamLetter === qs.team1;
+                   return (
+                     <div 
+                       key={l.id} 
+                       onClick={() => isAdmin && openLogEditModal(l, detailMatch)}
+                       className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1 rounded-lg transition -mx-1 px-1' : ''}`}
+                     >
+                       <span className="text-slate-600 text-[10px] w-8 shrink-0 text-center mt-1">{l.time}</span>
+                       <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
+                         <div className="text-white font-bold text-sm flex items-center gap-1">
+                           <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
+                           {l.isPK && <span className="text-[9px] bg-red-500/20 text-red-400 px-1 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
+                         </div>
+                         {l.remark && <div className="text-[11px] bg-slate-800/80 px-2 py-1 rounded text-slate-300 mt-1 inline-block border border-slate-700">{l.remark}</div>}
+                         {l.assistName && (
+                           <div className="text-slate-400 mt-1 flex items-center gap-1">
+                             <Footprints size={12} className="text-slate-500"/> <span className="text-xs">{l.assistName}</span>
+                           </div>
+                         )}
+                       </div>
+                     </div>
                    )
+                 })}
+                 {(detailMatch.logs || []).filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>}
+               </div>
+               {isAdmin && (
+                  <div className="flex justify-center mt-4 pt-4 border-t border-slate-800/50">
+                    <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: detailMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
+                      <Plus size={12}/> 누락된 득점 추가
+                    </button>
+                  </div>
+               )}
+            </div>
+          ))}
+
+          <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
+            <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-800 pb-2 flex justify-between items-end">
+                <span>참석자 최종 편성 명단</span>
+                {isAdmin && (
+                  <div className="flex gap-2 mb-1">
+                    <button 
+                      onClick={() => {
+                        setDetailModal({isOpen: false, match: null});
+                        setDetailModalMatchId(null);
+                        setAssignmentModal({ isOpen: true, match: detailMatch });
+                      }}
+                      className="bg-slate-800 text-purple-400 px-2.5 py-1 rounded text-[10px] font-bold border border-purple-500/30 flex items-center gap-1 hover:bg-slate-700 transition"
+                    >
+                      <Users size={12}/> 편성 수정
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setDetailModal({isOpen: false, match: null});
+                        setDetailModalMatchId(null);
+                        openMatchModal(detailMatch);
+                      }}
+                      className="bg-slate-800 text-blue-400 px-2.5 py-1 rounded text-[10px] font-bold border border-blue-500/30 flex items-center gap-1 hover:bg-slate-700 transition"
+                    >
+                      <Edit size={12}/> 명단 수정
+                    </button>
+                  </div>
                 )}
-              </div>
-              <div className="w-full mt-5 space-y-3 shrink-0">
-                <button onClick={doActualShare} className="w-full py-4 bg-[#FEE500] text-slate-900 rounded-2xl font-black text-lg hover:bg-[#FEE500]/90 transition shadow-lg flex items-center justify-center gap-2">
-                  <Share2 size={20} /> 공유 및 저장
-                </button>
-                <button onClick={() => setShareModal({isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false})} className="w-full py-3 text-slate-400 font-bold hover:text-white transition bg-slate-700/50 rounded-xl border border-slate-700">
-                  닫기
-                </button>
-              </div>
+            </div>
+            <div className="space-y-4">
+              {TEAM_LETTERS.slice(0, detailMatch.teamCount).map(teamLetter => {
+                const teamPlayers = players.filter(p => 
+                  (detailMatch.attendees || []).includes(p.id) && 
+                  ((detailMatch.teamAssignments || {})[p.id]) === teamLetter
+                );
+                
+                if(teamPlayers.length === 0) return null;
+
+                return (
+                  <div key={teamLetter}>
+                    <div className={`text-[11px] font-black mb-2 ${TEAM_TEXT_COLORS[teamLetter]}`}>
+                      {getTeamDisplayName(detailMatch, teamLetter)}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {teamPlayers.map(p => (
+                        <div key={p.id} className="bg-slate-800 px-3.5 py-2.5 rounded-full border border-slate-600/50 shadow-sm flex items-center">
+                          <span className="font-bold text-white text-[14px] tracking-wide">{p.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+
+  const matchModalFormJSX = matchModal.isOpen && (
+    <div className="fixed inset-0 bg-black/80 flex items-end justify-center z-[100]">
+      <div className="bg-slate-800 p-6 rounded-t-3xl w-full max-w-md border-t border-slate-700 animate-in slide-in-from-bottom max-h-[90vh] flex flex-col shadow-xl">
+        <div className="flex justify-between items-center mb-4 shrink-0">
+          <h2 className="text-xl font-bold text-white">{matchModal.match ? '일정 수정' : '새 일정 등록'}</h2>
+          <button onClick={() => setMatchModal({isOpen: false, match: null})} className="text-slate-400 hover:text-white"><X size={24}/></button>
+        </div>
+        
+        <div className="flex bg-slate-900 rounded-xl p-1 mb-4 shrink-0">
+           <button 
+             type="button" 
+             onClick={() => setMatchTypeForm('internal')} 
+             className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition ${matchTypeForm === 'internal' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'}`}
+           >
+             자체 팀 나누기
+           </button>
+           <button 
+             type="button" 
+             onClick={() => setMatchTypeForm('external')} 
+             className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition ${matchTypeForm === 'external' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'}`}
+           >
+             외부 팀과 매치
+           </button>
+        </div>
+
+        <form id="matchForm" onSubmit={saveMatch} className="space-y-4 overflow-y-auto hide-scrollbar flex-1 pb-4 pr-2">
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-slate-400 mb-1">날짜</label>
+              <input type="date" name="date" required defaultValue={matchModal.match?.date || getTodayString()} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-slate-400 mb-1">시간</label>
+              <input type="time" name="time" required defaultValue={matchModal.match?.time || "06:30"} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+            </div>
+          </div>
+          
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1">경기 장소</label>
+            <input type="text" name="location" required defaultValue={matchModal.match?.location || ""} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+          </div>
+
+          {matchTypeForm === 'external' && (
+            <div>
+              <label className="block text-xs font-bold text-purple-400 mb-1">상대팀 이름</label>
+              <input type="text" name="opponentName" required placeholder="예: FC 라이언" defaultValue={matchModal.match?.opponentName || ""} className="w-full bg-slate-900 border border-purple-500/50 p-3 rounded-xl text-white outline-none focus:border-purple-500" />
             </div>
           )}
-        </div>
-      </div>
-    );
-  }
 
-  function renderHiddenCaptureArea() {
-    if (!shareModal.isOpen || !shareModal.data || shareModal.isVideo) return null;
-    return (
-      <div className="fixed top-0 left-0 w-[500px] opacity-0 pointer-events-none z-[-100] overflow-visible">
-        <div id="capture-area-hidden" className="bg-slate-900 p-8 w-full flex flex-col items-center text-left text-slate-200 border-none pb-12">
-          
-          <div className="mb-6 w-full pb-5 border-b border-slate-700">
-            <h3 className="font-black text-white text-[28px] leading-tight mb-2">
-               {shareModal.data.matchType === 'external' ? `[교류전] vs ${shareModal.data.opponentName}` : `[자체전] ${shareModal.data.location}`}
-            </h3>
-            <p className="text-slate-400 text-[15px] font-medium">
-               {new Date(shareModal.data.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} {formatTimeAmPm(shareModal.data.time)} · 참석 {(shareModal.data.attendees || []).length}명
-            </p>
-          </div>
-
-          <div className="w-full bg-slate-800 rounded-2xl p-6 mb-6 border border-slate-700/50 shadow-md">
-             <div className="font-black text-slate-400 text-[15px] border-b border-slate-700/50 pb-3 mb-4">순위표</div>
-             <table className="w-full text-[15px] text-center">
-               <thead>
-                 <tr className="text-slate-500 font-bold">
-                   <th className="pb-4">순위</th><th className="pb-4 text-left">팀</th><th className="pb-4">승점</th><th className="pb-4">승</th><th className="pb-4">무</th><th className="pb-4">패</th><th className="pb-4">득</th><th className="pb-4">실</th><th className="pb-4">득실</th>
-                 </tr>
-               </thead>
-               <tbody>
-                 {calculateStandings(shareModal.data).map((st, i) => (
-                   <tr key={st.team} className="border-t border-slate-700/30 text-slate-300">
-                     <td className={`py-4 font-black ${i === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{i + 1}</td>
-                     <td className={`py-4 font-bold text-left ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareModal.data, st.team)}</td>
-                     <td className="py-4 text-blue-400 font-black">{st.pts}</td>
-                     <td className="py-4 text-white">{st.w}</td>
-                     <td className="py-4 text-slate-400">{st.d}</td>
-                     <td className="py-4 text-slate-400">{st.l}</td>
-                     <td className="py-4 text-white">{st.gf}</td>
-                     <td className="py-4 text-slate-400">{st.ga}</td>
-                     <td className="py-4 text-white">{st.gd > 0 ? '+'+st.gd : st.gd}</td>
-                   </tr>
-                 ))}
-               </tbody>
-             </table>
-          </div>
-
-          <div className="w-full space-y-5 mb-6">
-               {(shareModal.data.quarterScores || []).length > 0 ? (shareModal.data.quarterScores || []).map(qs => {
-                 const qLogs = (shareModal.data.logs || []).filter(l => l.quarter === qs.quarter);
-                 return (
-                   <div key={qs.quarter} className="w-full bg-slate-800 rounded-2xl p-6 border border-slate-700/50 shadow-md">
-                      <div className="relative flex justify-center items-center border-b border-slate-700/50 pb-4 mb-4">
-                        <span className="absolute left-0 font-black text-blue-400 text-[18px]">{qs.quarter}Q</span>
-                        <span className="font-black text-white text-[20px] text-center flex items-center">
-                          <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(shareModal.data, qs.team1)}</span> 
-                          <span className="text-slate-500 mx-5">{qs.score1} : {qs.score2}</span> 
-                          <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(shareModal.data, qs.team2)}</span>
-                        </span>
-                      </div>
-                      <div className="space-y-4">
-                        {qLogs.length > 0 ? qLogs.map(l => {
-                          const isLeft = l.teamLetter === qs.team1;
-                          return (
-                            <div key={l.id} className={`flex items-start gap-4 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
-                              <span className="text-slate-500 text-[12px] w-12 shrink-0 text-center">{l.time}</span>
-                              <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
-                                <div className="text-slate-100 font-bold text-[15px] flex items-center gap-2">
-                                  <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
-                                  {l.isPK && <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
-                                </div>
-                                {l.remark && <div className="text-[13px] bg-slate-900/80 px-2.5 py-1.5 rounded text-slate-300 mt-1.5 inline-block border border-slate-700/50">{l.remark}</div>}
-                                {l.assistName && (
-                                  <div className="text-slate-500 mt-1 flex items-center gap-1.5">
-                                    <Footprints size={14} className="text-slate-500"/> <span className="text-[13px]">{l.assistName}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        }) : <div className="text-[14px] text-slate-500 text-center py-4 italic">득점 기록이 없습니다.</div>}
-                      </div>
-                   </div>
-                 )
-               }) : (
-                 <div className="text-[14px] text-slate-500 text-center py-6 bg-slate-800 rounded-2xl border border-slate-700/50 shadow-md">아직 기록이 없습니다.</div>
-               )}
-          </div>
-
-          <div className="w-full bg-slate-800 rounded-2xl p-6 border border-slate-700/50 shadow-md">
-              <div className="text-[15px] text-slate-400 mb-5 font-black border-b border-slate-700/50 pb-3 flex justify-between items-end">
-                  <span>참석자 최종 편성 명단</span>
+          <div className="flex gap-4">
+            {matchTypeForm === 'internal' && (
+              <div className="flex-1">
+                <label className="block text-xs font-bold text-slate-400 mb-1">총 팀 개수</label>
+                <select name="teamCount" defaultValue={matchModal.match?.teamCount || 2} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
+                  <option value="2">2팀 (A,B)</option>
+                  <option value="3">3팀 (A,B,C)</option>
+                  <option value="4">4팀 (A,B,C,D)</option>
+                </select>
               </div>
-              <div className="space-y-6">
-                {TEAM_LETTERS.slice(0, shareModal.data.teamCount).map(teamLetter => {
-                  const teamPlayers = players.filter(p => (shareModal.data.attendees || []).includes(p.id) && ((shareModal.data.teamAssignments || {})[p.id]) === teamLetter);
-                  if(teamPlayers.length === 0) return null;
-                  return (
-                    <div key={teamLetter}>
-                      <div className={`text-[14px] font-black mb-3 ${TEAM_TEXT_COLORS[teamLetter]}`}>
-                        {getTeamDisplayName(shareModal.data, teamLetter)}
-                      </div>
-                      <div className="flex flex-wrap gap-2.5">
-                        {teamPlayers.map(p => (
-                          <div key={p.id} className="bg-slate-900 px-3.5 py-2.5 rounded-full border border-slate-600/50 shadow-sm flex items-center">
-                            <span className="font-bold text-white text-[14px] tracking-wide">{p.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function renderDetailModal() {
-    if (!detailModal.isOpen || !detailMatch) return null;
-    return (
-      <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-[100] animate-in fade-in">
-        <div className="bg-slate-800 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
-          <div className="p-6 border-b border-slate-700 bg-slate-900 shrink-0">
-            <div className="flex justify-between items-start mb-2">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${detailMatch.matchType === 'external' ? 'bg-purple-500/20 text-purple-400' : 'bg-green-500/20 text-green-400'}`}>
-                    {detailMatch.matchType === 'external' ? '교류전' : '자체전'}
-                  </span>
-                  <h2 className="text-lg font-black text-white">{detailMatch.date} 결과</h2>
-                </div>
-                <p className="text-sm text-slate-400"><MapPin size={12} className="inline mr-1"/>{detailMatch.location}</p>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => triggerShare(detailMatch)} className="text-yellow-500 bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"><Share2 size={20}/></button>
-                <button onClick={() => { setDetailModal({isOpen: false, match: null}); setDetailModalMatchId(null); }} className="text-slate-400 bg-slate-800 p-2 rounded-full hover:text-white transition"><X size={20}/></button>
-              </div>
+            )}
+            <div className={matchTypeForm === 'external' ? 'w-full' : 'flex-1'}>
+              <label className="block text-xs font-bold text-slate-400 mb-1">총 쿼터 수</label>
+              <input type="number" name="totalQuarters" required defaultValue={matchModal.match?.totalQuarters || 4} min="1" max="10" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
             </div>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-6 hide-scrollbar space-y-6">
-            <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
-              <div className="text-xs text-slate-400 mb-3 font-bold border-b border-slate-800 pb-2">순위표</div>
-              <table className="w-full text-xs text-center">
-                <thead>
-                  <tr className="text-slate-500 font-bold">
-                    <th className="pb-2">순위</th><th className="pb-2 text-left">팀</th><th className="pb-2">승점</th><th className="pb-2">승</th><th className="pb-2">무</th><th className="pb-2">패</th><th className="pb-2">득</th><th className="pb-2">실</th><th className="pb-2">득실</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {calculateStandings(detailMatch).map((st, index) => (
-                    <tr key={st.team} className="border-t border-slate-800">
-                      <td className={`py-2 font-black ${index === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{index + 1}</td>
-                      <td className={`py-2 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(detailMatch, st.team)}</td>
-                      <td className="py-2 text-blue-400 font-black">{st.pts}</td>
-                      <td className="py-2 text-white">{st.w}</td>
-                      <td className="py-2 text-slate-400">{st.d}</td>
-                      <td className="py-2 text-slate-400">{st.l}</td>
-                      <td className="py-2 text-white">{st.gf}</td>
-                      <td className="py-2 text-slate-400">{st.ga}</td>
-                      <td className="py-2 text-white">{st.gd > 0 ? `+${st.gd}` : st.gd}</td>
-                    </tr>
+          <div className="pt-2">
+            <label className="block text-xs font-bold text-slate-400 mb-2">참석자 체크 <span className="text-slate-500 font-normal ml-1">({matchTypeForm === 'external' ? '선택된 인원은 모두 한 팀이 됩니다' : '경기 당일 팀 편성을 진행합니다'})</span></label>
+            <div className="grid grid-cols-2 gap-2">
+              {currentTeamPlayers.map(p => (
+                <label key={p.id} className="flex items-center gap-2 bg-slate-900 p-3 rounded-lg border border-slate-700 cursor-pointer hover:border-slate-500 transition">
+                  <input type="checkbox" name={`attendee_${p.id}`} defaultChecked={matchModal.match ? (matchModal.match.attendees || []).includes(p.id) : false} className="accent-blue-500 w-4 h-4 rounded" />
+                  <span className="text-sm font-bold text-white">{p.name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </form>
+        <div className="pt-4 shrink-0 border-t border-slate-700">
+          <button type="submit" form="matchForm" className="w-full py-4 bg-blue-500 hover:bg-blue-400 text-white rounded-xl font-bold text-lg transition shadow-lg">저장하기</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const assignmentModalJSX = (assignmentModal.isOpen && assignmentModal.match) && (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
+      <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-md border border-slate-700 max-h-[80vh] flex flex-col shadow-xl">
+        <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-700">
+          <div><h2 className="text-lg font-bold text-white">참석자 팀 편성</h2></div>
+          <button onClick={() => setAssignmentModal({isOpen: false, match: null})} className="text-white bg-blue-500 px-4 py-2 rounded-xl font-bold">완료</button>
+        </div>
+        <div className="flex-1 overflow-y-auto pr-2 space-y-2 hide-scrollbar">
+          {currentTeamPlayers.filter(p => (assignmentModal.match.attendees || []).includes(p.id)).map(p => {
+            const currentTeam = (assignmentModal.match.teamAssignments || {})[p.id] || null;
+            return (
+              <div key={p.id} className="bg-slate-900 p-3 rounded-xl flex justify-between items-center border border-slate-700">
+                <div className="font-bold text-white">{p.name} <span className="text-xs text-slate-500 ml-1">{p.birthYear}</span></div>
+                <div className="flex bg-slate-800 rounded-lg p-1 gap-1">
+                  {TEAM_LETTERS.slice(0, assignmentModal.match.teamCount).map(t => (
+                    <button 
+                      key={t} onClick={() => assignTeam(p.id, t)}
+                      className={`w-8 h-8 flex items-center justify-center text-xs font-black rounded-md transition ${currentTeam === t ? TEAM_COLORS[t] + ' shadow' : 'bg-slate-700 text-slate-400 hover:text-white'}`}
+                    >
+                      {t}
+                    </button>
                   ))}
-                </tbody>
-              </table>
-            </div>
-
-            {(detailMatch.quarterScores || []).map(qs => (
-              <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700 pb-4">
-                 <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
-                   <span className="absolute left-0 font-black text-blue-400">{qs.quarter}Q</span>
-                   <span className="font-bold text-white text-lg text-center">
-                     <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(detailMatch, qs.team1)}</span> 
-                     <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span> 
-                     <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(detailMatch, qs.team2)}</span>
-                   </span>
-                 </div>
-                 <div className="space-y-3">
-                   {(detailMatch.logs || []).filter(l => l.quarter === qs.quarter).map(l => {
-                     const isLeft = l.teamLetter === qs.team1;
-                     return (
-                       <div 
-                         key={l.id} 
-                         onClick={() => isAdmin && openLogEditModal(l, detailMatch)}
-                         className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1 rounded-lg transition -mx-1 px-1' : ''}`}
-                       >
-                         <span className="text-slate-600 text-[10px] w-8 shrink-0 text-center mt-1">{l.time}</span>
-                         <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
-                           <div className="text-white font-bold text-sm flex items-center gap-1">
-                             <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
-                             {l.isPK && <span className="text-[9px] bg-red-500/20 text-red-400 px-1 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
-                           </div>
-                           {l.remark && <div className="text-[11px] bg-slate-800/80 px-2 py-1 rounded text-slate-300 mt-1 inline-block border border-slate-700">{l.remark}</div>}
-                           {l.assistName && (
-                             <div className="text-slate-400 mt-1 flex items-center gap-1">
-                               <Footprints size={12} className="text-slate-500"/> <span className="text-xs">{l.assistName}</span>
-                             </div>
-                           )}
-                         </div>
-                       </div>
-                     )
-                   })}
-                   {(detailMatch.logs || []).filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>}
-                 </div>
-                 {isAdmin && (
-                    <div className="flex justify-center mt-4 pt-4 border-t border-slate-800/50">
-                      <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: detailMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
-                        <Plus size={12}/> 누락된 득점 추가
-                      </button>
-                    </div>
-                 )}
-              </div>
-            ))}
-
-            <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
-              <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-800 pb-2 flex justify-between items-end">
-                  <span>참석자 최종 편성 명단</span>
-                  {isAdmin && (
-                    <div className="flex gap-2 mb-1">
-                      <button 
-                        onClick={() => {
-                          setDetailModal({isOpen: false, match: null});
-                          setDetailModalMatchId(null);
-                          setAssignmentModal({ isOpen: true, match: detailMatch });
-                        }}
-                        className="bg-slate-800 text-purple-400 px-2.5 py-1 rounded text-[10px] font-bold border border-purple-500/30 flex items-center gap-1 hover:bg-slate-700 transition"
-                      >
-                        <Users size={12}/> 편성 수정
-                      </button>
-                      <button 
-                        onClick={() => {
-                          setDetailModal({isOpen: false, match: null});
-                          setDetailModalMatchId(null);
-                          openMatchModal(detailMatch);
-                        }}
-                        className="bg-slate-800 text-blue-400 px-2.5 py-1 rounded text-[10px] font-bold border border-blue-500/30 flex items-center gap-1 hover:bg-slate-700 transition"
-                      >
-                        <Edit size={12}/> 명단 수정
-                      </button>
-                    </div>
-                  )}
-              </div>
-              <div className="space-y-4">
-                {TEAM_LETTERS.slice(0, detailMatch.teamCount).map(teamLetter => {
-                  const teamPlayers = players.filter(p => 
-                    (detailMatch.attendees || []).includes(p.id) && 
-                    ((detailMatch.teamAssignments || {})[p.id]) === teamLetter
-                  );
-                  if(teamPlayers.length === 0) return null;
-                  return (
-                    <div key={teamLetter}>
-                      <div className={`text-[11px] font-black mb-2 ${TEAM_TEXT_COLORS[teamLetter]}`}>
-                        {getTeamDisplayName(detailMatch, teamLetter)}
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {teamPlayers.map(p => (
-                          <div key={p.id} className="bg-slate-800 px-3.5 py-2.5 rounded-full border border-slate-600/50 shadow-sm flex items-center">
-                            <span className="font-bold text-white text-[14px] tracking-wide">{p.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function renderMatchModalForm() {
-    if (!matchModal.isOpen) return null;
-    return (
-      <div className="fixed inset-0 bg-black/80 flex items-end justify-center z-[100]">
-        <div className="bg-slate-800 p-6 rounded-t-3xl w-full max-w-md border-t border-slate-700 animate-in slide-in-from-bottom max-h-[90vh] flex flex-col shadow-xl">
-          <div className="flex justify-between items-center mb-4 shrink-0">
-            <h2 className="text-xl font-bold text-white">{matchModal.match ? '일정 수정' : '새 일정 등록'}</h2>
-            <button onClick={() => setMatchModal({isOpen: false, match: null})} className="text-slate-400 hover:text-white"><X size={24}/></button>
-          </div>
-          
-          <div className="flex bg-slate-900 rounded-xl p-1 mb-4 shrink-0">
-             <button 
-               type="button" 
-               onClick={() => setMatchTypeForm('internal')} 
-               className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition ${matchTypeForm === 'internal' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'}`}
-             >
-               자체 팀 나누기
-             </button>
-             <button 
-               type="button" 
-               onClick={() => setMatchTypeForm('external')} 
-               className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition ${matchTypeForm === 'external' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'}`}
-             >
-               외부 팀과 매치
-             </button>
-          </div>
-
-          <form id="matchForm" onSubmit={saveMatch} className="space-y-4 overflow-y-auto hide-scrollbar flex-1 pb-4 pr-2">
-            <div className="flex gap-4">
-              <div className="flex-1">
-                <label className="block text-xs font-bold text-slate-400 mb-1">날짜</label>
-                <input type="date" name="date" required defaultValue={matchModal.match?.date || getTodayString()} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-              </div>
-              <div className="flex-1">
-                <label className="block text-xs font-bold text-slate-400 mb-1">시간</label>
-                <input type="time" name="time" required defaultValue={matchModal.match?.time || "06:30"} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-              </div>
-            </div>
-            
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">경기 장소</label>
-              <input type="text" name="location" required defaultValue={matchModal.match?.location || ""} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-            </div>
-
-            {matchTypeForm === 'external' ? (
-              <div>
-                <label className="block text-xs font-bold text-purple-400 mb-1">상대팀 이름</label>
-                <input type="text" name="opponentName" required placeholder="예: FC 라이언" defaultValue={matchModal.match?.opponentName || ""} className="w-full bg-slate-900 border border-purple-500/50 p-3 rounded-xl text-white outline-none focus:border-purple-500" />
-              </div>
-            ) : null}
-
-            <div className="flex gap-4">
-              {matchTypeForm === 'internal' && (
-                <div className="flex-1">
-                  <label className="block text-xs font-bold text-slate-400 mb-1">총 팀 개수</label>
-                  <select name="teamCount" defaultValue={matchModal.match?.teamCount || 2} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
-                    <option value="2">2팀 (A,B)</option>
-                    <option value="3">3팀 (A,B,C)</option>
-                    <option value="4">4팀 (A,B,C,D)</option>
-                  </select>
                 </div>
-              )}
-              <div className={matchTypeForm === 'external' ? 'w-full' : 'flex-1'}>
-                <label className="block text-xs font-bold text-slate-400 mb-1">총 쿼터 수</label>
-                <input type="number" name="totalQuarters" required defaultValue={matchModal.match?.totalQuarters || 4} min="1" max="10" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
               </div>
-            </div>
-            
-            <div className="pt-2">
-              <label className="block text-xs font-bold text-slate-400 mb-2">참석자 체크 <span className="text-slate-500 font-normal ml-1">({matchTypeForm === 'external' ? '선택된 인원은 모두 한 팀이 됩니다' : '경기 당일 팀 편성을 진행합니다'})</span></label>
-              <div className="grid grid-cols-2 gap-2">
-                {currentTeamPlayers.map(p => (
-                  <label key={p.id} className="flex items-center gap-2 bg-slate-900 p-3 rounded-lg border border-slate-700 cursor-pointer hover:border-slate-500 transition">
-                    <input type="checkbox" name={`attendee_${p.id}`} defaultChecked={matchModal.match ? (matchModal.match.attendees || []).includes(p.id) : false} className="accent-blue-500 w-4 h-4 rounded" />
-                    <span className="text-sm font-bold text-white">{p.name}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </form>
-          <div className="pt-4 shrink-0 border-t border-slate-700">
-            <button type="submit" form="matchForm" className="w-full py-4 bg-blue-500 hover:bg-blue-400 text-white rounded-xl font-bold text-lg transition shadow-lg">저장하기</button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
+  const rosterModalFormJSX = rosterModal.isOpen && (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
+      <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
+        <h2 className="text-xl font-bold text-white mb-6 text-center">{rosterModal.player ? '명단 수정' : '새 선수 등록'}</h2>
+        <form onSubmit={saveRoster} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1">이름</label>
+            <input type="text" name="name" required defaultValue={rosterModal.player?.name || ""} placeholder="선수 이름" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
           </div>
-        </div>
-      </div>
-    );
-  }
-
-  function renderAssignmentModal() {
-    if (!assignmentModal.isOpen || !assignmentModal.match) return null;
-    return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
-        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-md border border-slate-700 max-h-[80vh] flex flex-col shadow-xl">
-          <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-700">
-            <div><h2 className="text-lg font-bold text-white">참석자 팀 편성</h2></div>
-            <button onClick={() => setAssignmentModal({isOpen: false, match: null})} className="text-white bg-blue-500 px-4 py-2 rounded-xl font-bold">완료</button>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1">출생 연도 (2자리)</label>
+            <input type="number" name="birthYear" required defaultValue={rosterModal.player?.birthYear || ""} placeholder="예: 96" min="0" max="99" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
           </div>
-          <div className="flex-1 overflow-y-auto pr-2 space-y-2 hide-scrollbar">
-            {currentTeamPlayers.filter(p => (assignmentModal.match.attendees || []).includes(p.id)).map(p => {
-              const currentTeam = (assignmentModal.match.teamAssignments || {})[p.id] || null;
-              return (
-                <div key={p.id} className="bg-slate-900 p-3 rounded-xl flex justify-between items-center border border-slate-700">
-                  <div className="font-bold text-white">{p.name} <span className="text-xs text-slate-500 ml-1">{p.birthYear}</span></div>
-                  <div className="flex bg-slate-800 rounded-lg p-1 gap-1">
-                    {TEAM_LETTERS.slice(0, assignmentModal.match.teamCount).map(t => (
-                      <button 
-                        key={t} onClick={() => assignTeam(p.id, t)}
-                        className={`w-8 h-8 flex items-center justify-center text-xs font-black rounded-md transition ${currentTeam === t ? TEAM_COLORS[t] + ' shadow' : 'bg-slate-700 text-slate-400 hover:text-white'}`}
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="flex gap-3 pt-4">
+            <button type="button" onClick={() => setRosterModal({isOpen: false, player: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold transition hover:bg-slate-600">취소</button>
+            <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold transition hover:bg-blue-400 shadow-lg">저장하기</button>
           </div>
-        </div>
+        </form>
       </div>
-    );
-  }
+    </div>
+  );
 
-  function renderRosterModalForm() {
-    if (!rosterModal.isOpen) return null;
-    return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
-        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
-          <h2 className="text-xl font-bold text-white mb-6 text-center">{rosterModal.player ? '명단 수정' : '새 선수 등록'}</h2>
-          <form onSubmit={saveRoster} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">이름</label>
-              <input type="text" name="name" required defaultValue={rosterModal.player?.name || ""} placeholder="선수 이름" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">출생 연도 (2자리)</label>
-              <input type="number" name="birthYear" required defaultValue={rosterModal.player?.birthYear || ""} placeholder="예: 96" min="0" max="99" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-            </div>
-            <div className="flex gap-3 pt-4">
-              <button type="button" onClick={() => setRosterModal({isOpen: false, player: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold transition hover:bg-slate-600">취소</button>
-              <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold transition hover:bg-blue-400 shadow-lg">저장하기</button>
-            </div>
-          </form>
-        </div>
+  const authModalJSX = authModal.isOpen && (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
+      <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
+        <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+          <Shield size={20} className="text-blue-500"/> 
+          {authModal.type === 'loginAdminAuth' ? '시스템 관리자 인증' : authModal.type === 'adminMode' ? '팀 관리자 전환' : `${authModal.targetTeam?.name} 로그인`}
+        </h2>
+        <p className="text-xs text-slate-400 mb-4">
+          {authModal.type === 'teamLogin' ? "팀 조회를 위해 비밀번호를 입력하세요." : authModal.type === 'adminMode' ? "현재 팀의 일정 관리 권한을 위해\n팀 관리자 비밀번호를 입력하세요." : "관리자 시스템 마스터 비밀번호를 입력하세요."}
+        </p>
+        <form onSubmit={handleAuthSubmit}>
+          <input 
+            type="password" 
+            name="password" 
+            required
+            autoFocus 
+            placeholder="비밀번호" 
+            className="w-full bg-slate-900 border border-slate-700 p-4 rounded-xl text-white mb-4 text-center tracking-[0.5em] text-lg font-bold outline-none focus:border-blue-500 transition" 
+          />
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setAuthModal({ isOpen: false })} className="flex-1 py-3 bg-slate-700 rounded-xl text-white font-bold">취소</button>
+            <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">확인</button>
+          </div>
+        </form>
       </div>
-    );
-  }
+    </div>
+  );
 
-  function renderAuthModal() {
-    if (!authModal.isOpen) return null;
-    return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
-        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
-          <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
-            <Shield size={20} className="text-blue-500"/> 
-            {authModal.type === 'loginAdminAuth' ? '시스템 관리자 인증' : authModal.type === 'adminMode' ? '팀 관리자 전환' : `${authModal.targetTeam?.name} 로그인`}
-          </h2>
-          <p className="text-xs text-slate-400 mb-4">
-            {authModal.type === 'teamLogin' ? "팀 조회를 위해 비밀번호를 입력하세요." : authModal.type === 'adminMode' ? "현재 팀의 일정 관리 권한을 위해\n팀 관리자 비밀번호를 입력하세요." : "관리자 시스템 마스터 비밀번호를 입력하세요."}
-          </p>
-          <form onSubmit={handleAuthSubmit}>
-            <input 
-              type="password" 
-              name="password" 
-              required
-              autoFocus 
-              placeholder="비밀번호" 
-              className="w-full bg-slate-900 border border-slate-700 p-4 rounded-xl text-white mb-4 text-center tracking-[0.5em] text-lg font-bold outline-none focus:border-blue-500 transition" 
-            />
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setAuthModal({ isOpen: false })} className="flex-1 py-3 bg-slate-700 rounded-xl text-white font-bold">취소</button>
-              <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">확인</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  function renderCreateTeamModal() {
-    if (!isCreateTeamOpen) return null;
-    return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
-        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
-          <h2 className="text-xl font-bold text-white mb-6 text-center">신규 팀 생성</h2>
-          <form onSubmit={handleCreateTeam} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2">팀 로고 (이미지 업로드)</label>
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 shrink-0 bg-slate-900 border border-slate-700 rounded-full flex items-center justify-center overflow-hidden text-2xl bg-white/5">
-                  {newTeamLogo?.startsWith('data:image') ? <img src={newTeamLogo} alt="Preview" className="w-full h-full object-cover" /> : (newTeamLogo || '⚽')}
-                </div>
-                <input type="file" accept="image/*" onChange={async (e) => { const file = e.target.files[0]; if (file) { const compressedLogo = await resizeImage(file); setNewTeamLogo(compressedLogo); } }} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-blue-500/10 file:text-blue-500 hover:file:bg-blue-500/20 cursor-pointer w-full"/>
+  const createTeamModalJSX = isCreateTeamOpen && (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
+      <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
+        <h2 className="text-xl font-bold text-white mb-6 text-center">신규 팀 생성</h2>
+        <form onSubmit={handleCreateTeam} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-2">팀 로고 (이미지 업로드)</label>
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 shrink-0 bg-slate-900 border border-slate-700 rounded-full flex items-center justify-center overflow-hidden text-2xl bg-white/5">
+                {newTeamLogo?.startsWith('data:image') ? <img src={newTeamLogo} alt="Preview" className="w-full h-full object-cover" /> : (newTeamLogo || '⚽')}
               </div>
+              <input type="file" accept="image/*" onChange={async (e) => { const file = e.target.files[0]; if (file) { const compressedLogo = await resizeImage(file); setNewTeamLogo(compressedLogo); } }} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-blue-500/10 file:text-blue-500 hover:file:bg-blue-500/20 cursor-pointer w-full"/>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">팀 이름</label>
-              <input type="text" name="teamName" required placeholder="예: 킥오프 FC" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">팀 전용 비밀번호</label>
-              <input type="text" name="password" required placeholder="팀원들과 공유할 조회용 비밀번호" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-blue-400 mb-1">팀 관리자 비밀번호</label>
-              <input type="text" name="adminPassword" required placeholder="일정 등록/수정용 관리자 비밀번호" className="w-full bg-slate-900 border border-blue-500/50 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-            </div>
-            <div className="flex gap-3 pt-4">
-              <button type="button" onClick={() => { setIsCreateTeamOpen(false); setNewTeamLogo(null); }} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
-              <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">생성</button>
-            </div>
-          </form>
-        </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1">팀 이름</label>
+            <input type="text" name="teamName" required placeholder="예: 킥오프 FC" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1">팀 전용 비밀번호</label>
+            <input type="text" name="password" required placeholder="팀원들과 공유할 조회용 비밀번호" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-blue-400 mb-1">팀 관리자 비밀번호</label>
+            <input type="text" name="adminPassword" required placeholder="일정 등록/수정용 관리자 비밀번호" className="w-full bg-slate-900 border border-blue-500/50 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+          </div>
+          <div className="flex gap-3 pt-4">
+            <button type="button" onClick={() => { setIsCreateTeamOpen(false); setNewTeamLogo(null); }} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
+            <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">생성</button>
+          </div>
+        </form>
       </div>
-    );
-  }
+    </div>
+  );
 
-  function renderEditTeamModal() {
-    if (!editTeamModal.isOpen) return null;
-    return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
-        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
-          <h2 className="text-xl font-bold text-white mb-6 text-center">팀 정보 수정</h2>
-          <form onSubmit={handleEditTeam} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2">팀 로고 변경</label>
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 shrink-0 bg-slate-900 border border-slate-700 rounded-full flex items-center justify-center overflow-hidden text-2xl bg-white/5">
-                  {editTeamLogo?.startsWith('data:image') ? <img src={editTeamLogo} alt="Preview" className="w-full h-full object-cover" /> : (editTeamLogo || '⚽')}
-                </div>
-                <input type="file" accept="image/*" onChange={async (e) => { const file = e.target.files[0]; if (file) { const compressedLogo = await resizeImage(file); setEditTeamLogo(compressedLogo); } }} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-blue-500/10 file:text-blue-500 hover:file:bg-blue-500/20 cursor-pointer w-full"/>
+  const editTeamModalJSX = editTeamModal.isOpen && (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
+      <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
+        <h2 className="text-xl font-bold text-white mb-6 text-center">팀 정보 수정</h2>
+        <form onSubmit={handleEditTeam} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-2">팀 로고 변경</label>
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 shrink-0 bg-slate-900 border border-slate-700 rounded-full flex items-center justify-center overflow-hidden text-2xl bg-white/5">
+                {editTeamLogo?.startsWith('data:image') ? <img src={editTeamLogo} alt="Preview" className="w-full h-full object-cover" /> : (editTeamLogo || '⚽')}
               </div>
+              <input type="file" accept="image/*" onChange={async (e) => { const file = e.target.files[0]; if (file) { const compressedLogo = await resizeImage(file); setEditTeamLogo(compressedLogo); } }} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-blue-500/10 file:text-blue-500 hover:file:bg-blue-500/20 cursor-pointer w-full"/>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">팀 이름</label>
-              <input type="text" name="teamName" required defaultValue={editTeamModal.team?.name} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">팀 전용 비밀번호</label>
-              <input type="text" name="password" required defaultValue={editTeamModal.team?.password} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-blue-400 mb-1">팀 관리자 비밀번호</label>
-              <input type="text" name="adminPassword" required defaultValue={editTeamModal.team?.adminPassword || 'admin'} className="w-full bg-slate-900 border border-blue-500/50 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-            </div>
-            <div className="flex gap-3 pt-4">
-              <button type="button" onClick={() => setEditTeamModal({isOpen: false, team: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
-              <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">저장</button>
-            </div>
-          </form>
-        </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1">팀 이름</label>
+            <input type="text" name="teamName" required defaultValue={editTeamModal.team?.name} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1">팀 전용 비밀번호</label>
+            <input type="text" name="password" required defaultValue={editTeamModal.team?.password} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-blue-400 mb-1">팀 관리자 비밀번호</label>
+            <input type="text" name="adminPassword" required defaultValue={editTeamModal.team?.adminPassword || 'admin'} className="w-full bg-slate-900 border border-blue-500/50 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+          </div>
+          <div className="flex gap-3 pt-4">
+            <button type="button" onClick={() => setEditTeamModal({isOpen: false, team: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
+            <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">저장</button>
+          </div>
+        </form>
       </div>
-    );
-  }
+    </div>
+  );
 
-  function renderAdminPwdChangeModal() {
-    if (!adminPwdChangeModal) return null;
-    return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
-        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
-          <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
-            <Shield size={20} className="text-blue-500"/> 마스터 비밀번호 변경
-          </h2>
-          <p className="text-xs text-slate-400 mb-6">새로운 시스템 마스터 비밀번호를 입력하세요.</p>
-          <form onSubmit={handleAdminPwdChange}>
-            <input type="password" name="newAdminPwd" required autoFocus placeholder="새 마스터 비밀번호" className="w-full bg-slate-900 border border-slate-700 p-4 rounded-xl text-white mb-4 text-center tracking-[0.2em] text-lg font-bold outline-none focus:border-blue-500 transition" />
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setAdminPwdChangeModal(false)} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
-              <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">변경하기</button>
-            </div>
-          </form>
-        </div>
+  const adminPwdChangeModalJSX = adminPwdChangeModal && (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
+      <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
+        <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+          <Shield size={20} className="text-blue-500"/> 마스터 비밀번호 변경
+        </h2>
+        <p className="text-xs text-slate-400 mb-6">새로운 시스템 마스터 비밀번호를 입력하세요.</p>
+        <form onSubmit={handleAdminPwdChange}>
+          <input type="password" name="newAdminPwd" required autoFocus placeholder="새 마스터 비밀번호" className="w-full bg-slate-900 border border-slate-700 p-4 rounded-xl text-white mb-4 text-center tracking-[0.2em] text-lg font-bold outline-none focus:border-blue-500 transition" />
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setAdminPwdChangeModal(false)} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
+            <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">변경하기</button>
+          </div>
+        </form>
       </div>
-    );
-  }
+    </div>
+  );
 
-  function renderGoalFlowModal() {
-    if (!goalFlow.isOpen) return null;
+  const goalFlowModalJSX = goalFlow.isOpen && (() => {
     const gfMatchId = goalFlow.matchId || liveMatchId;
     const gfMatch = matches.find(m => m.id === gfMatchId);
     
@@ -1637,10 +1604,9 @@ export default function App() {
         </div>
       </div>
     );
-  }
+  })();
 
-  function renderLogEditModal() {
-    if (!logEditModal.isOpen || !logEditModal.match || !logEditModal.log) return null;
+  const logEditModalJSX = (logEditModal.isOpen && logEditModal.match && logEditModal.log) && (() => {
     const m = logEditModal.match;
     const l = logEditModal.log;
     const isOpponentFakeLog = m.matchType === 'external' && l.teamLetter === 'B';
@@ -1695,93 +1661,88 @@ export default function App() {
         </div>
       </div>
     );
-  }
+  })();
 
-  function renderTokenEditModal() {
-    if (!tokenEditModal.isOpen || !tokenEditModal.token) return null;
-    return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100] animate-in fade-in">
-        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
-          <h2 className="text-xl font-bold text-white mb-4 text-center">선수 정보 설정</h2>
-          <form onSubmit={handleTokenEditSave} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2">포지션 선택</label>
-              <select name="position" defaultValue={tokenEditModal.token.position} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
-                {['FW', 'WF', 'AM', 'CM', 'DM', 'RB', 'LB', 'CB', 'GK'].map(pos => (
-                  <option key={pos} value={pos}>{pos}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2">이름 등록 (선택)</label>
-              <input type="text" name="name" defaultValue={tokenEditModal.token.name} placeholder="예: 손흥민" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-            </div>
-            <div className="flex gap-2 pt-2">
-              <button type="button" onClick={() => setTokenEditModal({isOpen: false, token: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
-              <button type="submit" className="flex-[2] py-3 bg-blue-500 text-white rounded-xl font-bold">저장</button>
-            </div>
-            <button type="button" onClick={handleTokenDelete} className="w-full py-3 mt-2 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl font-bold text-sm">선수 완전히 삭제</button>
-          </form>
-        </div>
+  const tokenEditModalJSX = (tokenEditModal.isOpen && tokenEditModal.token) && (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100] animate-in fade-in">
+      <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
+        <h2 className="text-xl font-bold text-white mb-4 text-center">선수 정보 설정</h2>
+        <form onSubmit={handleTokenEditSave} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-2">포지션 선택</label>
+            <select name="position" defaultValue={tokenEditModal.token.position} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
+              {['FW', 'WF', 'AM', 'CM', 'DM', 'RB', 'LB', 'CB', 'GK'].map(pos => (
+                <option key={pos} value={pos}>{pos}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-2">이름 등록 (선택)</label>
+            <input type="text" name="name" defaultValue={tokenEditModal.token.name} placeholder="예: 손흥민" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={() => setTokenEditModal({isOpen: false, token: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
+            <button type="submit" className="flex-[2] py-3 bg-blue-500 text-white rounded-xl font-bold">저장</button>
+          </div>
+          <button type="button" onClick={handleTokenDelete} className="w-full py-3 mt-2 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl font-bold text-sm">선수 완전히 삭제</button>
+        </form>
       </div>
-    );
-  }
+    </div>
+  );
 
-  function renderTeamSettingsModal() {
-    if (!teamSettingsModal) return null;
-    return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
-        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
-          <h2 className="text-xl font-bold text-white mb-6 text-center">환경 설정</h2>
-          <form onSubmit={handleTeamSettingsSave} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2">팀 로고 변경</label>
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 shrink-0 bg-slate-900 border border-slate-700 rounded-full flex items-center justify-center overflow-hidden text-2xl bg-white/5">
-                  {teamSettingsLogo?.startsWith('data:image') ? <img src={teamSettingsLogo} alt="Preview" className="w-full h-full object-cover" /> : (teamSettingsLogo || '⚽')}
-                </div>
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  onChange={async (e) => {
-                    const file = e.target.files[0];
-                    if (file) {
-                      const compressedLogo = await resizeImage(file);
-                      setTeamSettingsLogo(compressedLogo);
-                    }
-                  }} 
-                  className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-blue-500/10 file:text-blue-500 hover:file:bg-blue-500/20 cursor-pointer w-full"
-                />
+  const teamSettingsModalJSX = teamSettingsModal && (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
+      <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
+        <h2 className="text-xl font-bold text-white mb-6 text-center">환경 설정</h2>
+        <form onSubmit={handleTeamSettingsSave} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-2">팀 로고 변경</label>
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 shrink-0 bg-slate-900 border border-slate-700 rounded-full flex items-center justify-center overflow-hidden text-2xl bg-white/5">
+                {teamSettingsLogo?.startsWith('data:image') ? <img src={teamSettingsLogo} alt="Preview" className="w-full h-full object-cover" /> : (teamSettingsLogo || '⚽')}
               </div>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={async (e) => {
+                  const file = e.target.files[0];
+                  if (file) {
+                    const compressedLogo = await resizeImage(file);
+                    setTeamSettingsLogo(compressedLogo);
+                  }
+                }} 
+                className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-blue-500/10 file:text-blue-500 hover:file:bg-blue-500/20 cursor-pointer w-full"
+              />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">팀 이름</label>
-              <input type="text" name="name" required defaultValue={activeTeam?.name} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">팀 전용 비밀번호</label>
-              <input type="text" name="password" required defaultValue={activeTeam?.password} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-              <p className="text-[10px] text-slate-500 mt-1">팀원들이 조회용으로 접속할 때 사용하는 비밀번호입니다.</p>
-            </div>
-            <div className="pt-2 mt-2 border-t border-slate-700">
-              <label className="block text-xs font-bold text-blue-400 mb-1">팀 관리자 비밀번호 변경</label>
-              <input type="text" name="teamAdminPassword" required defaultValue={activeTeam?.adminPassword || 'admin'} className="w-full bg-slate-900 border border-blue-500/50 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
-              <p className="text-[10px] text-slate-500 mt-1">현재 팀의 일정을 등록/수정하기 위한 관리자 비밀번호입니다.</p>
-            </div>
-            <div className="flex gap-3 pt-4">
-              <button type="button" onClick={() => setTeamSettingsModal(false)} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
-              <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">저장하기</button>
-            </div>
-          </form>
-        </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1">팀 이름</label>
+            <input type="text" name="name" required defaultValue={activeTeam?.name} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1">팀 전용 비밀번호</label>
+            <input type="text" name="password" required defaultValue={activeTeam?.password} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+            <p className="text-[10px] text-slate-500 mt-1">팀원들이 조회용으로 접속할 때 사용하는 비밀번호입니다.</p>
+          </div>
+          <div className="pt-2 mt-2 border-t border-slate-700">
+            <label className="block text-xs font-bold text-blue-400 mb-1">팀 관리자 비밀번호 변경</label>
+            <input type="text" name="teamAdminPassword" required defaultValue={activeTeam?.adminPassword || 'admin'} className="w-full bg-slate-900 border border-blue-500/50 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+            <p className="text-[10px] text-slate-500 mt-1">현재 팀의 일정을 등록/수정하기 위한 관리자 비밀번호입니다.</p>
+          </div>
+          <div className="flex gap-3 pt-4">
+            <button type="button" onClick={() => setTeamSettingsModal(false)} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button>
+            <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">저장하기</button>
+          </div>
+        </form>
       </div>
-    );
-  }
+    </div>
+  );
 
 
   // ==========================================
   // JSX 메인 컴포넌트 구조
   // ==========================================
+
   if (appState === 'login') {
     return (
       <div className="min-h-screen bg-slate-900 text-slate-200 font-sans p-6 flex flex-col justify-center max-w-md mx-auto relative">
@@ -1869,10 +1830,10 @@ export default function App() {
           </div>
         )}
 
-        {renderCreateTeamModal()}
-        {renderEditTeamModal()}
-        {renderAdminPwdChangeModal()}
-        {renderAuthModal()}
+        {createTeamModalJSX}
+        {editTeamModalJSX}
+        {adminPwdChangeModalJSX}
+        {authModalJSX}
         {renderSystemModals()}
       </div>
     );
@@ -1935,9 +1896,9 @@ export default function App() {
             <button onClick={() => setLiveState({...liveState, isQuarterActive: true})} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 rounded-xl text-xl shadow-lg transition">쿼터 시작하기</button>
           </div>
 
-          {renderAssignmentModal()}
-          {renderShareModal()}
-          {renderHiddenCaptureArea()}
+          {assignmentModalJSX}
+          {shareModalJSX}
+          {hiddenCaptureAreaJSX}
           {renderSystemModals()}
         </div>
       );
@@ -2084,12 +2045,11 @@ export default function App() {
           <div className="h-6 shrink-0 w-full"></div>
         </div>
         
-        {/* 팝업 렌더링 영역 */}
-        {renderAssignmentModal()}
-        {renderShareModal()}
-        {renderHiddenCaptureArea()}
-        {renderGoalFlowModal()}
-        {renderLogEditModal()}
+        {assignmentModalJSX}
+        {shareModalJSX}
+        {hiddenCaptureAreaJSX}
+        {goalFlowModalJSX}
+        {logEditModalJSX}
         {renderSystemModals()}
       </div>
     );
@@ -2426,6 +2386,7 @@ export default function App() {
                 <button onClick={handleUndo} disabled={pastState.length === 0 || isPlaying} className="p-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Undo size={14}/></button>
                 <button onClick={handleRedo} disabled={futureState.length === 0 || isPlaying} className="p-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Redo size={14}/></button>
                 <button onClick={() => { setPitchType(pitchType); saveHistory(getInitialTacticsTokens(pitchType), []); clearFrames(); }} className="px-2.5 py-1.5 bg-slate-800 text-slate-400 rounded-lg font-bold text-[11px] border border-slate-700 hover:bg-slate-700 transition">초기화</button>
+                <button onClick={triggerTacticShare} className="px-2.5 py-1.5 bg-yellow-500/20 text-yellow-500 rounded-lg font-bold text-[11px] border border-yellow-500/30 hover:bg-yellow-500/30 transition flex items-center gap-1"><Share2 size={12}/> 캡처</button>
               </div>
             </div>
 
@@ -2462,20 +2423,17 @@ export default function App() {
                 onPointerLeave={handleBoardPointerUp}
                 className={`relative bg-emerald-700 border-2 ${isAutoRecording ? 'border-red-500 shadow-[inset_0_0_20px_rgba(239,68,68,0.7)]' : isPlaying ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'border-white/80 shadow-inner'} overflow-hidden tactic-board select-none w-full mx-auto transition-colors duration-300`}
               >
-                {/* --- Pitch Drawings --- */}
                 {pitchType === 'full' && (
                   <>
                     <div className="absolute top-1/2 left-0 w-full border-t-2 border-white/60 pointer-events-none"></div>
                     <div className="absolute top-1/2 left-1/2 w-20 h-20 sm:w-28 sm:h-28 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
                     <div className="absolute top-1/2 left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
                     
-                    {/* Top Penalty Area */}
                     <div className="absolute top-0 left-1/2 w-3/5 h-[15%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-0 left-1/2 w-[25%] h-[6%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-[15%] left-1/2 w-12 h-6 border-b-2 border-white/60 rounded-b-full -translate-x-1/2 pointer-events-none"></div>
 
-                    {/* Bottom Penalty Area */}
                     <div className="absolute bottom-0 left-1/2 w-3/5 h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute bottom-0 left-1/2 w-[25%] h-[6%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute bottom-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
@@ -2495,7 +2453,6 @@ export default function App() {
                   </>
                 )}
 
-                {/* --- User Drawings (Lines, Passes, Zones) --- */}
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
                   <defs>
                     <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -2506,7 +2463,6 @@ export default function App() {
                     </marker>
                   </defs>
                   
-                  {/* 직접 DOM 조작용 레퍼런스 요소 */}
                   <line ref={svgArrowRef} stroke="#FACC15" strokeWidth="4" markerEnd="url(#arrowhead)" style={{display: 'none'}} />
                   <line ref={svgPassRef} stroke="#60A5FA" strokeWidth="4" strokeDasharray="8,8" markerEnd="url(#passhead)" style={{display: 'none'}} />
                   <rect ref={svgZoneRef} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="3" style={{display: 'none'}} />
@@ -2533,7 +2489,6 @@ export default function App() {
                   })}
                 </svg>
 
-                {/* --- Tokens --- */}
                 {tacticTokens.map(t => (
                   <div
                     key={t.id}
@@ -2565,7 +2520,6 @@ export default function App() {
               </div>
             </div>
             
-            {/* ★ 애니메이션 프레임 제어 및 A/B팀 선수 조절 */}
             <div className="flex flex-col gap-2 shrink-0 border-t border-slate-800 pt-2">
                {animationFrames.length === 0 && !isAutoRecording && (
                  <p className="text-[10px] text-yellow-400 font-bold text-center animate-pulse tracking-wide my-1">💡 [자동 녹화]를 켜고 선수를 움직이면 자동으로 저장됩니다!</p>
@@ -2683,7 +2637,7 @@ export default function App() {
       </nav>
 
       {/* ============================================================================ */}
-      {/* 팝업 모달 영역 */}
+      {/* 팝업 모달 영역 (가장 안전한 위치에서 렌더링) */}
       {/* ============================================================================ */}
       {renderDetailModal()}
       {renderMatchModalForm()}
