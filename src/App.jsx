@@ -5,7 +5,8 @@ import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, wh
 import { 
   Calendar, Users, BarChart2, Plus, 
   MapPin, Clock, Trophy, Shield, Lock, 
-  ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings, Target, Undo, Redo
+  ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings, Target, Undo, Redo,
+  MousePointer2, MoveUpRight, Spline, Square, Eraser, Video, PlayCircle, Layers, RotateCcw
 } from 'lucide-react';
 
 // ==========================================
@@ -132,24 +133,18 @@ const getInitialTacticsTokens = (pitchType) => {
     tokens.push({ id: 'A_LB', position: 'LB', name: '', x: 20, y: 75, team: 'A' }, { id: 'A_CB1', position: 'CB', name: '', x: 40, y: 75, team: 'A' }, { id: 'A_CB2', position: 'CB', name: '', x: 60, y: 75, team: 'A' }, { id: 'A_RB', position: 'RB', name: '', x: 80, y: 75, team: 'A' });
     tokens.push({ id: 'A_LM', position: 'WF', name: '', x: 20, y: 60, team: 'A' }, { id: 'A_CM1', position: 'CM', name: '', x: 40, y: 60, team: 'A' }, { id: 'A_CM2', position: 'CM', name: '', x: 60, y: 60, team: 'A' }, { id: 'A_RM', position: 'WF', name: '', x: 80, y: 60, team: 'A' });
     tokens.push({ id: 'A_FW1', position: 'FW', name: '', x: 35, y: 45, team: 'A' }, { id: 'A_FW2', position: 'FW', name: '', x: 65, y: 45, team: 'A' });
-
-    tokens.push({ id: 'B_GK', position: 'GK', name: '', x: 50, y: 8, team: 'B' });
-    tokens.push({ id: 'B_LB', position: 'LB', name: '', x: 20, y: 25, team: 'B' }, { id: 'B_CB1', position: 'CB', name: '', x: 40, y: 25, team: 'B' }, { id: 'B_CB2', position: 'CB', name: '', x: 60, y: 25, team: 'B' }, { id: 'B_RB', position: 'RB', name: '', x: 80, y: 25, team: 'B' });
-    tokens.push({ id: 'B_LM', position: 'WF', name: '', x: 20, y: 40, team: 'B' }, { id: 'B_CM1', position: 'CM', name: '', x: 40, y: 40, team: 'B' }, { id: 'B_CM2', position: 'CM', name: '', x: 60, y: 40, team: 'B' }, { id: 'B_RM', position: 'WF', name: '', x: 80, y: 40, team: 'B' });
-    tokens.push({ id: 'B_FW1', position: 'FW', name: '', x: 35, y: 55, team: 'B' }, { id: 'B_FW2', position: 'FW', name: '', x: 65, y: 55, team: 'B' });
     
     tokens.push({ id: 'ball', label: '⚽', x: 50, y: 50, team: 'ball' });
   } else {
     tokens.push({ id: 'A_GK', position: 'GK', name: '', x: 50, y: 80, team: 'A' });
     for(let i=1; i<=5; i++) tokens.push({ id: `A_p${i}`, position: 'CM', name: '', x: 15 + i*12, y: 65, team: 'A' });
-    for(let i=1; i<=6; i++) tokens.push({ id: `B_p${i}`, position: 'CM', name: '', x: 15 + i*10, y: 35, team: 'B' });
     tokens.push({ id: 'ball', label: '⚽', x: 50, y: 50, team: 'ball' });
   }
   return tokens;
 };
 
 // ==========================================
-// 메인 App 컴포넌트 시작
+// 메인 App 컴포넌트
 // ==========================================
 export default function App() {
   // --- 1. 상태 (State) 관리 ---
@@ -203,13 +198,23 @@ export default function App() {
   
   const [logEditModal, setLogEditModal] = useState({ isOpen: false, match: null, log: null });
 
+  // --- 전술 보드 관련 State ---
   const [pitchType, setPitchType] = useState('full'); 
+  const [currentTool, setCurrentTool] = useState('move'); 
   const [tacticTokens, setTacticTokens] = useState(getInitialTacticsTokens('full'));
-  const [pastTokens, setPastTokens] = useState([]);
-  const [futureTokens, setFutureTokens] = useState([]);
+  const [drawings, setDrawings] = useState([]);
+  const [activeDrawing, setActiveDrawing] = useState(null);
+  const [pastState, setPastState] = useState([]);
+  const [futureState, setFutureState] = useState([]);
   const [draggingToken, setDraggingToken] = useState(null);
   const [tokenEditModal, setTokenEditModal] = useState({ isOpen: false, token: null });
   
+  // 애니메이션 프레임 관리
+  const [animationFrames, setAnimationFrames] = useState([]);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isAutoRecording, setIsAutoRecording] = useState(false); 
+  const playbackRef = useRef(null);
+
   const boardRef = useRef(null);
   const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 });
   const dragStartTokensRef = useRef(null);
@@ -226,7 +231,7 @@ export default function App() {
   const scheduledThisMonth = useMemo(() => monthlyMatches.filter(m => m.status === 'scheduled').sort((a,b) => a.date.localeCompare(b.date)), [monthlyMatches]);
   
   const completedThisMonthWithStandings = useMemo(() => {
-    return monthlyMatches
+    return [...monthlyMatches]
       .filter(m => m.status === 'completed')
       .sort((a,b) => b.date.localeCompare(a.date))
       .map(m => ({ ...m, standings: calculateStandings(m) }));
@@ -241,7 +246,6 @@ export default function App() {
     return map;
   }, [monthlyMatches]);
 
-  // ★ 통계 계산
   const monthlyStats = useMemo(() => {
     const statsMap = {}; 
     currentTeamPlayers.forEach(p => {
@@ -272,22 +276,40 @@ export default function App() {
       *::-webkit-scrollbar { display: none !important; width: 0 !important; }
       * { -ms-overflow-style: none !important; scrollbar-width: none !important; }
       .tactic-board { touch-action: none; }
+      input[type="number"]::-webkit-outer-spin-button,
+      input[type="number"]::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      input[type="number"] {
+        -moz-appearance: textfield;
+      }
     `}</style>
   );
 
-  // --- 3. useEffect (초기화 및 구독) ---
+  // --- 3. Effects ---
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) setUser(currentUser);
-      else signInAnonymously(auth).catch(console.error);
+      else signInAnonymously(auth).catch(err => console.error(err));
     });
 
-    const unsubTeams = onSnapshot(collection(db, 'teams'), snap => {
-      setTeams(snap.docs.map(d => d.data()));
-      setIsLoaded(true); 
-    });
+    const unsubTeams = onSnapshot(
+      collection(db, 'teams'), 
+      snap => {
+        setTeams(snap.docs.map(d => d.data()));
+        setIsLoaded(true); 
+      },
+      error => {
+        console.error("Firebase load error:", error);
+        setIsLoaded(true); 
+      }
+    );
 
-    return () => { unsubscribeAuth(); unsubTeams(); };
+    return () => {
+      unsubscribeAuth();
+      unsubTeams();
+    };
   }, []);
 
   useEffect(() => {
@@ -303,10 +325,19 @@ export default function App() {
     const qMatches = query(collection(db, 'matches'), where('teamId', '==', activeTeamId));
     const unsubMatches = onSnapshot(qMatches, snap => setMatches(snap.docs.map(d => d.data())));
 
-    return () => { unsubPlayers(); unsubMatches(); };
+    return () => {
+      unsubPlayers();
+      unsubMatches();
+    };
   }, [activeTeamId]);
 
-  // --- 4. 핸들러 함수들 ---
+  useEffect(() => {
+    return () => {
+      if (playbackRef.current) clearTimeout(playbackRef.current);
+    };
+  }, []);
+
+  // --- 4. 이벤트 핸들러 및 헬퍼 로직 ---
   const getTeamDisplayName = (match, letter) => {
     if (!match) return `${letter}팀`;
     if (match.matchType === 'external') {
@@ -469,10 +500,30 @@ export default function App() {
       const newAssignments = { ...(matchModal.match?.teamAssignments || {}) };
       attendees.forEach(pId => { 
         if (matchType === 'external') newAssignments[pId] = 'A'; 
-        // ★ 자체전일 때 A팀 자동 할당 강제 로직 삭제 완료 (미선택 디폴트)
       });
 
       const matchId = matchModal.match?.id || 'm' + Date.now().toString();
+      
+      // ★ 종료된 경기의 명단을 수정한 경우 Caps 동기화 로직
+      if (matchModal.match?.status === 'completed') {
+        const oldAttendees = matchModal.match.attendees || [];
+        const newAttendees = attendees;
+        
+        const added = newAttendees.filter(id => !oldAttendees.includes(id));
+        const removed = oldAttendees.filter(id => !newAttendees.includes(id));
+        
+        const updatePromises = [];
+        for (const id of added) {
+          const p = players.find(x => x.id === id);
+          if (p) updatePromises.push(setDoc(doc(db, 'players', id), { ...p, caps: (p.caps || 0) + 1 }));
+        }
+        for (const id of removed) {
+          const p = players.find(x => x.id === id);
+          if (p) updatePromises.push(setDoc(doc(db, 'players', id), { ...p, caps: Math.max(0, (p.caps || 0) - 1) }));
+        }
+        if (updatePromises.length > 0) await Promise.all(updatePromises);
+      }
+
       const newMatch = {
         ...matchModal.match,
         id: matchId,
@@ -545,6 +596,28 @@ export default function App() {
     });
   };
 
+  const requestResetStats = () => {
+    setSystemConfirm({
+      isOpen: true,
+      message: '🚨 정말 모든 선수의 누적 스탯(참석, 득점, 도움)을 0으로 초기화하시겠습니까?\n(테스트 데이터를 지우거나 새 시즌을 시작할 때 사용)\n\n※ 이 작업은 되돌릴 수 없습니다.',
+      onConfirm: async () => {
+        if(isProcessing) return; setIsProcessing(true);
+        try {
+          const updatePromises = currentTeamPlayers.map(p => 
+            setDoc(doc(db, 'players', p.id), { ...p, caps: 0, goals: 0, assists: 0 })
+          );
+          await Promise.all(updatePromises);
+          setSystemAlert({ isOpen: true, message: '모든 스탯이 성공적으로 초기화되었습니다.' });
+        } catch(err) {
+          console.error(err);
+          setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' });
+        } finally {
+          setIsProcessing(false);
+        }
+      }
+    });
+  };
+
   const assignTeam = (playerId, teamLetter) => {
     const m = assignmentModal.match;
     if(m) {
@@ -555,7 +628,7 @@ export default function App() {
       
       const updatedMatch = { 
         ...m, 
-        teamAssignments: newAssigns // ★ 이전 팀 기록 이력 제거 완료
+        teamAssignments: newAssigns
       };
 
       setAssignmentModal(prev => ({ ...prev, match: updatedMatch }));
@@ -1046,36 +1119,65 @@ export default function App() {
     }
   };
 
-  const saveHistory = (newTokens) => {
-    setPastTokens(prev => [...prev, tacticTokens].slice(-20)); 
-    setFutureTokens([]);
+  // --- 전술 보드 관련 핸들러 ---
+  const saveHistory = (newTokens, newDrawings = drawings) => {
+    setPastState(prev => [...prev, { tokens: tacticTokens, drawings }].slice(-20)); 
+    setFutureState([]);
     setTacticTokens(newTokens);
+    if(newDrawings) setDrawings(newDrawings);
+
+    if (isAutoRecording) {
+      setAnimationFrames(prev => [...prev, { tokens: JSON.parse(JSON.stringify(newTokens)), drawings: JSON.parse(JSON.stringify(newDrawings)) }]);
+    }
   };
 
   const handleUndo = () => {
-    if (pastTokens.length === 0) return;
-    const previous = pastTokens[pastTokens.length - 1];
-    setPastTokens(prev => prev.slice(0, -1));
-    setFutureTokens(prev => [tacticTokens, ...prev]);
-    setTacticTokens(previous);
+    if (pastState.length === 0) return;
+    const previous = pastState[pastState.length - 1];
+    setPastState(prev => prev.slice(0, -1));
+    setFutureState(prev => [{ tokens: tacticTokens, drawings }, ...prev]);
+    setTacticTokens(previous.tokens);
+    setDrawings(previous.drawings);
   };
 
   const handleRedo = () => {
-    if (futureTokens.length === 0) return;
-    const next = futureTokens[0];
-    setFutureTokens(prev => prev.slice(1));
-    setPastTokens(prev => [...prev, tacticTokens]);
-    setTacticTokens(next);
+    if (futureState.length === 0) return;
+    const next = futureState[0];
+    setFutureState(prev => prev.slice(1));
+    setPastState(prev => [...prev, { tokens: tacticTokens, drawings }]);
+    setTacticTokens(next.tokens);
+    setDrawings(next.drawings);
   };
 
-  const handleAddPlayer = (teamLetter) => {
-    const newId = `${teamLetter}_${Date.now()}`;
-    const yPos = pitchType === 'full' ? (teamLetter === 'A' ? 80 : 20) : (teamLetter === 'A' ? 65 : 35);
-    const newToken = { id: newId, position: 'CM', name: '', x: 50, y: yPos, team: teamLetter };
-    saveHistory([...tacticTokens, newToken]);
+  const handleUpdatePlayerCount = (teamLetter, newCount) => {
+    if (newCount < 0) newCount = 0;
+    if (newCount > 30) newCount = 30;
+
+    const teamTokens = tacticTokens.filter(t => t.team === teamLetter);
+    const otherTokens = tacticTokens.filter(t => t.team !== teamLetter);
+    const currentCount = teamTokens.length;
+
+    if (newCount === currentCount) return;
+
+    let newTeamTokens = [...teamTokens];
+
+    if (newCount > currentCount) {
+      const toAdd = newCount - currentCount;
+      for (let i = 0; i < toAdd; i++) {
+        const newId = `${teamLetter}_${Date.now()}_${i}`;
+        const yPos = pitchType === 'full' ? (teamLetter === 'A' ? 80 : 20) : (teamLetter === 'A' ? 65 : 35);
+        newTeamTokens.push({ id: newId, position: 'CM', name: '', x: 50, y: yPos, team: teamLetter });
+      }
+    } else {
+      const toRemove = currentCount - newCount;
+      newTeamTokens.splice(newTeamTokens.length - toRemove, toRemove);
+    }
+
+    saveHistory([...otherTokens, ...newTeamTokens]);
   };
 
-  const handleBoardPointerDown = (e, token) => {
+  const handleTokenPointerDown = (e, token) => {
+    if (currentTool !== 'move' || isPlaying) return;
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     pointerDownInfo.current = { x: e.clientX, y: e.clientY, time: Date.now() };
@@ -1083,8 +1185,19 @@ export default function App() {
     setDraggingToken(token.id);
   };
 
+  const handleBoardPointerDown = (e) => {
+    if (currentTool === 'move' || isPlaying) return;
+    const rect = boardRef.current.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    
+    if (currentTool === 'arrow' || currentTool === 'pass' || currentTool === 'zone') {
+       setActiveDrawing({ id: Date.now(), type: currentTool, start: {x, y}, end: {x, y} });
+    }
+  };
+
   const handleBoardPointerMove = (e) => {
-    if (!draggingToken || !boardRef.current) return;
+    if (!boardRef.current || isPlaying) return;
     const rect = boardRef.current.getBoundingClientRect();
     let x = ((e.clientX - rect.left) / rect.width) * 100;
     let y = ((e.clientY - rect.top) / rect.height) * 100;
@@ -1092,11 +1205,17 @@ export default function App() {
     x = Math.max(0, Math.min(100, x));
     y = Math.max(0, Math.min(100, y));
 
-    setTacticTokens(prev => prev.map(t => t.id === draggingToken ? { ...t, x, y } : t));
+    if (currentTool === 'move' && draggingToken) {
+      setTacticTokens(prev => prev.map(t => t.id === draggingToken ? { ...t, x, y } : t));
+    } else if (activeDrawing) {
+      setActiveDrawing(prev => ({ ...prev, end: {x, y} }));
+    }
   };
 
   const handleBoardPointerUp = (e) => {
-    if (draggingToken) {
+    if (isPlaying) return;
+    
+    if (currentTool === 'move' && draggingToken) {
       const downInfo = pointerDownInfo.current;
       const dist = Math.sqrt(Math.pow(e.clientX - downInfo.x, 2) + Math.pow(e.clientY - downInfo.y, 2));
       const timeDiff = Date.now() - downInfo.time;
@@ -1107,11 +1226,24 @@ export default function App() {
          }
          setTacticTokens(dragStartTokensRef.current);
       } else {
-         setPastTokens(prev => [...prev, dragStartTokensRef.current].slice(-20));
-         setFutureTokens([]);
+         saveHistory(tacticTokens);
       }
       setDraggingToken(null);
+    } else if (activeDrawing) {
+      const dist = Math.sqrt(Math.pow(activeDrawing.start.x - activeDrawing.end.x, 2) + Math.pow(activeDrawing.start.y - activeDrawing.end.y, 2));
+      if (dist > 2) {
+         const newDrawings = [...drawings, activeDrawing];
+         saveHistory(tacticTokens, newDrawings);
+      }
+      setActiveDrawing(null);
     }
+  };
+
+  const handleEraseDrawing = (e, id) => {
+    if (currentTool !== 'erase' || isPlaying) return;
+    e.stopPropagation();
+    const newDrawings = drawings.filter(d => d.id !== id);
+    saveHistory(tacticTokens, newDrawings);
   };
 
   const handleTokenEditSave = (e) => {
@@ -1133,9 +1265,54 @@ export default function App() {
     setTokenEditModal({ isOpen: false, token: null });
   };
 
+  const toggleAutoRecord = () => {
+    if (!isAutoRecording) {
+      setAnimationFrames([{ tokens: JSON.parse(JSON.stringify(tacticTokens)), drawings: JSON.parse(JSON.stringify(drawings)) }]);
+      setIsAutoRecording(true);
+    } else {
+      setIsAutoRecording(false);
+    }
+  };
+
+  const captureFrame = () => {
+    const newFrames = [...animationFrames, { tokens: JSON.parse(JSON.stringify(tacticTokens)), drawings: JSON.parse(JSON.stringify(drawings)) }];
+    setAnimationFrames(newFrames);
+  };
+
+  const clearFrames = () => {
+    setAnimationFrames([]);
+    setIsPlaying(false);
+    setIsAutoRecording(false);
+    if (playbackRef.current) clearTimeout(playbackRef.current);
+  };
+
+  const playAnimation = () => {
+    if (animationFrames.length < 2) {
+      setSystemAlert({ isOpen: true, message: '애니메이션을 재생하려면 최소 2개 이상의 장면이 캡처되어야 합니다.' });
+      return;
+    }
+
+    setIsPlaying(true);
+    let frameIdx = 0;
+
+    const playNext = () => {
+      if (frameIdx >= animationFrames.length) {
+        setIsPlaying(false);
+        return;
+      }
+      setTacticTokens(animationFrames[frameIdx].tokens);
+      setDrawings(animationFrames[frameIdx].drawings);
+      frameIdx++;
+      playbackRef.current = setTimeout(playNext, 1200);
+    };
+
+    playNext();
+  };
+
   // ==========================================
-  // 모달 렌더링 (모든 렌더링 헬퍼를 하나의 스코프에 안전하게 배치)
+  // 5. 팝업(모달) 렌더링 함수 모음
   // ==========================================
+  
   const renderCalendarDays = () => {
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
@@ -1163,41 +1340,42 @@ export default function App() {
     return days;
   };
 
-  const renderSystemModals = () => (
-    <>
-      {systemAlert.isOpen && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
-          <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
-            <p className="text-white font-bold mb-6 whitespace-pre-line">{systemAlert.message}</p>
-            <button onClick={() => setSystemAlert({isOpen: false, message: ''})} className="w-full py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
-          </div>
-        </div>
-      )}
-      {systemConfirm.isOpen && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
-          <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
-            <p className="text-white font-bold mb-6 whitespace-pre-line">{systemConfirm.message}</p>
-            <div className="flex gap-3">
-              <button onClick={() => setSystemConfirm({isOpen: false, message: '', onConfirm: null})} className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 transition text-white rounded-xl font-bold">취소</button>
-              <button onClick={() => { systemConfirm.onConfirm(); setSystemConfirm({isOpen: false, message: '', onConfirm: null}); }} className="flex-1 py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
+  const renderSystemModals = () => {
+    return (
+      <>
+        {systemAlert.isOpen && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
+            <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
+              <p className="text-white font-bold mb-6 whitespace-pre-line">{systemAlert.message}</p>
+              <button onClick={() => setSystemAlert({isOpen: false, message: ''})} className="w-full py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
             </div>
           </div>
-        </div>
-      )}
-      {isProcessing && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200]">
-          <div className="bg-slate-800 p-6 rounded-3xl flex flex-col items-center shadow-xl border border-slate-700 animate-in fade-in zoom-in-95">
-            <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
-            <p className="text-white font-bold text-sm tracking-wide">데이터 저장 중...</p>
+        )}
+        {systemConfirm.isOpen && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
+            <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
+              <p className="text-white font-bold mb-6 whitespace-pre-line">{systemConfirm.message}</p>
+              <div className="flex gap-3">
+                <button onClick={() => setSystemConfirm({isOpen: false, message: '', onConfirm: null})} className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 transition text-white rounded-xl font-bold">취소</button>
+                <button onClick={() => { systemConfirm.onConfirm(); setSystemConfirm({isOpen: false, message: '', onConfirm: null}); }} className="flex-1 py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
-    </>
-  );
+        )}
+        {isProcessing && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200]">
+            <div className="bg-slate-800 p-6 rounded-3xl flex flex-col items-center shadow-xl border border-slate-700 animate-in fade-in zoom-in-95">
+              <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+              <p className="text-white font-bold text-sm tracking-wide">데이터 저장 중...</p>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  };
 
   const renderShareModal = () => {
     if (!shareModal.isOpen) return null;
-
     return (
       <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-[90]">
         <div className="w-full max-w-sm flex flex-col items-center max-h-[90vh]">
@@ -1330,8 +1508,8 @@ export default function App() {
                       </div>
                       <div className="flex flex-wrap gap-2.5">
                         {teamPlayers.map(p => (
-                          <div key={p.id} className="bg-slate-800 px-4 py-2.5 rounded-full border border-slate-600/50 shadow-sm flex items-center">
-                            <span className="font-bold text-white text-[15px] tracking-wide">{p.name}</span>
+                          <div key={p.id} className="bg-slate-900 px-3.5 py-2.5 rounded-full border border-slate-600/50 shadow-sm flex items-center">
+                            <span className="font-bold text-white text-[14px] tracking-wide">{p.name}</span>
                           </div>
                         ))}
                       </div>
@@ -1340,7 +1518,6 @@ export default function App() {
                 })}
               </div>
           </div>
-
         </div>
       </div>
     );
@@ -1446,6 +1623,30 @@ export default function App() {
             <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
               <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-800 pb-2 flex justify-between items-end">
                   <span>참석자 최종 편성 명단</span>
+                  {isAdmin && (
+                    <div className="flex gap-2 mb-1">
+                      <button 
+                        onClick={() => {
+                          setDetailModal({isOpen: false, match: null});
+                          setDetailModalMatchId(null);
+                          setAssignmentModal({ isOpen: true, match: detailMatch });
+                        }}
+                        className="bg-slate-800 text-purple-400 px-2.5 py-1 rounded text-[10px] font-bold border border-purple-500/30 flex items-center gap-1 hover:bg-slate-700 transition"
+                      >
+                        <Users size={12}/> 편성 수정
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setDetailModal({isOpen: false, match: null});
+                          setDetailModalMatchId(null);
+                          openMatchModal(detailMatch);
+                        }}
+                        className="bg-slate-800 text-blue-400 px-2.5 py-1 rounded text-[10px] font-bold border border-blue-500/30 flex items-center gap-1 hover:bg-slate-700 transition"
+                      >
+                        <Edit size={12}/> 명단 수정
+                      </button>
+                    </div>
+                  )}
               </div>
               <div className="space-y-4">
                 {TEAM_LETTERS.slice(0, detailMatch.teamCount).map(teamLetter => {
@@ -1463,8 +1664,8 @@ export default function App() {
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {teamPlayers.map(p => (
-                          <div key={p.id} className="bg-slate-800 px-3.5 py-2 rounded-full border border-slate-600/50 shadow-sm flex items-center">
-                            <span className="font-bold text-white text-[13px] tracking-wide">{p.name}</span>
+                          <div key={p.id} className="bg-slate-800 px-3.5 py-2.5 rounded-full border border-slate-600/50 shadow-sm flex items-center">
+                            <span className="font-bold text-white text-[14px] tracking-wide">{p.name}</span>
                           </div>
                         ))}
                       </div>
@@ -1480,7 +1681,7 @@ export default function App() {
     );
   };
 
-  const renderMatchModal = () => {
+  const renderMatchModalForm = () => {
     if (!matchModal.isOpen) return null;
     return (
       <div className="fixed inset-0 bg-black/80 flex items-end justify-center z-50">
@@ -1602,7 +1803,7 @@ export default function App() {
     );
   };
 
-  const renderRosterModal = () => {
+  const renderRosterModalForm = () => {
     if (!rosterModal.isOpen) return null;
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
@@ -1989,7 +2190,7 @@ export default function App() {
   };
 
   // ==========================================
-  // 메인 렌더링 분기 시작
+  // 6. 메인 화면 렌더링 분기
   // ==========================================
 
   if (appState === 'login') {
@@ -2306,12 +2507,12 @@ export default function App() {
   }
 
   // ==========================================
-  // 메인 탭 화면 (matches, schedule, stats, tactics, roster)
+  // 7. 메인 탭 화면 반환 (matches, schedule, stats, tactics, roster)
   // ==========================================
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl">
+    <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl flex flex-col">
       {globalStyles}
-      <header className="px-6 py-4 border-b border-slate-800 bg-slate-900 sticky top-0 z-10 flex justify-between items-center">
+      <header className="px-6 py-4 border-b border-slate-800 bg-slate-900 sticky top-0 z-10 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700 text-lg overflow-hidden shrink-0">
             {activeTeam?.logo?.startsWith('data:image') ? <img src={activeTeam?.logo} alt="logo" className="w-full h-full object-cover" /> : activeTeam?.logo}
@@ -2335,11 +2536,11 @@ export default function App() {
         </div>
       </header>
 
-      <main className="p-6">
+      <main className="p-6 flex-1 flex flex-col min-h-0">
         
         {/* === 1. 경기 Tab === */}
         {activeTab === 'matches' && (
-          <div className="space-y-6 animate-in fade-in">
+          <div className="space-y-6 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar">
             <div className="flex justify-between items-center mb-2">
               <h2 className="text-xl font-black text-white">팀 경기</h2>
               {isAdmin && (
@@ -2381,9 +2582,11 @@ export default function App() {
                     </div>
                     
                     <div className="flex gap-2">
-                      <button onClick={() => handleActionClick('assign', m)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl text-sm flex justify-center items-center gap-2 transition">
-                        <Users size={16}/> 편성
-                      </button>
+                      {m.matchType !== 'external' && (
+                        <button onClick={() => handleActionClick('assign', m)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl text-sm flex justify-center items-center gap-2 transition">
+                          <Users size={16}/> 편성
+                        </button>
+                      )}
                       <button onClick={() => handleActionClick('start', m)} className={`bg-blue-500 text-white font-bold py-3 rounded-xl text-sm flex justify-center items-center gap-2 shadow-lg hover:bg-blue-600 transition ${m.matchType === 'external' ? 'w-full' : 'flex-1'}`}>
                         {(m.logs || []).length > 0 ? <Activity size={16}/> : <Play size={16} className="fill-current"/>} 
                         {(m.logs || []).length > 0 ? '이어하기' : '기록 시작'}
@@ -2475,7 +2678,7 @@ export default function App() {
 
         {/* === 2. 스케쥴 (달력) Tab === */}
         {activeTab === 'schedule' && (
-          <div className="space-y-6 animate-in fade-in">
+          <div className="space-y-6 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar">
             <h2 className="text-xl font-black text-white">팀 스케쥴</h2>
 
             <div className="flex justify-between items-center bg-slate-800 p-3 rounded-2xl border border-slate-700">
@@ -2526,7 +2729,7 @@ export default function App() {
 
         {/* === 3. 통계 (Stats) Tab === */}
         {activeTab === 'stats' && (
-          <div className="space-y-6 animate-in fade-in">
+          <div className="space-y-6 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar">
             <h2 className="text-xl font-black text-white">월간 팀 통계</h2>
 
             <div className="flex justify-between items-center bg-slate-800 p-3 rounded-2xl border border-slate-700">
@@ -2538,186 +2741,310 @@ export default function App() {
             {monthlyStats.length === 0 ? (
               <div className="text-center py-10 text-slate-500 border border-slate-800 rounded-2xl text-sm">해당 월에 종료된 경기 데이터가 없습니다.</div>
             ) : (
-              (() => {
-                const maxGoals = monthlyStats.length > 0 ? Math.max(...monthlyStats.map(s => s.goals)) : 0;
-                const topScorers = monthlyStats.filter(s => s.goals === maxGoals && s.goals > 0);
-                const topScorerText = topScorers.length > 1 ? `${topScorers[0].name} 외 ${topScorers.length - 1}명` : (topScorers[0]?.name || '-');
+              <>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
+                    <span className="text-[10px] font-bold text-slate-400 mb-2">이달의 득점왕</span>
+                    <span className="text-2xl mb-1">⚽</span>
+                    {(() => {
+                      const maxGoals = Math.max(...monthlyStats.map(s => s.goals), 0);
+                      const topScorers = monthlyStats.filter(s => s.goals === maxGoals && s.goals > 0);
+                      const topText = topScorers.length > 1 ? `${topScorers[0].name} 외 ${topScorers.length - 1}명` : (topScorers[0]?.name || '-');
+                      return (
+                        <>
+                          <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{ wordBreak: 'keep-all' }}>{topText}</span>
+                          <span className="text-xs font-bold text-blue-400">{maxGoals > 0 ? `${maxGoals}골` : ''}</span>
+                        </>
+                      );
+                    })()}
+                  </div>
+                  <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
+                    <span className="text-[10px] font-bold text-slate-400 mb-2">이달의 도움왕</span>
+                    <span className="text-2xl mb-1">👟</span>
+                    {(() => {
+                      const maxAssists = Math.max(...monthlyStats.map(s => s.assists), 0);
+                      const topAssists = monthlyStats.filter(s => s.assists === maxAssists && s.assists > 0);
+                      const topText = topAssists.length > 1 ? `${topAssists[0].name} 외 ${topAssists.length - 1}명` : (topAssists[0]?.name || '-');
+                      return (
+                        <>
+                          <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{ wordBreak: 'keep-all' }}>{topText}</span>
+                          <span className="text-xs font-bold text-blue-400">{maxAssists > 0 ? `${maxAssists}도움` : ''}</span>
+                        </>
+                      );
+                    })()}
+                  </div>
+                  <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
+                    <span className="text-[10px] font-bold text-slate-400 mb-2">이달의 참석왕</span>
+                    <span className="text-2xl mb-1">🔥</span>
+                    {(() => {
+                      const maxCaps = Math.max(...monthlyStats.map(s => s.caps), 0);
+                      const topCaps = monthlyStats.filter(s => s.caps === maxCaps && s.caps > 0);
+                      const topText = topCaps.length > 1 ? `${topCaps[0].name} 외 ${topCaps.length - 1}명` : (topCaps[0]?.name || '-');
+                      return (
+                        <>
+                          <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{ wordBreak: 'keep-all' }}>{topText}</span>
+                          <span className="text-xs font-bold text-blue-400">{maxCaps > 0 ? `${maxCaps}회` : ''}</span>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
 
-                const maxAssists = monthlyStats.length > 0 ? Math.max(...monthlyStats.map(s => s.assists)) : 0;
-                const topAssists = monthlyStats.filter(s => s.assists === maxAssists && s.assists > 0);
-                const topAssistText = topAssists.length > 1 ? `${topAssists[0].name} 외 ${topAssists.length - 1}명` : (topAssists[0]?.name || '-');
-
-                const maxCaps = monthlyStats.length > 0 ? Math.max(...monthlyStats.map(s => s.caps)) : 0;
-                const topCaps = monthlyStats.filter(s => s.caps === maxCaps && s.caps > 0);
-                const topCapText = topCaps.length > 1 ? `${topCaps[0].name} 외 ${topCaps.length - 1}명` : (topCaps[0]?.name || '-');
-
-                return (
-                  <>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="bg-slate-800 rounded-2xl p-3 border border-slate-700 flex flex-col items-center text-center shadow-sm">
-                        <span className="text-[10px] font-bold text-slate-400 mb-2">이달의 득점왕</span>
-                        <span className="text-2xl mb-1">⚽</span>
-                        <span className="text-[13px] font-black text-white leading-tight break-keep mb-1 w-full px-0.5">{topScorerText}</span>
-                        <span className="text-xs font-bold text-blue-400">{maxGoals > 0 ? `${maxGoals}골` : ''}</span>
-                      </div>
-                      <div className="bg-slate-800 rounded-2xl p-3 border border-slate-700 flex flex-col items-center text-center shadow-sm">
-                        <span className="text-[10px] font-bold text-slate-400 mb-2">이달의 도움왕</span>
-                        <span className="text-2xl mb-1">👟</span>
-                        <span className="text-[13px] font-black text-white leading-tight break-keep mb-1 w-full px-0.5">{topAssistText}</span>
-                        <span className="text-xs font-bold text-blue-400">{maxAssists > 0 ? `${maxAssists}도움` : ''}</span>
-                      </div>
-                      <div className="bg-slate-800 rounded-2xl p-3 border border-slate-700 flex flex-col items-center text-center shadow-sm">
-                        <span className="text-[10px] font-bold text-slate-400 mb-2">이달의 참석왕</span>
-                        <span className="text-2xl mb-1">🔥</span>
-                        <span className="text-[13px] font-black text-white leading-tight break-keep mb-1 w-full px-0.5">{topCapText}</span>
-                        <span className="text-xs font-bold text-blue-400">{maxCaps > 0 ? `${maxCaps}회` : ''}</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-sm">
-                      <table className="w-full text-sm text-center">
-                        <thead>
-                          <tr className="text-slate-500 font-bold border-b border-slate-700">
-                            <th className="pb-3 text-left pl-2">선수명</th>
-                            <th className="pb-3">참석</th>
-                            <th className="pb-3">득점</th>
-                            <th className="pb-3">도움</th>
-                            <th className="pb-3">포인트</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {monthlyStats.filter(s => s.caps > 0).map((st, i) => (
-                            <tr key={st.id} className="border-b border-slate-700/50 last:border-0">
-                              <td className="py-3 text-left pl-2 font-bold text-white">{st.name}</td>
-                              <td className="py-3 text-slate-300">{st.caps}</td>
-                              <td className="py-3 text-blue-400 font-bold">{st.goals}</td>
-                              <td className="py-3 text-emerald-400 font-bold">{st.assists}</td>
-                              <td className="py-3 text-yellow-400 font-black">{st.goals + st.assists}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                );
-              })()
+                <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-sm">
+                  <table className="w-full text-sm text-center">
+                    <thead>
+                      <tr className="text-slate-500 font-bold border-b border-slate-700">
+                        <th className="pb-3 text-left pl-2">선수명</th>
+                        <th className="pb-3">참석</th>
+                        <th className="pb-3">득점</th>
+                        <th className="pb-3">도움</th>
+                        <th className="pb-3">포인트</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {monthlyStats.filter(s => s.caps > 0).map((st, i) => (
+                        <tr key={st.id} className="border-b border-slate-700/50 last:border-0">
+                          <td className="py-3 text-left pl-2 font-bold text-white">{st.name}</td>
+                          <td className="py-3 text-slate-300">{st.caps}</td>
+                          <td className="py-3 text-blue-400 font-bold">{st.goals}</td>
+                          <td className="py-3 text-emerald-400 font-bold">{st.assists}</td>
+                          <td className="py-3 text-yellow-400 font-black">{st.goals + st.assists}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {monthlyStats.filter(s => s.caps > 0).length === 0 && (
+                     <div className="text-center text-xs text-slate-500 mt-4">데이터가 없습니다.</div>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}
 
         {/* === 4. 전술 Tab === */}
         {activeTab === 'tactics' && (
-          <div className="space-y-4 animate-in fade-in h-[calc(100dvh-180px)] flex flex-col">
-            <div className="flex justify-between items-center shrink-0">
-              <h2 className="text-xl font-black text-white">전술 보드</h2>
-              <div className="flex gap-2">
-                <button onClick={handleUndo} disabled={pastTokens.length === 0} className="p-1.5 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Undo size={16}/></button>
-                <button onClick={handleRedo} disabled={futureTokens.length === 0} className="p-1.5 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Redo size={16}/></button>
-                <button onClick={() => { setPitchType('full'); saveHistory(getInitialTacticsTokens('full')); }} className="text-[11px] bg-slate-800 text-slate-400 px-3 py-1.5 rounded-lg font-bold border border-slate-700 hover:bg-slate-700 transition">
-                  초기화
-                </button>
-                <button onClick={triggerTacticShare} className="text-[11px] bg-yellow-500/20 text-yellow-500 px-3 py-1.5 rounded-lg font-bold border border-yellow-500/30 hover:bg-yellow-500/30 transition flex items-center gap-1">
-                  <Share2 size={12}/> 공유
-                </button>
+          <div className="animate-in fade-in flex-1 flex flex-col min-h-0 relative pb-2 -mx-2 px-2">
+            
+            <div className="flex justify-between items-center shrink-0 mb-3">
+              <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-lg border border-slate-700">
+                 <button onClick={() => { setPitchType('full'); saveHistory(getInitialTacticsTokens('full'), []); clearFrames(); }} className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold transition ${pitchType === 'full' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                   풀 코트
+                 </button>
+                 <button onClick={() => { setPitchType('half'); saveHistory(getInitialTacticsTokens('half'), []); clearFrames(); }} className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold transition ${pitchType === 'half' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                   하프
+                 </button>
+              </div>
+              <div className="flex items-center gap-1">
+                <button onClick={handleUndo} disabled={pastState.length === 0 || isPlaying} className="p-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Undo size={14}/></button>
+                <button onClick={handleRedo} disabled={futureState.length === 0 || isPlaying} className="p-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Redo size={14}/></button>
+                <button onClick={() => { setPitchType(pitchType); saveHistory(getInitialTacticsTokens(pitchType), []); clearFrames(); }} className="px-2.5 py-1.5 bg-slate-800 text-slate-400 rounded-lg font-bold text-[11px] border border-slate-700 hover:bg-slate-700 transition">초기화</button>
+                <button onClick={triggerTacticShare} className="px-2.5 py-1.5 bg-yellow-500/20 text-yellow-500 rounded-lg font-bold text-[11px] border border-yellow-500/30 hover:bg-yellow-500/30 transition flex items-center gap-1"><Share2 size={12}/> 공유</button>
               </div>
             </div>
 
-            <div className="flex bg-slate-800 rounded-xl p-1 shrink-0">
-               <button onClick={() => { setPitchType('full'); saveHistory(getInitialTacticsTokens('full')); }} className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${pitchType === 'full' ? 'bg-slate-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>
-                 전체 코트
-               </button>
-               <button onClick={() => { setPitchType('half'); saveHistory(getInitialTacticsTokens('half')); }} className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${pitchType === 'half' ? 'bg-slate-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>
-                 하프 코트
-               </button>
-            </div>
+            <div className="flex-1 w-full relative min-h-0 bg-slate-950 rounded-2xl border border-slate-700 flex flex-col shadow-xl overflow-hidden">
+               
+               {/* 툴바 오버레이 (경기장 내부 우측 상단 플로팅) */}
+               <div className="absolute top-2 right-2 bg-slate-900/80 backdrop-blur-md p-1.5 rounded-xl border border-slate-600 shadow-xl flex flex-col gap-1.5 z-40">
+                 <button onClick={() => setCurrentTool('move')} className={`p-2 rounded-lg transition-colors ${currentTool === 'move' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                   <MousePointer2 size={16}/>
+                 </button>
+                 <button onClick={() => setCurrentTool('arrow')} className={`p-2 rounded-lg transition-colors ${currentTool === 'arrow' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                   <MoveUpRight size={16}/>
+                 </button>
+                 <button onClick={() => setCurrentTool('pass')} className={`p-2 rounded-lg transition-colors ${currentTool === 'pass' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                   <Spline size={16}/>
+                 </button>
+                 <button onClick={() => setCurrentTool('zone')} className={`p-2 rounded-lg transition-colors ${currentTool === 'zone' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                   <Square size={16}/>
+                 </button>
+                 <button onClick={() => setCurrentTool('erase')} className={`p-2 rounded-lg transition-colors ${currentTool === 'erase' ? 'bg-red-500 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                   <Eraser size={16}/>
+                 </button>
+               </div>
 
-            <div className="flex gap-2 shrink-0">
-               <button onClick={() => handleAddPlayer('A')} className="flex-1 py-2.5 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-400 text-xs font-bold rounded-xl flex items-center justify-center gap-1 transition">
-                 <Plus size={14}/> A팀 선수 추가
-               </button>
-               <button onClick={() => handleAddPlayer('B')} className="flex-1 py-2.5 bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 text-blue-400 text-xs font-bold rounded-xl flex items-center justify-center gap-1 transition">
-                 <Plus size={14}/> B팀 선수 추가
-               </button>
-            </div>
+               {/* 애니메이션 오버레이 (경기장 내부 하단 플로팅) */}
+               <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-[92%] bg-slate-900/90 backdrop-blur-md p-2 rounded-2xl border border-slate-600 shadow-2xl z-40 flex flex-col gap-2">
+                 {animationFrames.length === 0 && !isAutoRecording && (
+                   <p className="text-[10px] text-yellow-400 font-bold text-center animate-pulse tracking-wide mt-1">💡 [자동 녹화]를 켜고 선수를 움직이면 애니메이션이 만들어집니다!</p>
+                 )}
+                 {isAutoRecording && (
+                   <p className="text-[10px] text-red-400 font-bold text-center animate-pulse tracking-wide mt-1">🔴 녹화 중입니다. 선수를 이동하거나 선을 그리세요!</p>
+                 )}
+                 <div className="flex items-center gap-2">
+                   <div className="bg-slate-800 px-2 py-1.5 rounded-xl text-xs font-black text-slate-300 border border-slate-700 shadow-inner flex items-center gap-1 shrink-0">
+                      <Layers size={14}/> {animationFrames.length}컷
+                   </div>
+                   <button onClick={toggleAutoRecord} disabled={isPlaying} className={`flex-1 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 shadow disabled:opacity-50 ${isAutoRecording ? 'bg-slate-700 text-red-400 border border-red-500/50 animate-pulse' : 'bg-red-500 hover:bg-red-400 text-white'}`}>
+                      <Video size={14}/> {isAutoRecording ? '녹화 중지' : '자동 녹화'}
+                   </button>
+                   <button onClick={playAnimation} disabled={isPlaying || animationFrames.length < 2 || isAutoRecording} className="flex-1 py-2 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 shadow disabled:opacity-50">
+                      <PlayCircle size={14}/> 재생
+                   </button>
+                   <button onClick={clearFrames} disabled={isPlaying || animationFrames.length === 0} className="w-10 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl flex items-center justify-center transition disabled:opacity-50 shrink-0">
+                      <Trash2 size={14}/>
+                   </button>
+                 </div>
+               </div>
 
-            <div className="flex-1 w-full flex justify-center items-center min-h-0 relative pb-6">
-              <div 
-                ref={boardRef}
-                style={{ maxHeight: '100%', maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3' }}
-                onPointerMove={handleBoardPointerMove}
-                onPointerUp={handleBoardPointerUp}
-                onPointerLeave={handleBoardPointerUp}
-                className={`relative bg-emerald-700 border-2 border-white/80 overflow-hidden shadow-inner tactic-board touch-none select-none w-full mx-auto`}
-              >
-                {/* --- Pitch Drawings --- */}
-                {pitchType === 'full' && (
-                  <>
-                    <div className="absolute top-1/2 left-0 w-full border-t-2 border-white/60"></div>
-                    <div className="absolute top-1/2 left-1/2 w-20 h-20 sm:w-28 sm:h-28 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
-                    <div className="absolute top-1/2 left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
-                    
-                    {/* Top Penalty Area */}
-                    <div className="absolute top-0 left-1/2 w-3/5 h-[15%] border-2 border-t-0 border-white/60 -translate-x-1/2"></div>
-                    <div className="absolute top-0 left-1/2 w-[25%] h-[6%] border-2 border-t-0 border-white/60 -translate-x-1/2"></div>
-                    <div className="absolute top-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2"></div>
-                    <div className="absolute top-[15%] left-1/2 w-12 h-6 border-b-2 border-white/60 rounded-b-full -translate-x-1/2"></div>
+              {/* 경기장 (Board) 캡처 영역 */}
+              <div className="flex-1 w-full flex justify-center items-center overflow-hidden">
+                <div 
+                  ref={boardRef}
+                  style={{ maxHeight: '100%', maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: 'none' }}
+                  onPointerDown={handleBoardPointerDown}
+                  onPointerMove={handleBoardPointerMove}
+                  onPointerUp={handleBoardPointerUp}
+                  onPointerLeave={handleBoardPointerUp}
+                  className={`relative bg-emerald-700 w-full mx-auto shadow-inner tactic-board select-none transition-all duration-300 border-2 ${isAutoRecording ? 'border-red-500 shadow-[inset_0_0_20px_rgba(239,68,68,0.5)]' : isPlaying ? 'border-blue-500 shadow-[inset_0_0_20px_rgba(59,130,246,0.5)]' : 'border-white/80'}`}
+                >
+                  {/* --- Pitch Drawings --- */}
+                  {pitchType === 'full' && (
+                    <>
+                      <div className="absolute top-1/2 left-0 w-full border-t-2 border-white/60 pointer-events-none"></div>
+                      <div className="absolute top-1/2 left-1/2 w-20 h-20 sm:w-28 sm:h-28 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
+                      <div className="absolute top-1/2 left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
+                      
+                      {/* Top Penalty Area */}
+                      <div className="absolute top-0 left-1/2 w-3/5 h-[15%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
+                      <div className="absolute top-0 left-1/2 w-[25%] h-[6%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
+                      <div className="absolute top-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
+                      <div className="absolute top-[15%] left-1/2 w-12 h-6 border-b-2 border-white/60 rounded-b-full -translate-x-1/2 pointer-events-none"></div>
 
-                    {/* Bottom Penalty Area */}
-                    <div className="absolute bottom-0 left-1/2 w-3/5 h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2"></div>
-                    <div className="absolute bottom-0 left-1/2 w-[25%] h-[6%] border-2 border-b-0 border-white/60 -translate-x-1/2"></div>
-                    <div className="absolute bottom-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2"></div>
-                    <div className="absolute bottom-[15%] left-1/2 w-12 h-6 border-t-2 border-white/60 rounded-t-full -translate-x-1/2"></div>
-                  </>
-                )}
+                      {/* Bottom Penalty Area */}
+                      <div className="absolute bottom-0 left-1/2 w-3/5 h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
+                      <div className="absolute bottom-0 left-1/2 w-[25%] h-[6%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
+                      <div className="absolute bottom-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
+                      <div className="absolute bottom-[15%] left-1/2 w-12 h-6 border-t-2 border-white/60 rounded-t-full -translate-x-1/2 pointer-events-none"></div>
+                    </>
+                  )}
 
-                {pitchType === 'half' && (
-                  <>
-                    <div className="absolute top-0 left-0 w-full border-t-2 border-white/60"></div>
-                    <div className="absolute top-0 left-1/2 w-32 h-32 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
+                  {pitchType === 'half' && (
+                    <>
+                      <div className="absolute top-0 left-0 w-full border-t-2 border-white/60 pointer-events-none"></div>
+                      <div className="absolute top-0 left-1/2 w-32 h-32 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
 
-                    <div className="absolute bottom-0 left-1/2 w-[70%] h-[40%] border-2 border-b-0 border-white/60 -translate-x-1/2"></div>
-                    <div className="absolute bottom-0 left-1/2 w-[35%] h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2"></div>
-                    <div className="absolute bottom-[30%] left-1/2 w-2 h-2 bg-white/80 rounded-full -translate-x-1/2"></div>
-                    <div className="absolute bottom-[40%] left-1/2 w-20 h-10 border-t-2 border-white/60 rounded-t-full -translate-x-1/2"></div>
-                  </>
-                )}
+                      <div className="absolute bottom-0 left-1/2 w-[70%] h-[40%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
+                      <div className="absolute bottom-0 left-1/2 w-[35%] h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
+                      <div className="absolute bottom-[30%] left-1/2 w-2 h-2 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
+                      <div className="absolute bottom-[40%] left-1/2 w-20 h-10 border-t-2 border-white/60 rounded-t-full -translate-x-1/2 pointer-events-none"></div>
+                    </>
+                  )}
 
-                {/* --- Tokens --- */}
-                {tacticTokens.map(t => (
-                  <div
-                    key={t.id}
-                    onPointerDown={(e) => handleBoardPointerDown(e, t)}
-                    style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
-                    className={`absolute rounded-full flex flex-col items-center justify-center font-black transition-transform duration-75 text-[10px] sm:text-[11px] 
-                      ${draggingToken === t.id ? 'scale-125 z-50 opacity-90 cursor-grabbing' : 'scale-100 z-30 cursor-grab'}
-                      ${t.team === 'A' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-red-600 text-white border border-red-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
-                      ${t.team === 'B' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 text-white border border-blue-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
-                      ${t.team === 'ball' ? 'w-6 h-6 sm:w-7 sm:h-7 bg-white text-black shadow-[inset_0_-1px_3px_rgba(0,0,0,0.3),_0_3px_6px_rgba(0,0,0,0.6)] text-[16px]' : ''}
-                    `}
-                  >
-                    <span>{t.team === 'ball' ? t.label : t.position}</span>
-                    {t.name && (
-                      <span className="absolute top-[120%] text-[10px] sm:text-[11px] font-bold text-white bg-black/80 px-2 py-0.5 rounded-full shadow-md whitespace-nowrap z-40 pointer-events-none tracking-tight border border-white/20">
-                        {t.name}
-                      </span>
-                    )}
-                  </div>
-                ))}
+                  {/* --- User Drawings --- */}
+                  <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
+                    <defs>
+                      <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill="#FACC15" />
+                      </marker>
+                      <marker id="passhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill="#60A5FA" />
+                      </marker>
+                    </defs>
+                    {[...drawings, activeDrawing].filter(Boolean).map(d => {
+                      const isEraseMode = currentTool === 'erase' && !isPlaying;
+                      const pointerClass = isEraseMode ? 'pointer-events-auto cursor-pointer hover:stroke-red-500 hover:stroke-[5px] transition-all' : 'transition-all duration-1000';
+                      
+                      if (d.type === 'arrow') {
+                        return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#FACC15" strokeWidth="3" markerEnd="url(#arrowhead)" className={pointerClass} onPointerDown={(e) => handleEraseDrawing(e, d.id)} />
+                      }
+                      if (d.type === 'pass') {
+                        return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#60A5FA" strokeWidth="3" strokeDasharray="6,6" markerEnd="url(#passhead)" className={pointerClass} onPointerDown={(e) => handleEraseDrawing(e, d.id)} />
+                      }
+                      if (d.type === 'zone') {
+                        const x = Math.min(d.start.x, d.end.x);
+                        const y = Math.min(d.start.y, d.end.y);
+                        const w = Math.abs(d.start.x - d.end.x);
+                        const h = Math.abs(d.start.y - d.end.y);
+                        const rectClass = isEraseMode ? 'pointer-events-auto cursor-pointer hover:fill-red-500/30 hover:stroke-red-500 transition-all' : 'transition-all duration-1000';
+                        return <rect key={d.id} x={`${x}%`} y={`${y}%`} width={`${w}%`} height={`${h}%`} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="2" className={rectClass} onPointerDown={(e) => handleEraseDrawing(e, d.id)} />
+                      }
+                      return null;
+                    })}
+                  </svg>
+
+                  {/* --- Tokens --- */}
+                  {tacticTokens.map(t => (
+                    <div
+                      key={t.id}
+                      onPointerDown={(e) => handleTokenPointerDown(e, t)}
+                      style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
+                      className={`absolute rounded-full flex flex-col items-center justify-center font-black text-[10px] sm:text-[11px] 
+                        ${isPlaying ? 'transition-all duration-1000 ease-in-out pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
+                        ${currentTool !== 'move' && !isPlaying ? 'pointer-events-none z-20' : ''}
+                        ${t.team === 'A' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-red-600 text-white border border-red-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
+                        ${t.team === 'B' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 text-white border border-blue-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
+                        ${t.team === 'ball' ? 'w-6 h-6 sm:w-7 sm:h-7 bg-white text-black shadow-[inset_0_-1px_3px_rgba(0,0,0,0.3),_0_3px_6px_rgba(0,0,0,0.6)] text-[16px]' : ''}
+                      `}
+                    >
+                      <span>{t.team === 'ball' ? t.label : t.position}</span>
+                      {t.name && (
+                        <span className="absolute top-[120%] text-[10px] sm:text-[11px] font-bold text-white bg-black/80 px-2 py-0.5 rounded-full shadow-md whitespace-nowrap z-40 pointer-events-none tracking-tight border border-white/20">
+                          {t.name}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
-            <p className="text-center text-[10px] text-slate-500 mt-2 shrink-0">선수를 터치하여 정보를 변경할 수 있습니다.</p>
+            
+            {/* ★ A팀/B팀 선수 증감 및 수동 입력 UI */}
+            <div className="flex gap-2 shrink-0 border-t border-slate-800 pt-3">
+               <div className="flex-1 flex items-center justify-between bg-red-500/5 border border-red-500/20 rounded-xl p-1.5 pl-3">
+                 <span className="text-[11px] font-bold text-red-400">A팀 선수</span>
+                 <div className="flex items-center gap-1">
+                   <button onClick={() => handleUpdatePlayerCount('A', tacticTokens.filter(t=>t.team==='A').length - 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition font-black text-sm disabled:opacity-50">-</button>
+                   <input 
+                     type="number" 
+                     value={tacticTokens.filter(t=>t.team==='A').length === 0 ? '' : tacticTokens.filter(t=>t.team==='A').length} 
+                     onChange={(e) => {
+                        const val = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
+                        handleUpdatePlayerCount('A', val);
+                     }} 
+                     disabled={isPlaying}
+                     className="w-8 text-center bg-transparent text-white text-xs font-bold outline-none disabled:opacity-50" 
+                   />
+                   <button onClick={() => handleUpdatePlayerCount('A', tacticTokens.filter(t=>t.team==='A').length + 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition font-black text-sm disabled:opacity-50">+</button>
+                 </div>
+               </div>
+               
+               <div className="flex-1 flex items-center justify-between bg-blue-500/5 border border-blue-500/20 rounded-xl p-1.5 pl-3">
+                 <span className="text-[11px] font-bold text-blue-400">B팀 선수</span>
+                 <div className="flex items-center gap-1">
+                   <button onClick={() => handleUpdatePlayerCount('B', tacticTokens.filter(t=>t.team==='B').length - 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition font-black text-sm disabled:opacity-50">-</button>
+                   <input 
+                     type="number" 
+                     value={tacticTokens.filter(t=>t.team==='B').length === 0 ? '' : tacticTokens.filter(t=>t.team==='B').length} 
+                     onChange={(e) => {
+                        const val = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
+                        handleUpdatePlayerCount('B', val);
+                     }} 
+                     disabled={isPlaying}
+                     className="w-8 text-center bg-transparent text-white text-xs font-bold outline-none disabled:opacity-50" 
+                   />
+                   <button onClick={() => handleUpdatePlayerCount('B', tacticTokens.filter(t=>t.team==='B').length + 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition font-black text-sm disabled:opacity-50">+</button>
+                 </div>
+               </div>
+            </div>
           </div>
         )}
 
         {/* === 5. 명단 Tab === */}
         {activeTab === 'roster' && (
-          <div className="space-y-4 animate-in fade-in">
+          <div className="space-y-4 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar">
             <div className="flex justify-between items-center">
               <h2 className="text-xl font-black text-white">팀 명단</h2>
               {isAdmin && (
-                <button onClick={() => setRosterModal({isOpen: true, player: null})} className="text-xs bg-slate-800 text-blue-400 px-3 py-1.5 rounded-lg font-bold border border-blue-500/30 flex items-center gap-1 hover:bg-slate-700 transition">
-                  <Plus size={14}/> 선수 추가
-                </button>
+                <div className="flex gap-2">
+                  <button onClick={requestResetStats} className="text-xs bg-red-500/10 text-red-400 px-3 py-1.5 rounded-lg font-bold border border-red-500/30 flex items-center gap-1 hover:bg-red-500/20 transition">
+                    <RotateCcw size={12}/> 스탯 초기화
+                  </button>
+                  <button onClick={() => setRosterModal({isOpen: true, player: null})} className="text-xs bg-slate-800 text-blue-400 px-3 py-1.5 rounded-lg font-bold border border-blue-500/30 flex items-center gap-1 hover:bg-slate-700 transition">
+                    <Plus size={14}/> 선수 추가
+                  </button>
+                </div>
               )}
             </div>
             {currentTeamPlayers.length === 0 && (
@@ -2774,12 +3101,12 @@ export default function App() {
       </nav>
 
       {/* ============================================================================ */}
-      {/* MODALS (렌더링 통합 관리 영역) */}
+      {/* 팝업 모달 영역 (가장 안전한 위치에서 렌더링) */}
       {/* ============================================================================ */}
       {renderDetailModal()}
-      {renderMatchModal()}
+      {renderMatchModalForm()}
       {renderAssignmentModal()}
-      {renderRosterModal()}
+      {renderRosterModalForm()}
       {renderAuthModal()}
       {renderTeamSettingsModal()}
       {renderTokenEditModal()}
