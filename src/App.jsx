@@ -48,7 +48,6 @@ const resizeImage = (file, maxWidth = 300, maxHeight = 300) => {
         const canvas = document.createElement('canvas');
         let width = img.width;
         let height = img.height;
-
         if (width > height) {
           if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
         } else {
@@ -106,8 +105,7 @@ const formatTimeAmPm = (timeStr) => {
   const [h, m] = timeStr.split(':');
   const hour = parseInt(h, 10);
   const ampm = hour >= 12 ? '오후' : '오전';
-  const formattedHour = hour % 12 || 12;
-  return `${ampm} ${formattedHour}:${m}`;
+  return `${ampm} ${hour % 12 || 12}:${m}`;
 };
 
 const getTodayString = () => {
@@ -115,6 +113,7 @@ const getTodayString = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+// ★ 초기 전술 보드 설정: A팀(우리 팀)과 공만 보이도록 설정
 const getInitialTacticsTokens = (pitchType) => {
   const tokens = [];
   if (pitchType === 'full') {
@@ -148,6 +147,7 @@ export default function App() {
   const [activeTeamId, setActiveTeamId] = useState(null);
   const [players, setPlayers] = useState([]);
   const [matches, setMatches] = useState([]);
+
   const [viewDate, setViewDate] = useState(new Date());
 
   const [systemAlert, setSystemAlert] = useState({ isOpen: false, message: '' });
@@ -180,7 +180,7 @@ export default function App() {
   const [goalFlow, setGoalFlow] = useState({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false });
   const [logEditModal, setLogEditModal] = useState({ isOpen: false, match: null, log: null });
 
-  // 전술 보드 관련 State
+  // --- 전술 보드 관련 State ---
   const [pitchType, setPitchType] = useState('full'); 
   const [currentTool, setCurrentTool] = useState('move'); 
   const [tacticTokens, setTacticTokens] = useState(getInitialTacticsTokens('full'));
@@ -195,22 +195,33 @@ export default function App() {
   const [animationFrames, setAnimationFrames] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAutoRecording, setIsAutoRecording] = useState(false); 
+
   const playbackRef = useRef(null);
   const boardRef = useRef(null);
   const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 });
   const dragStartTokensRef = useRef(null);
 
-  // ★ 빠른 그리기(Lag 제거)를 위한 직접 DOM 조작 Ref
+  // 빠른 그리기를 위한 직접 조작 DOM Refs
   const svgArrowRef = useRef(null);
   const svgPassRef = useRef(null);
   const svgZoneRef = useRef(null);
-  const activeDrawingData = useRef(null);
 
+  // --- 메모이제이션 데이터 ---
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
   const liveMatch = useMemo(() => matches.find(m => m.id === liveMatchId), [matches, liveMatchId]);
   const detailMatch = useMemo(() => matches.find(m => m.id === detailModalMatchId), [matches, detailModalMatchId]);
+
+  // ★ 누락되었던 팀 이름 추출 함수 복구
+  const getTeamDisplayName = (match, letter) => {
+    if (!match) return `${letter}팀`;
+    if (match.matchType === 'external') {
+      if (letter === 'A') return activeTeam?.name || '우리 팀';
+      if (letter === 'B') return match.opponentName || '상대 팀';
+    }
+    return `${letter}팀`;
+  };
 
   const viewYearMonth = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
   const monthlyMatches = useMemo(() => currentTeamMatches.filter(m => m.date.startsWith(viewYearMonth)), [currentTeamMatches, viewYearMonth]);
@@ -258,12 +269,14 @@ export default function App() {
     <style>{`
       *::-webkit-scrollbar { display: none !important; width: 0 !important; }
       * { -ms-overflow-style: none !important; scrollbar-width: none !important; }
+      /* 전술보드 터치 스크롤 허용 처리는 인라인 스타일로 제어 */
       input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
       input[type="number"] { -moz-appearance: textfield; }
       .will-change-transform { will-change: transform, left, top; }
     `}</style>
   );
 
+  // --- Effects ---
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) setUser(currentUser);
@@ -287,6 +300,12 @@ export default function App() {
   useEffect(() => {
     return () => { if (playbackRef.current) clearTimeout(playbackRef.current); };
   }, []);
+
+  // --- 일반 이벤트 핸들러 ---
+  const prevMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
+  const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
+
+  const openMatchModal = (match) => { setMatchTypeForm(match?.matchType || 'internal'); setMatchModal({ isOpen: true, match }); };
 
   const handleActionClick = (action, match) => {
     const safeDate = match.date.replace(/-/g, '/');
@@ -369,6 +388,8 @@ export default function App() {
       attendees.forEach(pId => { if (matchType === 'external') newAssignments[pId] = 'A'; });
 
       const matchId = matchModal.match?.id || 'm' + Date.now().toString();
+      
+      // 종료된 경기 명단 수정 시 선수 캡스 연동
       if (matchModal.match?.status === 'completed') {
         const oldAttendees = matchModal.match.attendees || [];
         const added = attendees.filter(id => !oldAttendees.includes(id));
@@ -599,6 +620,7 @@ export default function App() {
     } catch (err) { setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' }); } finally { setIsProcessing(false); }
   };
 
+  // --- 리포트/캡처 공유 ---
   const triggerShare = (data) => {
     setShareModal({ isOpen: true, step: 1, data, file: null, imgUrl: null, isVideo: false });
     setTimeout(async () => {
@@ -643,22 +665,15 @@ export default function App() {
     const file = shareModal.file; if (!file) return;
     const isKakaotalk = navigator.userAgent.toLowerCase().includes('kakaotalk');
     if (isKakaotalk) {
-      setSystemAlert({ isOpen: true, message: '🚨 카카오톡 브라우저에서는 자동 공유/복사가 제한됩니다.\n\n💡 해결 방법:\n1. 화면의 이미지를 길게 눌러 저장하시거나\n2. 우측 하단 ⠇ 메뉴를 눌러 "다른 브라우저로 열기(Safari/Chrome)"를 선택해주세요!' });
+      setSystemAlert({ isOpen: true, message: '🚨 카카오톡 브라우저에서는 파일 다이렉트 전송이 제한됩니다.\n\n💡 방법: 하단의 공유버튼(⠇)을 눌러 "다른 브라우저(Safari 등)로 열기"를 한 뒤 공유해주세요.' });
       return;
     }
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try { await navigator.share({ title: 'MATCHBOARD', files: [file] }); } catch (error) { if (error.name !== 'AbortError') downloadFallback(file, shareModal.imgUrl); }
-    } else {
-      if (!shareModal.isVideo && navigator.clipboard && window.isSecureContext) {
-        try {
-          const clipboardItem = new ClipboardItem({ [file.type]: file });
-          await navigator.clipboard.write([clipboardItem]);
-          setSystemAlert({ isOpen: true, message: '클립보드에 복사되었습니다!\n원하는 곳에 붙여넣기 해주세요.' });
-        } catch(e) { downloadFallback(file, shareModal.imgUrl); }
-      } else { downloadFallback(file, shareModal.imgUrl); }
-    }
+    } else { downloadFallback(file, shareModal.imgUrl); }
   };
 
+  // --- 전술 보드 조작 ---
   const saveHistory = (newTokens, newDrawings = drawings) => {
     setPastState(prev => [...prev, { tokens: tacticTokens, drawings }].slice(-20)); 
     setFutureState([]);
@@ -781,6 +796,7 @@ export default function App() {
     saveHistory(newTokens); setTokenEditModal({ isOpen: false, token: null });
   };
 
+  // --- 전술 영상 (애니메이션) 처리 ---
   const toggleAutoRecord = () => {
     if (!isAutoRecording) {
       setAnimationFrames([{ tokens: JSON.parse(JSON.stringify(tacticTokens)), drawings: JSON.parse(JSON.stringify(drawings)) }]);
@@ -909,7 +925,7 @@ export default function App() {
   };
 
   // ==========================================
-  // 5. 팝업 렌더링 함수 모음 (모두 최상단 배치)
+  // 5. 팝업(모달) 렌더링 함수 모음 (안전 구역 선언)
   // ==========================================
   function renderCalendarDays() {
     const year = viewDate.getFullYear(); const month = viewDate.getMonth(); const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -956,7 +972,7 @@ export default function App() {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200]">
             <div className="bg-slate-800 p-6 rounded-3xl flex flex-col items-center shadow-xl border border-slate-700 animate-in fade-in zoom-in-95">
               <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
-              <p className="text-white font-bold text-sm tracking-wide">데이터 저장 중...</p>
+              <p className="text-white font-bold text-sm tracking-wide">데이터 처리 중...</p>
             </div>
           </div>
         )}
@@ -983,7 +999,7 @@ export default function App() {
               <div className="w-full flex-1 overflow-y-auto rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50 hide-scrollbar flex justify-center items-center">
                 {shareModal.imgUrl && (
                    shareModal.isVideo ? (
-                     <video src={shareModal.imgUrl} autoPlay loop playsInline controls className="w-full h-auto rounded-lg shadow-sm" />
+                     <video src={shareModal.imgUrl} autoPlay loop playsInline className="w-full h-auto rounded-lg shadow-sm" />
                    ) : (
                      <img src={shareModal.imgUrl} alt="Preview" className="w-full h-auto rounded-lg shadow-sm" />
                    )
@@ -1266,6 +1282,7 @@ export default function App() {
                 })}
               </div>
             </div>
+
           </div>
         </div>
       </div>
@@ -1411,7 +1428,7 @@ export default function App() {
             </div>
             <div className="flex gap-3 pt-4">
               <button type="button" onClick={() => setRosterModal({isOpen: false, player: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold transition hover:bg-slate-600">취소</button>
-              <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold transition hover:bg-blue-400 shadow-lg">저장하기</button>
+              <button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold transition hover:bg-blue-400 shadow-lg">저하기</button>
             </div>
           </form>
         </div>
@@ -1702,7 +1719,7 @@ export default function App() {
   function renderTokenEditModal() {
     if (!tokenEditModal.isOpen || !tokenEditModal.token) return null;
     return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100] animate-in fade-in">
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[70] animate-in fade-in">
         <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
           <h2 className="text-xl font-bold text-white mb-4 text-center">선수 정보 설정</h2>
           <form onSubmit={handleTokenEditSave} className="space-y-4">
@@ -1781,9 +1798,8 @@ export default function App() {
   }
 
   // ==========================================
-  // 메인 컴포넌트 렌더링 분기 시작
+  // JSX 메인 컴포넌트 구조
   // ==========================================
-
   if (appState === 'login') {
     return (
       <div className="min-h-screen bg-slate-900 text-slate-200 font-sans p-6 flex flex-col justify-center max-w-md mx-auto relative">
@@ -2086,7 +2102,6 @@ export default function App() {
           <div className="h-6 shrink-0 w-full"></div>
         </div>
         
-        {/* 팝업 렌더링 영역 */}
         {renderAssignmentModal()}
         {renderShareModal()}
         {renderHiddenCaptureArea()}
@@ -2097,7 +2112,9 @@ export default function App() {
     );
   }
 
+  // ==========================================
   // 메인 탭 반환 (matches, schedule, stats, tactics, roster)
+  // ==========================================
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl flex flex-col">
       {globalStyles}
@@ -2465,17 +2482,20 @@ export default function App() {
                 onPointerLeave={handleBoardPointerUp}
                 className={`relative bg-emerald-700 border-2 ${isAutoRecording ? 'border-red-500 shadow-[inset_0_0_20px_rgba(239,68,68,0.7)]' : isPlaying ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'border-white/80 shadow-inner'} overflow-hidden tactic-board select-none w-full mx-auto transition-colors duration-300`}
               >
+                {/* --- Pitch Drawings --- */}
                 {pitchType === 'full' && (
                   <>
                     <div className="absolute top-1/2 left-0 w-full border-t-2 border-white/60 pointer-events-none"></div>
                     <div className="absolute top-1/2 left-1/2 w-20 h-20 sm:w-28 sm:h-28 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
                     <div className="absolute top-1/2 left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
                     
+                    {/* Top Penalty Area */}
                     <div className="absolute top-0 left-1/2 w-3/5 h-[15%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-0 left-1/2 w-[25%] h-[6%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-[15%] left-1/2 w-12 h-6 border-b-2 border-white/60 rounded-b-full -translate-x-1/2 pointer-events-none"></div>
 
+                    {/* Bottom Penalty Area */}
                     <div className="absolute bottom-0 left-1/2 w-3/5 h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute bottom-0 left-1/2 w-[25%] h-[6%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute bottom-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
@@ -2495,6 +2515,7 @@ export default function App() {
                   </>
                 )}
 
+                {/* --- User Drawings --- */}
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
                   <defs>
                     <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -2531,14 +2552,14 @@ export default function App() {
                   })}
                 </svg>
 
+                {/* --- Tokens --- */}
                 {tacticTokens.map(t => (
                   <div
                     key={t.id}
-                    id={`token-${t.id}`}
                     onPointerDown={(e) => handleTokenPointerDown(e, t)}
                     style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
                     className={`absolute rounded-full flex flex-col items-center justify-center font-black transition-transform duration-75 text-[10px] sm:text-[11px] will-change-transform 
-                      ${isPlaying ? 'transition-none pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
+                      ${isPlaying ? 'transition-[left,top] duration-1000 ease-in-out pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
                       ${currentTool !== 'move' && !isPlaying ? 'pointer-events-none z-20' : ''}
                       ${t.team === 'A' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-red-600 text-white border border-red-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
                       ${t.team === 'B' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 text-white border border-blue-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
@@ -2562,6 +2583,7 @@ export default function App() {
               </div>
             </div>
             
+            {/* ★ 애니메이션 프레임 제어 및 A/B팀 선수 조절 */}
             <div className="flex flex-col gap-2 shrink-0 border-t border-slate-800 pt-2">
                {animationFrames.length === 0 && !isAutoRecording && (
                  <p className="text-[10px] text-yellow-400 font-bold text-center animate-pulse tracking-wide my-1">💡 [자동 녹화]를 켜고 선수를 움직이면 자동으로 저장됩니다!</p>
@@ -2679,7 +2701,7 @@ export default function App() {
       </nav>
 
       {/* ============================================================================ */}
-      {/* 팝업 모달 영역 */}
+      {/* 팝업 모달 영역 (가장 안전한 위치에서 렌더링) */}
       {/* ============================================================================ */}
       {renderDetailModal()}
       {renderMatchModalForm()}
