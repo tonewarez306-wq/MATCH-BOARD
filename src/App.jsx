@@ -48,20 +48,12 @@ const resizeImage = (file, maxWidth = 300, maxHeight = 300) => {
         const canvas = document.createElement('canvas');
         let width = img.width;
         let height = img.height;
-
         if (width > height) {
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
-          }
+          if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
         } else {
-          if (height > maxHeight) {
-            width = Math.round((width * maxHeight) / height);
-            height = maxHeight;
-          }
+          if (height > maxHeight) { width = Math.round((width * maxHeight) / height); height = maxHeight; }
         }
-        canvas.width = width;
-        canvas.height = height;
+        canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
         resolve(canvas.toDataURL('image/jpeg', 0.8)); 
@@ -73,10 +65,7 @@ const resizeImage = (file, maxWidth = 300, maxHeight = 300) => {
 
 const loadHtml2Canvas = () => {
   return new Promise((resolve, reject) => {
-    if (window.html2canvas) {
-      resolve(window.html2canvas);
-      return;
-    }
+    if (window.html2canvas) { resolve(window.html2canvas); return; }
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
     script.onload = () => resolve(window.html2canvas);
@@ -94,7 +83,6 @@ const calculateStandings = (match) => {
   (match.quarterScores || []).forEach(qs => {
     const { team1, team2, score1, score2 } = qs;
     if (!stats[team1] || !stats[team2]) return;
-    
     stats[team1].matches++; stats[team2].matches++;
     stats[team1].gf += score1; stats[team1].ga += score2;
     stats[team2].gf += score2; stats[team2].ga += score1;
@@ -117,8 +105,7 @@ const formatTimeAmPm = (timeStr) => {
   const [h, m] = timeStr.split(':');
   const hour = parseInt(h, 10);
   const ampm = hour >= 12 ? '오후' : '오전';
-  const formattedHour = hour % 12 || 12;
-  return `${ampm} ${formattedHour}:${m}`;
+  return `${ampm} ${hour % 12 || 12}:${m}`;
 };
 
 const getTodayString = () => {
@@ -146,7 +133,7 @@ const getInitialTacticsTokens = (pitchType) => {
 // 메인 App 컴포넌트
 // ==========================================
 export default function App() {
-  // --- 1. 상태 (State) 관리 ---
+  // --- 상태 (State) 관리 ---
   const [user, setUser] = useState(null);
   const [appState, setAppState] = useState('login'); 
   const [activeTab, setActiveTab] = useState('matches'); 
@@ -160,7 +147,6 @@ export default function App() {
   const [activeTeamId, setActiveTeamId] = useState(null);
   const [players, setPlayers] = useState([]);
   const [matches, setMatches] = useState([]);
-
   const [viewDate, setViewDate] = useState(new Date());
 
   const [systemAlert, setSystemAlert] = useState({ isOpen: false, message: '' });
@@ -190,14 +176,10 @@ export default function App() {
   const [liveMatchId, setLiveMatchId] = useState(null);
   const [liveState, setLiveState] = useState({ currentQuarter: 1, playingTeams: ['A', 'B'], isQuarterActive: false });
   
-  const [goalFlow, setGoalFlow] = useState({ 
-    isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, 
-    availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false 
-  });
-  
+  const [goalFlow, setGoalFlow] = useState({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false });
   const [logEditModal, setLogEditModal] = useState({ isOpen: false, match: null, log: null });
 
-  // --- 전술 보드 관련 State ---
+  // 전술 보드 관련 State
   const [pitchType, setPitchType] = useState('full'); 
   const [currentTool, setCurrentTool] = useState('move'); 
   const [tacticTokens, setTacticTokens] = useState(getInitialTacticsTokens('full'));
@@ -208,22 +190,21 @@ export default function App() {
   const [draggingToken, setDraggingToken] = useState(null);
   const [tokenEditModal, setTokenEditModal] = useState({ isOpen: false, token: null });
   
-  // 애니메이션 프레임 관리
+  // 애니메이션 관련 State
   const [animationFrames, setAnimationFrames] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAutoRecording, setIsAutoRecording] = useState(false); 
-  const playbackRef = useRef(null);
 
+  // --- Refs ---
+  const playbackRef = useRef(null);
   const boardRef = useRef(null);
   const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 });
   const dragStartTokensRef = useRef(null);
-
-  // DOM 직접 조작용 Ref (최적화)
   const svgArrowRef = useRef(null);
   const svgPassRef = useRef(null);
   const svgZoneRef = useRef(null);
 
-  // --- 2. 데이터 메모이제이션 ---
+  // --- 데이터 메모이제이션 ---
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
@@ -235,65 +216,41 @@ export default function App() {
   const scheduledThisMonth = useMemo(() => monthlyMatches.filter(m => m.status === 'scheduled').sort((a,b) => a.date.localeCompare(b.date)), [monthlyMatches]);
   
   const completedThisMonthWithStandings = useMemo(() => {
-    return monthlyMatches
-      .filter(m => m.status === 'completed')
-      .sort((a,b) => b.date.localeCompare(a.date))
-      .map(m => ({ ...m, standings: calculateStandings(m) }));
+    return monthlyMatches.filter(m => m.status === 'completed').sort((a,b) => b.date.localeCompare(a.date)).map(m => ({ ...m, standings: calculateStandings(m) }));
   }, [monthlyMatches]);
 
   const matchesByDate = useMemo(() => {
     const map = {};
-    monthlyMatches.forEach(m => {
-      if (!map[m.date]) map[m.date] = [];
-      map[m.date].push(m);
-    });
+    monthlyMatches.forEach(m => { if (!map[m.date]) map[m.date] = []; map[m.date].push(m); });
     return map;
   }, [monthlyMatches]);
 
   const calculatedPlayersList = useMemo(() => {
     const stats = {};
-    currentTeamPlayers.forEach(p => {
-       stats[p.id] = { ...p, trueCaps: 0, trueGoals: 0, trueAssists: 0 };
-    });
+    currentTeamPlayers.forEach(p => { stats[p.id] = { ...p, trueCaps: 0, trueGoals: 0, trueAssists: 0 }; });
     const completedMatches = currentTeamMatches.filter(m => m.status === 'completed');
     completedMatches.forEach(m => {
-      (m.attendees || []).forEach(pid => {
-        if (stats[pid]) stats[pid].trueCaps += 1;
-      });
+      (m.attendees || []).forEach(pid => { if (stats[pid]) stats[pid].trueCaps += 1; });
       (m.logs || []).forEach(log => {
         if (log.scorerId && stats[log.scorerId]) stats[log.scorerId].trueGoals += 1;
         if (log.assistId && stats[log.assistId]) stats[log.assistId].trueAssists += 1;
       });
     });
-    return Object.values(stats).sort((a,b) => {
-       if (b.trueCaps !== a.trueCaps) return b.trueCaps - a.trueCaps;
-       return b.trueGoals - a.trueGoals;
-    });
+    return Object.values(stats).sort((a,b) => b.trueCaps !== a.trueCaps ? b.trueCaps - a.trueCaps : b.trueGoals - a.trueGoals);
   }, [currentTeamPlayers, currentTeamMatches]);
 
   const monthlyStats = useMemo(() => {
     const statsMap = {}; 
-    currentTeamPlayers.forEach(p => {
-      statsMap[p.id] = { id: p.id, name: p.name, caps: 0, goals: 0, assists: 0 };
-    });
-
+    currentTeamPlayers.forEach(p => { statsMap[p.id] = { id: p.id, name: p.name, caps: 0, goals: 0, assists: 0 }; });
     const completedMatches = monthlyMatches.filter(m => m.status === 'completed');
-
     completedMatches.forEach(m => {
-      (m.attendees || []).forEach(pId => {
-        if(statsMap[pId]) statsMap[pId].caps += 1;
-      });
+      (m.attendees || []).forEach(pId => { if(statsMap[pId]) statsMap[pId].caps += 1; });
       (m.logs || []).forEach(log => {
         if (log.scorerId && statsMap[log.scorerId]) statsMap[log.scorerId].goals += 1;
         if (log.assistId && statsMap[log.assistId]) statsMap[log.assistId].assists += 1;
       });
     });
-
-    return Object.values(statsMap).sort((a, b) => {
-      if (b.goals !== a.goals) return b.goals - a.goals;
-      if (b.assists !== a.assists) return b.assists - a.assists;
-      return b.caps - a.caps;
-    });
+    return Object.values(statsMap).sort((a, b) => b.goals !== a.goals ? b.goals - a.goals : (b.assists !== a.assists ? b.assists - a.assists : b.caps - a.caps));
   }, [monthlyMatches, currentTeamPlayers]);
 
   const globalStyles = (
@@ -301,57 +258,38 @@ export default function App() {
       *::-webkit-scrollbar { display: none !important; width: 0 !important; }
       * { -ms-overflow-style: none !important; scrollbar-width: none !important; }
       .tactic-board { touch-action: none; }
-      input[type="number"]::-webkit-outer-spin-button,
-      input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+      input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
       input[type="number"] { -moz-appearance: textfield; }
       .will-change-transform { will-change: transform, left, top; }
     `}</style>
   );
 
-  // --- 3. Effects ---
+  // --- Effects ---
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) setUser(currentUser);
       else signInAnonymously(auth).catch(err => console.error(err));
     });
-
     const unsubTeams = onSnapshot(collection(db, 'teams'), snap => {
-      setTeams(snap.docs.map(d => d.data()));
-      setIsLoaded(true); 
+      setTeams(snap.docs.map(d => d.data())); setIsLoaded(true); 
     });
-
-    return () => {
-      unsubscribeAuth();
-      unsubTeams();
-    };
+    return () => { unsubscribeAuth(); unsubTeams(); };
   }, []);
 
   useEffect(() => {
-    if (!activeTeamId) {
-      setPlayers([]);
-      setMatches([]);
-      return;
-    }
-
+    if (!activeTeamId) { setPlayers([]); setMatches([]); return; }
     const qPlayers = query(collection(db, 'players'), where('teamId', '==', activeTeamId));
     const unsubPlayers = onSnapshot(qPlayers, snap => setPlayers(snap.docs.map(d => d.data())));
-
     const qMatches = query(collection(db, 'matches'), where('teamId', '==', activeTeamId));
     const unsubMatches = onSnapshot(qMatches, snap => setMatches(snap.docs.map(d => d.data())));
-
-    return () => {
-      unsubPlayers();
-      unsubMatches();
-    };
+    return () => { unsubPlayers(); unsubMatches(); };
   }, [activeTeamId]);
 
   useEffect(() => {
-    return () => {
-      if (playbackRef.current) clearTimeout(playbackRef.current);
-    };
+    return () => { if (playbackRef.current) clearTimeout(playbackRef.current); };
   }, []);
 
-  // --- 4. 이벤트 핸들러 및 로직 ---
+  // --- 이벤트 핸들러 ---
   const getTeamDisplayName = (match, letter) => {
     if (!match) return `${letter}팀`;
     if (match.matchType === 'external') {
@@ -364,16 +302,12 @@ export default function App() {
   const prevMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
   const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
 
-  const openMatchModal = (match) => {
-    setMatchTypeForm(match?.matchType || 'internal');
-    setMatchModal({ isOpen: true, match });
-  };
+  const openMatchModal = (match) => { setMatchTypeForm(match?.matchType || 'internal'); setMatchModal({ isOpen: true, match }); };
 
   const handleActionClick = (action, match) => {
     const safeDate = match.date.replace(/-/g, '/');
     const matchDateTime = new Date(`${safeDate} ${match.time}`);
     const now = new Date();
-
     if (!isAdmin) {
       if (matchDateTime > now) {
         setSystemAlert({ isOpen: true, message: `해당 기능은 경기 시작 전에는 이용할 수 없습니다.\n\n미리 기록 및 편성을 원하시면 우측 상단의\n[관리자 전환]을 이용해 주세요.` });
@@ -382,7 +316,6 @@ export default function App() {
       }
       return;
     }
-
     if (action === 'assign') setAssignmentModal({ isOpen: true, match });
     if (action === 'start') startLiveMatch(match);
   };
@@ -391,232 +324,108 @@ export default function App() {
     e.preventDefault();
     const pwd = e.target.password.value;
     if (authModal.type === 'loginAdminAuth') {
-      if (pwd === adminPassword) {
-        setIsLoginAdminMode(true);
-        setAuthModal({ isOpen: false });
-      } else setSystemAlert({ isOpen: true, message: '시스템 관리자 비밀번호가 틀렸습니다.' });
+      if (pwd === adminPassword) { setIsLoginAdminMode(true); setAuthModal({ isOpen: false }); } 
+      else setSystemAlert({ isOpen: true, message: '시스템 관리자 비밀번호가 틀렸습니다.' });
     } else if (authModal.type === 'adminCreate') {
-      if (pwd === adminPassword) {
-        setAuthModal({ isOpen: false });
-        setIsCreateTeamOpen(true);
-      } else setSystemAlert({ isOpen: true, message: '시스템 관리자 비밀번호가 틀렸습니다.' });
+      if (pwd === adminPassword) { setAuthModal({ isOpen: false }); setIsCreateTeamOpen(true); } 
+      else setSystemAlert({ isOpen: true, message: '시스템 관리자 비밀번호가 틀렸습니다.' });
     } else if (authModal.type === 'adminMode') {
-      if (pwd === (activeTeam?.adminPassword || 'admin')) {
-        setIsAdmin(true);
-        setAuthModal({ isOpen: false });
-      } else setSystemAlert({ isOpen: true, message: '팀 관리자 비밀번호가 틀렸습니다.' });
+      if (pwd === (activeTeam?.adminPassword || 'admin')) { setIsAdmin(true); setAuthModal({ isOpen: false }); } 
+      else setSystemAlert({ isOpen: true, message: '팀 관리자 비밀번호가 틀렸습니다.' });
     } else if (authModal.type === 'teamLogin') {
-      if (pwd === authModal.targetTeam.password) {
-        setActiveTeamId(authModal.targetTeam.id);
-        setIsAdmin(false); 
-        setAppState('main');
-        setAuthModal({ isOpen: false });
-      } else setSystemAlert({ isOpen: true, message: '팀 비밀번호가 틀렸습니다.' });
+      if (pwd === authModal.targetTeam.password) { setActiveTeamId(authModal.targetTeam.id); setIsAdmin(false); setAppState('main'); setAuthModal({ isOpen: false }); } 
+      else setSystemAlert({ isOpen: true, message: '팀 비밀번호가 틀렸습니다.' });
     }
   };
 
-  const logout = () => {
-    setActiveTeamId(null);
-    setIsAdmin(false);
-    setAppState('login');
-    setAuthModal({ isOpen: false, type: '', targetTeam: null });
-  };
+  const logout = () => { setActiveTeamId(null); setIsAdmin(false); setAppState('login'); setAuthModal({ isOpen: false, type: '', targetTeam: null }); };
 
-  const handleAdminPwdChange = (e) => {
-    e.preventDefault();
-    setAdminPassword(e.target.newAdminPwd.value);
-    setAdminPwdChangeModal(false);
-    setSystemAlert({ isOpen: true, message: '마스터 비밀번호가 성공적으로 변경되었습니다.' });
-  };
+  const handleAdminPwdChange = (e) => { e.preventDefault(); setAdminPassword(e.target.newAdminPwd.value); setAdminPwdChangeModal(false); setSystemAlert({ isOpen: true, message: '마스터 비밀번호가 성공적으로 변경되었습니다.' }); };
 
   const handleCreateTeam = async (e) => {
-    e.preventDefault();
-    if(isProcessing) return; setIsProcessing(true);
+    e.preventDefault(); if(isProcessing) return; setIsProcessing(true);
     try {
       const newTeamId = 't' + Date.now();
-      const newTeam = {
-        id: newTeamId,
-        name: e.target.teamName.value,
-        password: e.target.password.value,
-        adminPassword: e.target.adminPassword.value,
-        logo: newTeamLogo || '⚽'
-      };
+      const newTeam = { id: newTeamId, name: e.target.teamName.value, password: e.target.password.value, adminPassword: e.target.adminPassword.value, logo: newTeamLogo || '⚽' };
       await setDoc(doc(db, 'teams', newTeamId), newTeam);
-      setIsCreateTeamOpen(false);
-      setNewTeamLogo(null);
+      setIsCreateTeamOpen(false); setNewTeamLogo(null);
     } finally { setIsProcessing(false); }
   };
 
   const handleEditTeam = async (e) => {
-    e.preventDefault();
-    if(isProcessing) return; setIsProcessing(true);
+    e.preventDefault(); if(isProcessing) return; setIsProcessing(true);
     try {
-      const updatedTeam = {
-        ...editTeamModal.team,
-        name: e.target.teamName.value,
-        password: e.target.password.value,
-        adminPassword: e.target.adminPassword.value,
-        logo: editTeamLogo || editTeamModal.team.logo
-      };
+      const updatedTeam = { ...editTeamModal.team, name: e.target.teamName.value, password: e.target.password.value, adminPassword: e.target.adminPassword.value, logo: editTeamLogo || editTeamModal.team.logo };
       await setDoc(doc(db, 'teams', updatedTeam.id), updatedTeam);
-      setEditTeamModal({ isOpen: false, team: null });
-      setSystemAlert({ isOpen: true, message: '팀 정보가 수정되었습니다.' });
+      setEditTeamModal({ isOpen: false, team: null }); setSystemAlert({ isOpen: true, message: '팀 정보가 수정되었습니다.' });
     } finally { setIsProcessing(false); }
   };
 
-  const requestDeleteTeam = (id) => {
-    setSystemConfirm({
-      isOpen: true,
-      message: '정말 이 팀을 삭제하시겠습니까? 관련 일정이 모두 삭제됩니다.',
-      onConfirm: async () => {
-        if(isProcessing) return; setIsProcessing(true);
-        await deleteDoc(doc(db, 'teams', id));
-        setIsProcessing(false);
-      }
-    });
-  };
+  const requestDeleteTeam = (id) => { setSystemConfirm({ isOpen: true, message: '정말 이 팀을 삭제하시겠습니까? 관련 일정이 모두 삭제됩니다.', onConfirm: async () => { if(isProcessing) return; setIsProcessing(true); await deleteDoc(doc(db, 'teams', id)); setIsProcessing(false); } }); };
 
   const handleTeamSettingsSave = async (e) => {
-    e.preventDefault();
-    if(isProcessing) return; setIsProcessing(true);
+    e.preventDefault(); if(isProcessing) return; setIsProcessing(true);
     try {
       const fd = new FormData(e.target);
-      const updatedTeam = {
-        ...activeTeam,
-        name: fd.get('name'),
-        password: fd.get('password'),
-        adminPassword: fd.get('teamAdminPassword'),
-        logo: teamSettingsLogo || activeTeam.logo
-      };
+      const updatedTeam = { ...activeTeam, name: fd.get('name'), password: fd.get('password'), adminPassword: fd.get('teamAdminPassword'), logo: teamSettingsLogo || activeTeam.logo };
       await setDoc(doc(db, 'teams', activeTeamId), updatedTeam);
-      setTeamSettingsModal(false);
-      setSystemAlert({isOpen: true, message: '팀 설정이 성공적으로 저장되었습니다.'});
+      setTeamSettingsModal(false); setSystemAlert({isOpen: true, message: '팀 설정이 성공적으로 저장되었습니다.'});
     } finally { setIsProcessing(false); }
   };
 
   const saveMatch = async (e) => {
-    e.preventDefault();
-    if(isProcessing) return; setIsProcessing(true);
+    e.preventDefault(); if(isProcessing) return; setIsProcessing(true);
     try {
       const fd = new FormData(e.target);
       const attendees = currentTeamPlayers.filter(p => fd.get(`attendee_${p.id}`)).map(p => p.id);
-      
       const matchType = matchTypeForm;
       const opponentName = matchType === 'external' ? fd.get('opponentName') : '';
       const teamCount = matchType === 'external' ? 2 : parseInt(fd.get('teamCount'));
-
       const newAssignments = { ...(matchModal.match?.teamAssignments || {}) };
       attendees.forEach(pId => { if (matchType === 'external') newAssignments[pId] = 'A'; });
 
       const matchId = matchModal.match?.id || 'm' + Date.now().toString();
-      
       if (matchModal.match?.status === 'completed') {
         const oldAttendees = matchModal.match.attendees || [];
-        const newAttendees = attendees;
-        const added = newAttendees.filter(id => !oldAttendees.includes(id));
-        const removed = oldAttendees.filter(id => !newAttendees.includes(id));
-        
+        const added = attendees.filter(id => !oldAttendees.includes(id));
+        const removed = oldAttendees.filter(id => !attendees.includes(id));
         const updatePromises = [];
-        for (const id of added) {
-          const p = players.find(x => x.id === id);
-          if (p) updatePromises.push(setDoc(doc(db, 'players', id), { ...p, caps: (p.caps || 0) + 1 }));
-        }
-        for (const id of removed) {
-          const p = players.find(x => x.id === id);
-          if (p) updatePromises.push(setDoc(doc(db, 'players', id), { ...p, caps: Math.max(0, (p.caps || 0) - 1) }));
-        }
+        for (const id of added) { const p = players.find(x => x.id === id); if (p) updatePromises.push(setDoc(doc(db, 'players', id), { ...p, caps: (p.caps || 0) + 1 })); }
+        for (const id of removed) { const p = players.find(x => x.id === id); if (p) updatePromises.push(setDoc(doc(db, 'players', id), { ...p, caps: Math.max(0, (p.caps || 0) - 1) })); }
         if (updatePromises.length > 0) await Promise.all(updatePromises);
       }
 
-      const newMatch = {
-        ...matchModal.match,
-        id: matchId,
-        teamId: activeTeamId,
-        date: fd.get('date'),
-        time: fd.get('time'),
-        location: fd.get('location'),
-        matchType,
-        opponentName,
-        teamCount,
-        totalQuarters: parseInt(fd.get('totalQuarters')),
-        attendees,
-        teamAssignments: newAssignments, 
-        scores: matchModal.match?.scores || { A: 0, B: 0, C: 0, D: 0 },
-        quarterScores: matchModal.match?.quarterScores || [],
-        logs: matchModal.match?.logs || [],
-        status: matchModal.match?.status || 'scheduled'
-      };
-
+      const newMatch = { ...matchModal.match, id: matchId, teamId: activeTeamId, date: fd.get('date'), time: fd.get('time'), location: fd.get('location'), matchType, opponentName, teamCount, totalQuarters: parseInt(fd.get('totalQuarters')), attendees, teamAssignments: newAssignments, scores: matchModal.match?.scores || { A: 0, B: 0, C: 0, D: 0 }, quarterScores: matchModal.match?.quarterScores || [], logs: matchModal.match?.logs || [], status: matchModal.match?.status || 'scheduled' };
       await setDoc(doc(db, 'matches', matchId), newMatch);
       setMatchModal({ isOpen: false, match: null });
     } finally { setIsProcessing(false); }
   };
 
-  const requestDeleteMatch = (id) => {
-    setSystemConfirm({
-      isOpen: true,
-      message: '정말 삭제하시겠습니까?',
-      onConfirm: async () => {
-        if(isProcessing) return; setIsProcessing(true);
-        await deleteDoc(doc(db, 'matches', id));
-        setMatchModal({ isOpen: false, match: null });
-        setIsProcessing(false);
-      }
-    });
-  };
+  const requestDeleteMatch = (id) => { setSystemConfirm({ isOpen: true, message: '정말 삭제하시겠습니까?', onConfirm: async () => { if(isProcessing) return; setIsProcessing(true); await deleteDoc(doc(db, 'matches', id)); setMatchModal({ isOpen: false, match: null }); setIsProcessing(false); } }); };
 
   const saveRoster = async (e) => {
-    e.preventDefault();
-    if(isProcessing) return; setIsProcessing(true);
+    e.preventDefault(); if(isProcessing) return; setIsProcessing(true);
     try {
       const fd = new FormData(e.target);
       const playerId = rosterModal.player?.id || 'p' + Date.now();
-      const newPlayer = {
-        ...rosterModal.player,
-        id: playerId,
-        teamId: activeTeamId,
-        name: fd.get('name'),
-        birthYear: parseInt(fd.get('birthYear')),
-        goals: rosterModal.player?.goals || 0,
-        assists: rosterModal.player?.assists || 0,
-        caps: rosterModal.player?.caps || 0
-      };
+      const newPlayer = { ...rosterModal.player, id: playerId, teamId: activeTeamId, name: fd.get('name'), birthYear: parseInt(fd.get('birthYear')), goals: rosterModal.player?.goals || 0, assists: rosterModal.player?.assists || 0, caps: rosterModal.player?.caps || 0 };
       await setDoc(doc(db, 'players', playerId), newPlayer);
       setRosterModal({ isOpen: false, player: null });
     } finally { setIsProcessing(false); }
   };
 
-  const requestDeleteRoster = (id) => {
-    setSystemConfirm({
-      isOpen: true,
-      message: '명단에서 삭제하시겠습니까?',
-      onConfirm: async () => {
-        if(isProcessing) return; setIsProcessing(true);
-        await deleteDoc(doc(db, 'players', id));
-        setRosterModal({ isOpen: false, player: null });
-        setIsProcessing(false);
-      }
-    });
-  };
+  const requestDeleteRoster = (id) => { setSystemConfirm({ isOpen: true, message: '명단에서 삭제하시겠습니까?', onConfirm: async () => { if(isProcessing) return; setIsProcessing(true); await deleteDoc(doc(db, 'players', id)); setRosterModal({ isOpen: false, player: null }); setIsProcessing(false); } }); };
 
   const requestResetStats = () => {
     setSystemConfirm({
-      isOpen: true,
-      message: '🚨 정말 모든 선수의 누적 스탯(참석, 득점, 도움)을 0으로 초기화하시겠습니까?\n\n※ 이 작업은 되돌릴 수 없습니다.',
+      isOpen: true, message: '🚨 정말 모든 선수의 누적 스탯(참석, 득점, 도움)을 0으로 초기화하시겠습니까?\n\n※ 이 작업은 되돌릴 수 없습니다.',
       onConfirm: async () => {
         if(isProcessing) return; setIsProcessing(true);
         try {
-          const updatePromises = currentTeamPlayers.map(p => 
-            setDoc(doc(db, 'players', p.id), { ...p, caps: 0, goals: 0, assists: 0 })
-          );
+          const updatePromises = currentTeamPlayers.map(p => setDoc(doc(db, 'players', p.id), { ...p, caps: 0, goals: 0, assists: 0 }));
           await Promise.all(updatePromises);
           setSystemAlert({ isOpen: true, message: '모든 스탯이 성공적으로 초기화되었습니다.' });
-        } catch(err) {
-          console.error(err);
-          setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' });
-        } finally {
-          setIsProcessing(false);
-        }
+        } catch(err) { setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' }); } finally { setIsProcessing(false); }
       }
     });
   };
@@ -638,66 +447,32 @@ export default function App() {
     const mLogs = match.logs || [];
     const currentQ = qScores.length + 1;
     const currentLogs = mLogs.filter(l => l.quarter === currentQ);
-
-    let playingTeams = ['A', 'B'];
-    let isQuarterActive = false;
-
-    if (match.matchType === 'external') {
-       playingTeams = ['A', 'B']; 
-       if (currentLogs.length > 0) isQuarterActive = true; 
-    } else {
+    let playingTeams = ['A', 'B']; let isQuarterActive = false;
+    if (match.matchType === 'external') { playingTeams = ['A', 'B']; if (currentLogs.length > 0) isQuarterActive = true; } 
+    else {
        if (currentLogs.length > 0) {
           const teamsInLogs = [...new Set(currentLogs.map(l => l.teamLetter))];
-          if (teamsInLogs.length === 2) playingTeams = teamsInLogs;
-          else if (teamsInLogs.length === 1) playingTeams = [teamsInLogs[0], TEAM_LETTERS.find(t => t !== teamsInLogs[0])];
+          if (teamsInLogs.length === 2) playingTeams = teamsInLogs; else if (teamsInLogs.length === 1) playingTeams = [teamsInLogs[0], TEAM_LETTERS.find(t => t !== teamsInLogs[0])];
           isQuarterActive = true;
        }
     }
-    setLiveMatchId(match.id);
-    setLiveState({ currentQuarter: currentQ, playingTeams: playingTeams, isQuarterActive: isQuarterActive });
-    setAppState('liveMatch');
+    setLiveMatchId(match.id); setLiveState({ currentQuarter: currentQ, playingTeams: playingTeams, isQuarterActive: isQuarterActive }); setAppState('liveMatch');
   };
 
   const handleOpponentGoalSubmit = async () => {
     if(isProcessing) return; setIsProcessing(true);
-    const gfMatchId = goalFlow.matchId;
-    const gfQuarter = goalFlow.quarter;
-    const gfIsPK = goalFlow.isPK;
-    const gfRemark = goalFlow.remark;
-    const gfIsMissingAdd = goalFlow.isMissingAdd;
-
+    const gfMatchId = goalFlow.matchId; const gfQuarter = goalFlow.quarter; const gfIsPK = goalFlow.isPK; const gfRemark = goalFlow.remark; const gfIsMissingAdd = goalFlow.isMissingAdd;
     setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false });
-
     try {
-      const targetMatchId = gfMatchId || liveMatchId;
-      const targetMatch = matches.find(m => m.id === targetMatchId);
-      const quarter = gfQuarter || liveState.currentQuarter;
-      
-      const newLog = {
-        id: Date.now(),
-        quarter: quarter,
-        teamLetter: 'B',
-        scorerId: null,
-        scorerName: targetMatch.opponentName || '상대팀',
-        assistId: null,
-        assistName: null,
-        time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }),
-        isPK: gfIsPK || false,
-        remark: gfRemark || ''
-      };
-      
+      const targetMatchId = gfMatchId || liveMatchId; const targetMatch = matches.find(m => m.id === targetMatchId); const quarter = gfQuarter || liveState.currentQuarter;
+      const newLog = { id: Date.now(), quarter: quarter, teamLetter: 'B', scorerId: null, scorerName: targetMatch.opponentName || '상대팀', assistId: null, assistName: null, time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }), isPK: gfIsPK || false, remark: gfRemark || '' };
       const newLogs = [...(targetMatch.logs || []), newLog];
       const newScores = { ...(targetMatch.scores || {}), 'B': ((targetMatch.scores || {})['B'] || 0) + 1 };
-      
       let newQuarterScores = [...(targetMatch.quarterScores || [])];
       if (gfIsMissingAdd) {
          const qsIndex = newQuarterScores.findIndex(qs => qs.quarter === quarter);
-         if (qsIndex > -1) {
-            const qs = newQuarterScores[qsIndex];
-            newQuarterScores[qsIndex] = { ...qs, score2: qs.score2 + 1 };
-         }
+         if (qsIndex > -1) { const qs = newQuarterScores[qsIndex]; newQuarterScores[qsIndex] = { ...qs, score2: qs.score2 + 1 }; }
       }
-
       const updatedMatch = { ...targetMatch, scores: newScores, logs: newLogs, quarterScores: newQuarterScores };
       await setDoc(doc(db, 'matches', targetMatchId), updatedMatch);
     } finally { setIsProcessing(false); }
@@ -705,245 +480,117 @@ export default function App() {
 
   const handleOwnGoalSubmit = async (targetTeamLetter, isOurFault = false) => {
     if(isProcessing) return; setIsProcessing(true);
-    const gfMatchId = goalFlow.matchId;
-    const gfQuarter = goalFlow.quarter;
-    const gfRemark = goalFlow.remark;
-    const gfIsMissingAdd = goalFlow.isMissingAdd;
-
+    const gfMatchId = goalFlow.matchId; const gfQuarter = goalFlow.quarter; const gfRemark = goalFlow.remark; const gfIsMissingAdd = goalFlow.isMissingAdd;
     setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false });
-
     try {
-      const targetMatchId = gfMatchId || liveMatchId;
-      const targetMatch = matches.find(m => m.id === targetMatchId);
-      const quarter = gfQuarter || liveState.currentQuarter;
+      const targetMatchId = gfMatchId || liveMatchId; const targetMatch = matches.find(m => m.id === targetMatchId); const quarter = gfQuarter || liveState.currentQuarter;
       const scorerName = isOurFault ? '우리팀 자책골' : '상대팀 자책골';
-      
-      const newLog = {
-        id: Date.now(),
-        quarter: quarter,
-        teamLetter: targetTeamLetter,
-        scorerId: null,
-        scorerName: scorerName,
-        assistId: null,
-        assistName: null,
-        time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }),
-        isPK: false,
-        remark: gfRemark || ''
-      };
-      
+      const newLog = { id: Date.now(), quarter: quarter, teamLetter: targetTeamLetter, scorerId: null, scorerName: scorerName, assistId: null, assistName: null, time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }), isPK: false, remark: gfRemark || '' };
       const newLogs = [...(targetMatch.logs || []), newLog];
       const newScores = { ...(targetMatch.scores || {}), [targetTeamLetter]: ((targetMatch.scores || {})[targetTeamLetter] || 0) + 1 };
-      
       let newQuarterScores = [...(targetMatch.quarterScores || [])];
       if (gfIsMissingAdd) {
          const qsIndex = newQuarterScores.findIndex(qs => qs.quarter === quarter);
          if (qsIndex > -1) {
-            const qs = newQuarterScores[qsIndex];
-            const isTeam1 = qs.team1 === targetTeamLetter;
-            newQuarterScores[qsIndex] = {
-               ...qs,
-               score1: isTeam1 ? qs.score1 + 1 : qs.score1,
-               score2: !isTeam1 ? qs.score2 + 1 : qs.score2
-            };
+            const qs = newQuarterScores[qsIndex]; const isTeam1 = qs.team1 === targetTeamLetter;
+            newQuarterScores[qsIndex] = { ...qs, score1: isTeam1 ? qs.score1 + 1 : qs.score1, score2: !isTeam1 ? qs.score2 + 1 : qs.score2 };
          }
       }
-
       const updatedMatch = { ...targetMatch, scores: newScores, logs: newLogs, quarterScores: newQuarterScores };
       await setDoc(doc(db, 'matches', targetMatchId), updatedMatch);
     } finally { setIsProcessing(false); }
   };
 
   const handleGoalSubmit = async (playerId, teamLetter) => {
-    if (goalFlow.step === 1) {
-      setGoalFlow({ ...goalFlow, step: 2, teamLetter, scorer: playerId });
-    } else {
+    if (goalFlow.step === 1) { setGoalFlow({ ...goalFlow, step: 2, teamLetter, scorer: playerId }); } else {
       if(isProcessing) return; setIsProcessing(true);
-      const gfMatchId = goalFlow.matchId;
-      const gfQuarter = goalFlow.quarter;
-      const gfTeamLetter = goalFlow.teamLetter;
-      const gfScorer = goalFlow.scorer;
-      const gfIsPK = goalFlow.isPK;
-      const gfRemark = goalFlow.remark;
-      const gfIsMissingAdd = goalFlow.isMissingAdd;
-
+      const gfMatchId = goalFlow.matchId; const gfQuarter = goalFlow.quarter; const gfTeamLetter = goalFlow.teamLetter; const gfScorer = goalFlow.scorer; const gfIsPK = goalFlow.isPK; const gfRemark = goalFlow.remark; const gfIsMissingAdd = goalFlow.isMissingAdd;
       setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false });
-
       try {
-        const targetMatchId = gfMatchId || liveMatchId;
-        const targetMatch = matches.find(m => m.id === targetMatchId);
-        const quarter = gfQuarter || liveState.currentQuarter;
-        const assistId = playerId;
-        
-        const newLog = {
-          id: Date.now(),
-          quarter: quarter,
-          teamLetter: gfTeamLetter,
-          scorerId: gfScorer,
-          scorerName: players.find(p=>p.id===gfScorer)?.name,
-          assistId: assistId, 
-          assistName: assistId ? players.find(p=>p.id===assistId)?.name : null,
-          time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }),
-          isPK: gfIsPK || false,
-          remark: gfRemark || ''
-        };
-        
+        const targetMatchId = gfMatchId || liveMatchId; const targetMatch = matches.find(m => m.id === targetMatchId); const quarter = gfQuarter || liveState.currentQuarter; const assistId = playerId;
+        const newLog = { id: Date.now(), quarter: quarter, teamLetter: gfTeamLetter, scorerId: gfScorer, scorerName: players.find(p=>p.id===gfScorer)?.name, assistId: assistId, assistName: assistId ? players.find(p=>p.id===assistId)?.name : null, time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }), isPK: gfIsPK || false, remark: gfRemark || '' };
         const newLogs = [...(targetMatch.logs || []), newLog];
         const newScores = { ...(targetMatch.scores || {}), [gfTeamLetter]: ((targetMatch.scores || {})[gfTeamLetter] || 0) + 1 };
-        
         let newQuarterScores = [...(targetMatch.quarterScores || [])];
         if (gfIsMissingAdd) {
            const qsIndex = newQuarterScores.findIndex(qs => qs.quarter === quarter);
            if (qsIndex > -1) {
-              const qs = newQuarterScores[qsIndex];
-              const isTeam1 = qs.team1 === gfTeamLetter;
-              newQuarterScores[qsIndex] = {
-                 ...qs,
-                 score1: isTeam1 ? qs.score1 + 1 : qs.score1,
-                 score2: !isTeam1 ? qs.score2 + 1 : qs.score2
-              };
+              const qs = newQuarterScores[qsIndex]; const isTeam1 = qs.team1 === gfTeamLetter;
+              newQuarterScores[qsIndex] = { ...qs, score1: isTeam1 ? qs.score1 + 1 : qs.score1, score2: !isTeam1 ? qs.score2 + 1 : qs.score2 };
            }
         }
-
         const updatedMatch = { ...targetMatch, scores: newScores, logs: newLogs, quarterScores: newQuarterScores };
         const updatePromises = [setDoc(doc(db, 'matches', targetMatchId), updatedMatch)];
-
         const scorer = players.find(p => p.id === gfScorer);
         if (scorer) updatePromises.push(setDoc(doc(db, 'players', scorer.id), { ...scorer, goals: (scorer.goals || 0) + 1 }));
-        if (assistId) {
-          const assist = players.find(p => p.id === assistId);
-          if (assist) updatePromises.push(setDoc(doc(db, 'players', assist.id), { ...assist, assists: (assist.assists || 0) + 1 }));
-        }
-
+        if (assistId) { const assist = players.find(p => p.id === assistId); if (assist) updatePromises.push(setDoc(doc(db, 'players', assist.id), { ...assist, assists: (assist.assists || 0) + 1 })); }
         await Promise.all(updatePromises);
       } finally { setIsProcessing(false); }
     }
   };
 
   const openLogEditModal = (log, match) => {
-    if (!isAdmin) {
-      setSystemAlert({isOpen: true, message: '기록 수정은 팀 관리자만 가능합니다.'});
-      return;
-    }
+    if (!isAdmin) { setSystemAlert({isOpen: true, message: '기록 수정은 팀 관리자만 가능합니다.'}); return; }
     const enrichedLog = { ...log };
-    if (!enrichedLog.scorerId && enrichedLog.scorerName) {
-         enrichedLog.scorerId = players.find(p => p.name === enrichedLog.scorerName)?.id;
-    }
-    if (!enrichedLog.assistId && enrichedLog.assistName) {
-         enrichedLog.assistId = players.find(p => p.name === enrichedLog.assistName)?.id;
-    }
+    if (!enrichedLog.scorerId && enrichedLog.scorerName) enrichedLog.scorerId = players.find(p => p.name === enrichedLog.scorerName)?.id;
+    if (!enrichedLog.assistId && enrichedLog.assistName) enrichedLog.assistId = players.find(p => p.name === enrichedLog.assistName)?.id;
     setLogEditModal({ isOpen: true, match, log: enrichedLog });
   };
 
   const handleLogEditSave = async (e) => {
-    e.preventDefault();
-    if(isProcessing) return; setIsProcessing(true);
+    e.preventDefault(); if(isProcessing) return; setIsProcessing(true);
     try {
-      const fd = new FormData(e.target);
-      const newScorerId = fd.get('scorerId') || null;
-      const newAssistId = fd.get('assistId');
-      const newIsPK = fd.get('isPK') === 'true';
-      const newRemark = fd.get('remark') || '';
+      const fd = new FormData(e.target); const newScorerId = fd.get('scorerId') || null; const newAssistId = fd.get('assistId'); const newIsPK = fd.get('isPK') === 'true'; const newRemark = fd.get('remark') || '';
+      const m = matches.find(match => match.id === logEditModal.match.id); const l = logEditModal.log;
+      const oldScorerId = l.scorerId; const oldAssistId = l.assistId; const updatePromises = [];
 
-      const m = matches.find(match => match.id === logEditModal.match.id);
-      const l = logEditModal.log;
-      const updatePromises = [];
-
-      if (l.scorerId !== newScorerId) {
-          if (l.scorerId) {
-             const p = players.find(p => p.id === l.scorerId);
-             if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, goals: Math.max(0, (p.goals || 0) - 1) }));
-          }
-          if (newScorerId) {
-             const p = players.find(p => p.id === newScorerId);
-             if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, goals: (p.goals || 0) + 1 }));
-          }
+      if (oldScorerId !== newScorerId) {
+          if (oldScorerId) { const p = players.find(p => p.id === oldScorerId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, goals: Math.max(0, (p.goals || 0) - 1) })); }
+          if (newScorerId) { const p = players.find(p => p.id === newScorerId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, goals: (p.goals || 0) + 1 })); }
       }
-
-      if (l.assistId !== newAssistId) {
-          if (l.assistId) {
-             const p = players.find(p => p.id === l.assistId);
-             if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, assists: Math.max(0, (p.assists || 0) - 1) }));
-          }
-          if (newAssistId && newAssistId !== 'none') {
-             const p = players.find(p => p.id === newAssistId);
-             if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, assists: (p.assists || 0) + 1 }));
-          }
+      if (oldAssistId !== newAssistId) {
+          if (oldAssistId) { const p = players.find(p => p.id === oldAssistId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, assists: Math.max(0, (p.assists || 0) - 1) })); }
+          if (newAssistId && newAssistId !== 'none') { const p = players.find(p => p.id === newAssistId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, assists: (p.assists || 0) + 1 })); }
       }
-
       const finalAssistId = newAssistId === 'none' ? null : newAssistId;
       const finalAssistName = finalAssistId ? players.find(p => p.id === finalAssistId)?.name : null;
 
       const updatedLogs = (m.logs || []).map(log => {
-          if (log.id === l.id) {
-              return {
-                  ...log, scorerId: newScorerId,
-                  scorerName: newScorerId ? (players.find(p => p.id === newScorerId)?.name || log.scorerName) : log.scorerName,
-                  assistId: finalAssistId, assistName: finalAssistName, isPK: newIsPK, remark: newRemark
-              };
-          }
+          if (log.id === l.id) { return { ...log, scorerId: newScorerId, scorerName: newScorerId ? (players.find(p => p.id === newScorerId)?.name || log.scorerName) : log.scorerName, assistId: finalAssistId, assistName: finalAssistName, isPK: newIsPK, remark: newRemark }; }
           return log;
       });
-
       updatePromises.push(setDoc(doc(db, 'matches', m.id), { ...m, logs: updatedLogs }));
       await Promise.all(updatePromises);
-
       setLogEditModal({ isOpen: false, match: null, log: null });
       setSystemAlert({ isOpen: true, message: '득점 기록이 수정되었습니다.' });
     } finally { setIsProcessing(false); }
   };
 
   const handleLogDelete = async () => {
-    const m = matches.find(match => match.id === logEditModal.match.id);
-    const l = logEditModal.log;
-
-    setSystemConfirm({
-        isOpen: true,
-        message: '정말 이 득점 기록을 삭제하시겠습니까?\n(선수 개인 기록과 팀 점수도 함께 차감됩니다.)',
-        onConfirm: async () => {
+    const m = matches.find(match => match.id === logEditModal.match.id); const l = logEditModal.log;
+    setSystemConfirm({ isOpen: true, message: '정말 이 득점 기록을 삭제하시겠습니까?\n(선수 개인 기록과 팀 점수도 함께 차감됩니다.)', onConfirm: async () => {
             if(isProcessing) return; setIsProcessing(true);
             try {
               const updatePromises = [];
-
-              if (l.scorerId) {
-                 const p = players.find(p => p.id === l.scorerId);
-                 if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, goals: Math.max(0, (p.goals || 0) - 1) }));
-              }
-              if (l.assistId) {
-                 const p = players.find(p => p.id === l.assistId);
-                 if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, assists: Math.max(0, (p.assists || 0) - 1) }));
-              }
-
+              if (l.scorerId) { const p = players.find(p => p.id === l.scorerId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, goals: Math.max(0, (p.goals || 0) - 1) })); }
+              if (l.assistId) { const p = players.find(p => p.id === l.assistId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, assists: Math.max(0, (p.assists || 0) - 1) })); }
               const updatedLogs = (m.logs || []).filter(log => log.id !== l.id);
               let updatedQuarterScores = [...(m.quarterScores || [])];
               const qsIndex = updatedQuarterScores.findIndex(qs => qs.quarter === l.quarter);
               if (qsIndex > -1) {
-                  const qs = updatedQuarterScores[qsIndex];
-                  const isTeam1 = qs.team1 === l.teamLetter;
-                  updatedQuarterScores[qsIndex] = {
-                      ...qs,
-                      score1: isTeam1 ? Math.max(0, qs.score1 - 1) : qs.score1,
-                      score2: !isTeam1 ? Math.max(0, qs.score2 - 1) : qs.score2,
-                  };
+                  const qs = updatedQuarterScores[qsIndex]; const isTeam1 = qs.team1 === l.teamLetter;
+                  updatedQuarterScores[qsIndex] = { ...qs, score1: isTeam1 ? Math.max(0, qs.score1 - 1) : qs.score1, score2: !isTeam1 ? Math.max(0, qs.score2 - 1) : qs.score2 };
               }
-
               const updatedScores = { ...(m.scores || {}) };
               if (updatedScores[l.teamLetter] !== undefined) updatedScores[l.teamLetter] = Math.max(0, updatedScores[l.teamLetter] - 1);
-
-              updatePromises.push(setDoc(doc(db, 'matches', m.id), { 
-                  ...m, logs: updatedLogs, scores: updatedScores, quarterScores: updatedQuarterScores 
-              }));
-
+              updatePromises.push(setDoc(doc(db, 'matches', m.id), { ...m, logs: updatedLogs, scores: updatedScores, quarterScores: updatedQuarterScores }));
               await Promise.all(updatePromises);
-              setLogEditModal({ isOpen: false, match: null, log: null });
-              setSystemAlert({ isOpen: true, message: '득점 기록이 삭제되었습니다.' });
+              setLogEditModal({ isOpen: false, match: null, log: null }); setSystemAlert({ isOpen: true, message: '득점 기록이 삭제되었습니다.' });
             } finally { setIsProcessing(false); }
-        }
-    });
+        } });
   };
 
-  const requestEndQuarter = () => {
-    setSystemConfirm({ isOpen: true, message: '현재 쿼터를 종료하시겠습니까?', onConfirm: () => endQuarter() });
-  };
+  const requestEndQuarter = () => { setSystemConfirm({ isOpen: true, message: '현재 쿼터를 종료하시겠습니까?', onConfirm: () => endQuarter() }); };
 
   const endQuarter = async () => {
     if(isProcessing) return; setIsProcessing(true);
@@ -952,29 +599,20 @@ export default function App() {
       const mLogs = liveMatch.logs || [];
       const qScore1 = mLogs.filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === t1).length;
       const qScore2 = mLogs.filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === t2).length;
-
       const newQuarterScore = { quarter: liveState.currentQuarter, team1: t1, team2: t2, score1: qScore1, score2: qScore2 };
       const updatedMatch = { ...liveMatch, quarterScores: [...(liveMatch.quarterScores || []), newQuarterScore] };
           
       if (liveState.currentQuarter >= liveMatch.totalQuarters) {
          const updatePromises = [];
-         for (const p of players) {
-           if ((updatedMatch.attendees || []).includes(p.id)) {
-              updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, caps: (p.caps || 0) + 1 }));
-           }
-         }
+         for (const p of players) { if ((updatedMatch.attendees || []).includes(p.id)) { updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, caps: (p.caps || 0) + 1 })); } }
          updatePromises.push(setDoc(doc(db, 'matches', liveMatchId), { ...updatedMatch, status: 'completed' }));
          await Promise.all(updatePromises);
-         setAppState('main');
-         setLiveMatchId(null);
+         setAppState('main'); setLiveMatchId(null);
       } else {
          await setDoc(doc(db, 'matches', liveMatchId), updatedMatch);
          setLiveState(prev => ({ currentQuarter: prev.currentQuarter + 1, playingTeams: ['A', 'B'], isQuarterActive: false }));
       }
-    } catch (err) {
-      console.error(err);
-      setSystemAlert({ isOpen: true, message: '오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' });
-    } finally { setIsProcessing(false); }
+    } catch (err) { setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' }); } finally { setIsProcessing(false); }
   };
 
   const triggerShare = (data) => {
@@ -991,11 +629,7 @@ export default function App() {
           const imgUrl = URL.createObjectURL(blob);
           setShareModal(prev => ({ ...prev, step: 2, file, imgUrl, isVideo: false }));
         }, 'image/png');
-      } catch (err) {
-        console.error('캡처 에러:', err);
-        setSystemAlert({ isOpen: true, message: '이미지 생성 중 오류가 발생했습니다.' });
-        setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
-      }
+      } catch (err) { setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' }); setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false }); }
     }, 500); 
   };
 
@@ -1012,54 +646,25 @@ export default function App() {
           const imgUrl = URL.createObjectURL(blob);
           setShareModal(prev => ({ ...prev, step: 2, file, imgUrl, isVideo: false }));
         }, 'image/png');
-      } catch (err) {
-        console.error('전술판 캡처 에러:', err);
-        setSystemAlert({ isOpen: true, message: '이미지 생성 중 오류가 발생했습니다.' });
-        setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
-      }
+      } catch (err) { setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' }); setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false }); }
     }, 500); 
   };
 
   const downloadFallback = (file, url) => {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = file.name;
-    a.click();
+    const a = document.createElement('a'); a.href = url; a.download = file.name; a.click();
     setSystemAlert({ isOpen: true, message: '파일이 기기에 다운로드 되었습니다.' });
   }
 
   const doActualShare = async () => {
-    const file = shareModal.file;
-    if (!file) return;
-
+    const file = shareModal.file; if (!file) return;
     const isKakaotalk = navigator.userAgent.toLowerCase().includes('kakaotalk');
     if (isKakaotalk) {
-      setSystemAlert({ 
-        isOpen: true, 
-        message: '🚨 카카오톡 내장 브라우저에서는 자동 공유가 제한됩니다.\n\n💡 해결 방법:\n1. 화면의 미디어를 길게 눌러 저장하시거나\n2. 우측 하단 ⠇ 메뉴를 눌러 "다른 브라우저로 열기(Safari/Chrome)"를 선택해주세요!' 
-      });
+      setSystemAlert({ isOpen: true, message: '🚨 카카오톡 브라우저에서는 공유가 제한됩니다.\n하단 ⠇ 메뉴 > "다른 브라우저로 열기"를 선택하세요.' });
       return;
     }
-
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({ title: 'MATCHBOARD', files: [file] });
-      } catch (error) {
-        if (error.name !== 'AbortError') downloadFallback(file, shareModal.imgUrl);
-      }
-    } else {
-      if (!shareModal.isVideo && navigator.clipboard && window.isSecureContext) {
-        try {
-          const clipboardItem = new ClipboardItem({ [file.type]: file });
-          await navigator.clipboard.write([clipboardItem]);
-          setSystemAlert({ isOpen: true, message: '클립보드에 복사되었습니다!\n원하는 곳에 붙여넣기 해주세요.' });
-        } catch(e) {
-          downloadFallback(file, shareModal.imgUrl);
-        }
-      } else {
-        downloadFallback(file, shareModal.imgUrl);
-      }
-    }
+      try { await navigator.share({ title: 'MATCHBOARD', files: [file] }); } catch (error) { if (error.name !== 'AbortError') downloadFallback(file, shareModal.imgUrl); }
+    } else { downloadFallback(file, shareModal.imgUrl); }
   };
 
   const saveHistory = (newTokens, newDrawings = drawings) => {
@@ -1067,10 +672,7 @@ export default function App() {
     setFutureState([]);
     setTacticTokens(newTokens);
     if(newDrawings) setDrawings(newDrawings);
-
-    if (isAutoRecording) {
-      setAnimationFrames(prev => [...prev, { tokens: JSON.parse(JSON.stringify(newTokens)), drawings: JSON.parse(JSON.stringify(newDrawings)) }]);
-    }
+    if (isAutoRecording) setAnimationFrames(prev => [...prev, { tokens: JSON.parse(JSON.stringify(newTokens)), drawings: JSON.parse(JSON.stringify(newDrawings)) }]);
   };
 
   const handleUndo = () => {
@@ -1078,8 +680,7 @@ export default function App() {
     const previous = pastState[pastState.length - 1];
     setPastState(prev => prev.slice(0, -1));
     setFutureState(prev => [{ tokens: tacticTokens, drawings }, ...prev]);
-    setTacticTokens(previous.tokens);
-    setDrawings(previous.drawings);
+    setTacticTokens(previous.tokens); setDrawings(previous.drawings);
   };
 
   const handleRedo = () => {
@@ -1087,18 +688,14 @@ export default function App() {
     const next = futureState[0];
     setFutureState(prev => prev.slice(1));
     setPastState(prev => [...prev, { tokens: tacticTokens, drawings }]);
-    setTacticTokens(next.tokens);
-    setDrawings(next.drawings);
+    setTacticTokens(next.tokens); setDrawings(next.drawings);
   };
 
   const handleUpdatePlayerCount = (teamLetter, newCount) => {
-    if (newCount < 0) newCount = 0;
-    if (newCount > 30) newCount = 30;
-
+    if (newCount < 0) newCount = 0; if (newCount > 30) newCount = 30;
     const teamTokens = tacticTokens.filter(t => t.team === teamLetter);
     const otherTokens = tacticTokens.filter(t => t.team !== teamLetter);
     const currentCount = teamTokens.length;
-
     if (newCount === currentCount) return;
 
     let newTeamTokens = [...teamTokens];
@@ -1118,8 +715,7 @@ export default function App() {
 
   const handleTokenPointerDown = (e, token) => {
     if (currentTool !== 'move' || isPlaying) return;
-    e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
+    e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId);
     pointerDownInfo.current = { x: e.clientX, y: e.clientY, time: Date.now() };
     dragStartTokensRef.current = [...tacticTokens];
     setDraggingToken(token.id);
@@ -1128,8 +724,7 @@ export default function App() {
   const handleBoardPointerDown = (e) => {
     if (currentTool === 'move' || isPlaying) return;
     const rect = boardRef.current.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    const x = ((e.clientX - rect.left) / rect.width) * 100; const y = ((e.clientY - rect.top) / rect.height) * 100;
     if (currentTool === 'arrow' || currentTool === 'pass' || currentTool === 'zone') {
        setActiveDrawing({ id: Date.now(), type: currentTool, start: {x, y}, end: {x, y} });
     }
@@ -1138,10 +733,8 @@ export default function App() {
   const handleBoardPointerMove = (e) => {
     if (!boardRef.current || isPlaying) return;
     const rect = boardRef.current.getBoundingClientRect();
-    let x = ((e.clientX - rect.left) / rect.width) * 100;
-    let y = ((e.clientY - rect.top) / rect.height) * 100;
-    x = Math.max(0, Math.min(100, x));
-    y = Math.max(0, Math.min(100, y));
+    let x = ((e.clientX - rect.left) / rect.width) * 100; let y = ((e.clientY - rect.top) / rect.height) * 100;
+    x = Math.max(0, Math.min(100, x)); y = Math.max(0, Math.min(100, y));
 
     if (currentTool === 'move' && draggingToken) {
       setTacticTokens(prev => prev.map(t => t.id === draggingToken ? { ...t, x, y } : t));
@@ -1155,54 +748,39 @@ export default function App() {
     if (currentTool === 'move' && draggingToken) {
       const downInfo = pointerDownInfo.current;
       const dist = Math.sqrt(Math.pow(e.clientX - downInfo.x, 2) + Math.pow(e.clientY - downInfo.y, 2));
-      const timeDiff = Date.now() - downInfo.time;
-      if (dist < 5 && timeDiff < 250) {
+      if (dist < 5 && (Date.now() - downInfo.time) < 250) {
          if (draggingToken !== 'ball') setTokenEditModal({ isOpen: true, token: tacticTokens.find(t => t.id === draggingToken) });
          setTacticTokens(dragStartTokensRef.current);
-      } else {
-         saveHistory(tacticTokens);
-      }
+      } else { saveHistory(tacticTokens); }
       setDraggingToken(null);
     } else if (activeDrawing) {
       const dist = Math.sqrt(Math.pow(activeDrawing.start.x - activeDrawing.end.x, 2) + Math.pow(activeDrawing.start.y - activeDrawing.end.y, 2));
-      if (dist > 2) {
-         const newDrawings = [...drawings, activeDrawing];
-         saveHistory(tacticTokens, newDrawings);
-      }
+      if (dist > 2) { const newDrawings = [...drawings, activeDrawing]; saveHistory(tacticTokens, newDrawings); }
       setActiveDrawing(null);
     }
   };
 
   const handleEraseDrawing = (e, id) => {
-    if (currentTool !== 'erase' || isPlaying) return;
-    e.stopPropagation();
-    const newDrawings = drawings.filter(d => d.id !== id);
-    saveHistory(tacticTokens, newDrawings);
+    if (currentTool !== 'erase' || isPlaying) return; e.stopPropagation();
+    const newDrawings = drawings.filter(d => d.id !== id); saveHistory(tacticTokens, newDrawings);
   };
 
   const handleTokenEditSave = (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const pos = fd.get('position');
-    const name = fd.get('name');
+    e.preventDefault(); const fd = new FormData(e.target); const pos = fd.get('position'); const name = fd.get('name');
     const newTokens = tacticTokens.map(t => t.id === tokenEditModal.token.id ? { ...t, position: pos, name: name } : t);
-    saveHistory(newTokens);
-    setTokenEditModal({ isOpen: false, token: null });
+    saveHistory(newTokens); setTokenEditModal({ isOpen: false, token: null });
   };
 
   const handleTokenDelete = () => {
     const newTokens = tacticTokens.filter(t => t.id !== tokenEditModal.token.id);
-    saveHistory(newTokens);
-    setTokenEditModal({ isOpen: false, token: null });
+    saveHistory(newTokens); setTokenEditModal({ isOpen: false, token: null });
   };
 
   const toggleAutoRecord = () => {
     if (!isAutoRecording) {
       setAnimationFrames([{ tokens: JSON.parse(JSON.stringify(tacticTokens)), drawings: JSON.parse(JSON.stringify(drawings)) }]);
       setIsAutoRecording(true);
-    } else {
-      setIsAutoRecording(false);
-    }
+    } else { setIsAutoRecording(false); }
   };
 
   const captureFrame = () => {
@@ -1210,29 +788,15 @@ export default function App() {
     setAnimationFrames(newFrames);
   };
 
-  const clearFrames = () => {
-    setAnimationFrames([]);
-    setIsPlaying(false);
-    setIsAutoRecording(false);
-    if (playbackRef.current) clearTimeout(playbackRef.current);
-  };
+  const clearFrames = () => { setAnimationFrames([]); setIsPlaying(false); setIsAutoRecording(false); if (playbackRef.current) clearTimeout(playbackRef.current); };
 
   const playAnimation = () => {
-    if (animationFrames.length < 2) {
-      setSystemAlert({ isOpen: true, message: '애니메이션을 재생하려면 최소 2개 이상의 장면이 캡처되어야 합니다.' });
-      return;
-    }
-    setIsPlaying(true);
-    let frameIdx = 0;
+    if (animationFrames.length < 2) { setSystemAlert({ isOpen: true, message: '최소 2장면이 필요합니다.' }); return; }
+    setIsPlaying(true); let frameIdx = 0;
     const playNext = () => {
-      if (frameIdx >= animationFrames.length) {
-        setIsPlaying(false);
-        return;
-      }
-      setTacticTokens(animationFrames[frameIdx].tokens);
-      setDrawings(animationFrames[frameIdx].drawings);
-      frameIdx++;
-      playbackRef.current = setTimeout(playNext, 1200);
+      if (frameIdx >= animationFrames.length) { setIsPlaying(false); return; }
+      setTacticTokens(animationFrames[frameIdx].tokens); setDrawings(animationFrames[frameIdx].drawings);
+      frameIdx++; playbackRef.current = setTimeout(playNext, 1200);
     };
     playNext();
   };
@@ -1241,11 +805,8 @@ export default function App() {
     if (animationFrames.length < 2) return;
     setShareModal({ isOpen: true, step: 1, data: null, file: null, imgUrl: null, isVideo: true });
 
-    const canvas = document.createElement('canvas');
-    canvas.width = 600;
-    canvas.height = pitchType === 'full' ? 900 : 800;
+    const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = pitchType === 'full' ? 900 : 800;
     const ctx = canvas.getContext('2d');
-    
     const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
     const stream = canvas.captureStream(30); 
     const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
@@ -1259,49 +820,28 @@ export default function App() {
         const url = URL.createObjectURL(blob);
         setShareModal(prev => ({ ...prev, step: 2, file, imgUrl: url, isVideo: true }));
     };
-
     recorder.start();
-    
-    let frameIdx = 0;
-    let progress = 0;
-    const fps = 30;
-    const stepsPerFrame = fps * 1.2; 
+    let frameIdx = 0; let progress = 0; const fps = 30; const stepsPerFrame = fps * 1.2; 
     
     const draw = () => {
-        ctx.fillStyle = '#047857';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(0, canvas.height/2); ctx.lineTo(canvas.width, canvas.height/2);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(canvas.width/2, canvas.height/2, 60, 0, Math.PI*2);
-        ctx.stroke();
+        ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(0, canvas.height/2); ctx.lineTo(canvas.width, canvas.height/2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height/2, 60, 0, Math.PI*2); ctx.stroke();
 
         const currentFrame = animationFrames[frameIdx];
         const nextFrame = animationFrames[Math.min(frameIdx + 1, animationFrames.length - 1)];
         
         currentFrame.drawings.forEach(d => {
             if(d.type === 'arrow' || d.type === 'pass') {
-               ctx.strokeStyle = d.type === 'arrow' ? '#FACC15' : '#60A5FA';
-               ctx.lineWidth = 5;
+               ctx.strokeStyle = d.type === 'arrow' ? '#FACC15' : '#60A5FA'; ctx.lineWidth = 5;
                if(d.type==='pass') ctx.setLineDash([12, 12]); else ctx.setLineDash([]);
-               ctx.beginPath();
-               ctx.moveTo((d.start.x/100)*canvas.width, (d.start.y/100)*canvas.height);
-               ctx.lineTo((d.end.x/100)*canvas.width, (d.end.y/100)*canvas.height);
-               ctx.stroke();
-               ctx.setLineDash([]);
+               ctx.beginPath(); ctx.moveTo((d.start.x/100)*canvas.width, (d.start.y/100)*canvas.height); ctx.lineTo((d.end.x/100)*canvas.width, (d.end.y/100)*canvas.height); ctx.stroke(); ctx.setLineDash([]);
             } else if(d.type === 'zone') {
-               ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
-               ctx.strokeStyle = '#3B82F6';
-               ctx.lineWidth = 3;
-               const x = Math.min(d.start.x, d.end.x)/100 * canvas.width;
-               const y = Math.min(d.start.y, d.end.y)/100 * canvas.height;
-               const w = Math.abs(d.start.x - d.end.x)/100 * canvas.width;
-               const h = Math.abs(d.start.y - d.end.y)/100 * canvas.height;
-               ctx.fillRect(x,y,w,h);
-               ctx.strokeRect(x,y,w,h);
+               ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; ctx.strokeStyle = '#3B82F6'; ctx.lineWidth = 3;
+               const x = Math.min(d.start.x, d.end.x)/100 * canvas.width; const y = Math.min(d.start.y, d.end.y)/100 * canvas.height;
+               const w = Math.abs(d.start.x - d.end.x)/100 * canvas.width; const h = Math.abs(d.start.y - d.end.y)/100 * canvas.height;
+               ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h);
             }
         });
 
@@ -1309,64 +849,56 @@ export default function App() {
             const t2 = nextFrame.tokens.find(t => t.id === t1.id) || t1;
             const t = progress / stepsPerFrame;
             const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-            
-            const x = t1.x + (t2.x - t1.x) * ease;
-            const y = t1.y + (t2.y - t1.y) * ease;
-            
-            const px = (x / 100) * canvas.width;
-            const py = (y / 100) * canvas.height;
+            const x = t1.x + (t2.x - t1.x) * ease; const y = t1.y + (t2.y - t1.y) * ease;
+            const px = (x / 100) * canvas.width; const py = (y / 100) * canvas.height;
 
             if(t1.team === 'ball') {
-                ctx.fillStyle = '#FFFFFF';
-                ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI*2); ctx.fill();
-                ctx.fillStyle = '#000000';
-                ctx.font = '18px sans-serif';
-                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                ctx.fillText('⚽', px, py);
+                ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#000000'; ctx.font = '18px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('⚽', px, py);
             } else {
-                ctx.fillStyle = t1.team === 'A' ? '#DC2626' : '#2563EB';
-                ctx.beginPath(); ctx.arc(px, py, 22, 0, Math.PI*2); ctx.fill();
-                ctx.strokeStyle = t1.team === 'A' ? '#991B1B' : '#1E40AF';
-                ctx.lineWidth = 3; ctx.stroke();
+                ctx.fillStyle = t1.team === 'A' ? '#DC2626' : '#2563EB'; ctx.beginPath(); ctx.arc(px, py, 22, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = t1.team === 'A' ? '#991B1B' : '#1E40AF'; ctx.lineWidth = 3; ctx.stroke();
                 
-                ctx.fillStyle = '#FFFFFF';
-                ctx.font = 'bold 14px sans-serif';
-                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                ctx.fillText(t1.position || '', px, py);
+                ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t1.position || '', px, py);
 
                 if (t1.name) {
                   ctx.font = 'bold 12px sans-serif';
-                  const textWidth = ctx.measureText(t1.name).width;
-                  const rectWidth = textWidth + 16;
-                  const rectHeight = 20;
-                  const rectY = py + 32;
-                  
-                  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-                  ctx.beginPath();
-                  if (ctx.roundRect) ctx.roundRect(px - rectWidth/2, rectY - rectHeight/2, rectWidth, rectHeight, 10);
-                  else ctx.rect(px - rectWidth/2, rectY - rectHeight/2, rectWidth, rectHeight);
-                  ctx.fill();
-                  ctx.fillStyle = '#FFFFFF';
-                  ctx.fillText(t1.name, px, rectY);
+                  const textWidth = ctx.measureText(t1.name).width; const rectWidth = textWidth + 16; const rectHeight = 20; const rectY = py + 32;
+                  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.beginPath();
+                  if (ctx.roundRect) ctx.roundRect(px - rectWidth/2, rectY - rectHeight/2, rectWidth, rectHeight, 10); else ctx.rect(px - rectWidth/2, rectY - rectHeight/2, rectWidth, rectHeight);
+                  ctx.fill(); ctx.fillStyle = '#FFFFFF'; ctx.fillText(t1.name, px, rectY);
                 }
             }
         });
 
-        progress++;
-        if (progress > stepsPerFrame) { progress = 0; frameIdx++; }
-
-        if (frameIdx < animationFrames.length - 1 || (frameIdx === animationFrames.length - 1 && progress < fps * 0.5)) {
-            setTimeout(draw, 1000 / fps);
-        } else {
-            setTimeout(() => recorder.stop(), 200);
-        }
+        progress++; if (progress > stepsPerFrame) { progress = 0; frameIdx++; }
+        if (frameIdx < animationFrames.length - 1 || (frameIdx === animationFrames.length - 1 && progress < fps * 0.5)) { setTimeout(draw, 1000 / fps); } else { setTimeout(() => recorder.stop(), 200); }
     };
     draw();
   };
 
   // ==========================================
-  // 5. 팝업(모달) 렌더링 함수 모음 (가장 안전한 위치)
+  // 5. 팝업 모달 렌더링 함수 모음
   // ==========================================
+  const renderCalendarDays = () => {
+    const year = viewDate.getFullYear(); const month = viewDate.getMonth(); const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const days = [];
+    for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="p-2" />);
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const dayMatches = matchesByDate[dateStr] || [];
+      days.push(
+        <div key={day} className="p-2 aspect-square border border-slate-700/50 rounded-xl relative flex flex-col items-center bg-slate-800/30">
+          <span className="text-xs font-bold text-slate-300">{day}</span>
+          <div className="flex gap-1 mt-1">
+            {dayMatches.map((m, idx) => (<div key={idx} className={`w-1.5 h-1.5 rounded-full ${m.status === 'completed' ? 'bg-slate-500' : 'bg-blue-400'}`} />))}
+          </div>
+        </div>
+      );
+    }
+    return days;
+  };
+
   const renderSystemModals = () => {
     return (
       <>
@@ -1404,7 +936,7 @@ export default function App() {
   const renderShareModal = () => {
     if (!shareModal.isOpen) return null;
     return (
-      <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-[100]">
+      <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-[90]">
         <div className="w-full max-w-sm flex flex-col items-center max-h-[90vh]">
           {shareModal.step === 1 ? (
             <div className="bg-slate-800 border border-slate-700 p-6 rounded-3xl w-full shadow-xl flex flex-col items-center text-center animate-in zoom-in-95">
@@ -1446,6 +978,7 @@ export default function App() {
     return (
       <div className="fixed top-0 left-0 w-[500px] opacity-0 pointer-events-none z-[-100] overflow-visible">
         <div id="capture-area-hidden" className="bg-slate-900 p-8 w-full flex flex-col items-center text-left text-slate-200 border-none pb-12">
+          
           <div className="mb-6 w-full pb-5 border-b border-slate-700">
             <h3 className="font-black text-white text-[28px] leading-tight mb-2">
                {shareModal.data.matchType === 'external' ? `[교류전] vs ${shareModal.data.opponentName}` : `[자체전] ${shareModal.data.location}`}
@@ -1454,6 +987,7 @@ export default function App() {
                {new Date(shareModal.data.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} {formatTimeAmPm(shareModal.data.time)} · 참석 {(shareModal.data.attendees || []).length}명
             </p>
           </div>
+
           <div className="w-full bg-slate-800 rounded-2xl p-6 mb-6 border border-slate-700/50 shadow-md">
              <div className="font-black text-slate-400 text-[15px] border-b border-slate-700/50 pb-3 mb-4">순위표</div>
              <table className="w-full text-[15px] text-center">
@@ -1479,6 +1013,7 @@ export default function App() {
                </tbody>
              </table>
           </div>
+
           <div className="w-full space-y-5 mb-6">
                {(shareModal.data.quarterScores || []).length > 0 ? (shareModal.data.quarterScores || []).map(qs => {
                  const qLogs = (shareModal.data.logs || []).filter(l => l.quarter === qs.quarter);
@@ -1520,6 +1055,7 @@ export default function App() {
                  <div className="text-[14px] text-slate-500 text-center py-6 bg-slate-800 rounded-2xl border border-slate-700/50 shadow-md">아직 기록이 없습니다.</div>
                )}
           </div>
+
           <div className="w-full bg-slate-800 rounded-2xl p-6 border border-slate-700/50 shadow-md">
               <div className="text-[15px] text-slate-400 mb-5 font-black border-b border-slate-700/50 pb-3 flex justify-between items-end">
                   <span>참석자 최종 편성 명단</span>
@@ -1681,9 +1217,7 @@ export default function App() {
                     (detailMatch.attendees || []).includes(p.id) && 
                     ((detailMatch.teamAssignments || {})[p.id]) === teamLetter
                   );
-                  
                   if(teamPlayers.length === 0) return null;
-
                   return (
                     <div key={teamLetter}>
                       <div className={`text-[11px] font-black mb-2 ${TEAM_TEXT_COLORS[teamLetter]}`}>
@@ -1701,7 +1235,6 @@ export default function App() {
                 })}
               </div>
             </div>
-
           </div>
         </div>
       </div>
@@ -2075,16 +1608,16 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderLogEditModal = () => {
+  function renderLogEditModal() {
     if (!logEditModal.isOpen || !logEditModal.match || !logEditModal.log) return null;
     const m = logEditModal.match;
     const l = logEditModal.log;
     const isOpponentFakeLog = m.matchType === 'external' && l.teamLetter === 'B';
 
     return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[60]">
         <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm shadow-xl border border-slate-700 animate-in zoom-in-95">
           <h2 className="text-xl font-bold text-white mb-6">득점 기록 수정</h2>
           {isOpponentFakeLog ? (
@@ -2133,9 +1666,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderTokenEditModal = () => {
+  function renderTokenEditModal() {
     if (!tokenEditModal.isOpen || !tokenEditModal.token) return null;
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100] animate-in fade-in">
@@ -2163,9 +1696,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderTeamSettingsModal = () => {
+  function renderTeamSettingsModal() {
     if (!teamSettingsModal) return null;
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
@@ -2214,11 +1747,328 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
 
   // ==========================================
-  // 6. 메인 탭 화면 반환 (matches, schedule, stats, tactics, roster)
+  // 메인 컴포넌트 JSX 렌더링 분기 시작
+  // ==========================================
+
+  if (appState === 'login') {
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-200 font-sans p-6 flex flex-col justify-center max-w-md mx-auto relative">
+        {globalStyles}
+        <div className="absolute top-6 right-6">
+          {!isLoginAdminMode ? (
+            <button onClick={() => setAuthModal({ isOpen: true, type: 'loginAdminAuth' })} className="text-xs text-slate-400 border border-slate-700 bg-slate-800 px-3 py-1.5 rounded-lg hover:text-white transition flex items-center gap-1">
+              <Shield size={14}/> 관리자 설정
+            </button>
+          ) : (
+            <button onClick={() => setIsLoginAdminMode(false)} className="text-xs text-red-400 border border-red-500/30 bg-red-500/10 px-3 py-1.5 rounded-lg hover:bg-red-500/20 transition flex items-center gap-1">
+              <LogOut size={14}/> 관리자 종료
+            </button>
+          )}
+        </div>
+
+        <div className="text-center mb-10 mt-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div className="flex justify-center mb-5">
+            <div className="relative">
+              <div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 rounded-full animate-pulse"></div>
+              <div className="w-16 h-16 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-2xl flex items-center justify-center shadow-lg relative z-10">
+                <Activity size={32} className="text-blue-500" />
+              </div>
+            </div>
+          </div>
+          <h1 className="text-4xl font-black tracking-tighter mb-3 bg-gradient-to-r from-white via-blue-100 to-slate-400 text-transparent bg-clip-text">
+            MATCHBOARD
+          </h1>
+          <p className="text-slate-400 text-sm font-medium tracking-wide">승리를 기록하는 가장 스마트한 방법</p>
+          {isLoginAdminMode && (
+            <div className="mt-5 bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs py-2 px-4 rounded-xl font-bold inline-block animate-pulse">
+              시스템 관리자 모드 활성화됨
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4 mb-8">
+          <h2 className="text-sm font-bold text-slate-500 px-2">{isLoginAdminMode ? '등록된 팀 관리' : '내 팀 선택하기'}</h2>
+          
+          {!isLoaded ? (
+            <div className="flex justify-center py-12">
+              <div className="w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+            </div>
+          ) : teams.length === 0 && !isLoginAdminMode ? (
+            <div className="text-center py-10 bg-slate-800/50 rounded-2xl border border-slate-700 text-sm text-slate-500 animate-in fade-in">
+              등록된 팀이 없습니다.<br/>우측 상단의 <strong className="text-slate-400">관리자 설정</strong>에서<br/>새로운 팀을 생성해 주세요.
+            </div>
+          ) : (
+            <div className="space-y-4 animate-in fade-in">
+              {teams.map(team => (
+                <div key={team.id} className="relative group">
+                  <button 
+                    onClick={() => !isLoginAdminMode && setAuthModal({ isOpen: true, type: 'teamLogin', targetTeam: team })} 
+                    className={`w-full bg-slate-800 hover:bg-slate-700 p-4 rounded-2xl border border-slate-700 flex items-center gap-4 transition text-left ${isLoginAdminMode ? 'cursor-default' : 'cursor-pointer'}`}
+                  >
+                    <div className="w-12 h-12 bg-slate-900 rounded-full flex items-center justify-center text-2xl border border-slate-600 overflow-hidden shrink-0 bg-white/5">
+                      {team.logo?.startsWith('data:image') ? <img src={team.logo} alt={team.name} className="w-full h-full object-cover" /> : team.logo}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-bold text-white text-lg">{team.name}</div>
+                      <div className="text-xs text-slate-400">{isLoginAdminMode ? `비밀번호: ${team.password}` : '터치하여 로그인'}</div>
+                    </div>
+                    {!isLoginAdminMode && <ChevronRight className="text-slate-500" />}
+                  </button>
+                  {isLoginAdminMode && (
+                    <div className="absolute top-1/2 -translate-y-1/2 right-4 flex gap-2">
+                      <button onClick={() => { setEditTeamLogo(team.logo); setEditTeamModal({ isOpen: true, team }); }} className="p-2 bg-slate-700 text-slate-300 rounded-lg hover:text-white transition shadow-sm"><Edit size={16}/></button>
+                      <button onClick={() => requestDeleteTeam(team.id)} className="p-2 bg-slate-700 text-slate-300 rounded-lg hover:text-red-400 transition shadow-sm"><Trash2 size={16}/></button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {isLoginAdminMode && (
+          <div className="space-y-3">
+            <button onClick={() => { setNewTeamLogo(null); setIsCreateTeamOpen(true); }} className="w-full py-4 border-2 border-dashed border-slate-700 rounded-2xl text-blue-400 font-bold flex items-center justify-center gap-2 hover:border-blue-500 bg-blue-500/5 transition">
+              <Plus size={20} /> 새 팀 생성하기
+            </button>
+            <button onClick={() => setAdminPwdChangeModal(true)} className="w-full py-4 border-2 border-dashed border-slate-700 rounded-2xl text-slate-400 font-bold flex items-center justify-center gap-2 hover:text-white hover:border-slate-500 bg-slate-800/50 transition">
+              <Shield size={20} /> 관리자 마스터 비밀번호 변경
+            </button>
+          </div>
+        )}
+
+        {renderCreateTeamModal()}
+        {renderEditTeamModal()}
+        {renderAdminPwdChangeModal()}
+        {renderAuthModal()}
+        {renderSystemModals()}
+      </div>
+    );
+  }
+
+  if (appState === 'liveMatch' && liveMatch) {
+    const activeTeams = liveState.playingTeams;
+    const isExternal = liveMatch.matchType === 'external';
+    
+    const renderLiveHeader = (title) => (
+      <header className="flex justify-between items-center mb-6 pt-2 shrink-0">
+        <button onClick={() => setAppState('main')} className="flex items-center gap-1 text-slate-400 hover:text-white font-bold text-sm">
+          <ChevronLeft size={20}/> 메인
+        </button>
+        <h2 className="text-lg font-black text-white">{title}</h2>
+        <div className="flex items-center gap-2">
+          {!isExternal && (
+            <button onClick={() => setAssignmentModal({isOpen: true, match: liveMatch})} className="text-xs bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg font-bold border border-slate-600 flex items-center gap-1 hover:bg-slate-700 transition">
+              <Users size={14}/> 편성
+            </button>
+          )}
+          <button onClick={() => triggerShare(liveMatch)} className="text-xs bg-yellow-500/20 text-yellow-500 px-3 py-1.5 rounded-lg font-bold border border-yellow-500/30 flex items-center gap-1 hover:bg-yellow-500/30 transition">
+            <Share2 size={14}/> 공유
+          </button>
+        </div>
+      </header>
+    );
+
+    if (!liveState.isQuarterActive) {
+      return (
+        <div className="bg-slate-900 text-slate-200 font-sans p-5 sm:p-6 max-w-md mx-auto flex flex-col relative h-[100dvh] overflow-hidden">
+          {globalStyles}
+          {renderLiveHeader("새 쿼터 준비")}
+          <div className="flex-1 flex flex-col justify-center pb-20 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <h2 className="text-3xl font-black text-center text-white mb-2">{liveState.currentQuarter}Q 매치업</h2>
+            <p className="text-center text-slate-400 mb-10">이번 쿼터에 맞붙을 팀을 확인하세요.</p>
+            
+            {isExternal ? (
+              <div className="flex items-center justify-center gap-4 mb-12">
+                <div className={`w-32 border-2 text-white font-black text-xl text-center py-8 rounded-2xl shadow-xl bg-slate-800 border-slate-400`}>
+                   {activeTeam?.name || '우리 팀'}
+                </div>
+                <span className="text-slate-600 font-black italic text-2xl">VS</span>
+                <div className={`w-32 border-2 text-white font-black text-xl text-center py-8 rounded-2xl shadow-xl ${TEAM_COLORS['B']}`}>
+                   {liveMatch.opponentName}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center gap-4 mb-12">
+                <select value={liveState.playingTeams[0]} onChange={(e) => setLiveState({...liveState, playingTeams: [e.target.value, liveState.playingTeams[1]]})} className={`w-28 border-2 text-white font-black text-3xl text-center py-6 rounded-2xl appearance-none shadow-xl outline-none ${liveState.playingTeams[0] === 'A' ? 'bg-slate-800 border-slate-400' : TEAM_COLORS[liveState.playingTeams[0]]}`}>
+                  {TEAM_LETTERS.slice(0, liveMatch.teamCount).map(t => <option key={t} value={t} className="bg-slate-900">{t}팀</option>)}
+                </select>
+                <span className="text-slate-600 font-black italic text-2xl">VS</span>
+                <select value={liveState.playingTeams[1]} onChange={(e) => setLiveState({...liveState, playingTeams: [liveState.playingTeams[0], e.target.value]})} className={`w-28 border-2 text-white font-black text-3xl text-center py-6 rounded-2xl appearance-none shadow-xl outline-none ${liveState.playingTeams[1] === 'A' ? 'bg-slate-800 border-slate-400' : TEAM_COLORS[liveState.playingTeams[1]]}`}>
+                  {TEAM_LETTERS.slice(0, liveMatch.teamCount).map(t => <option key={t} value={t} className="bg-slate-900">{t}팀</option>)}
+                </select>
+              </div>
+            )}
+            
+            <button onClick={() => setLiveState({...liveState, isQuarterActive: true})} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 rounded-xl text-xl shadow-lg transition">쿼터 시작하기</button>
+          </div>
+
+          {renderAssignmentModal()}
+          {renderShareModal()}
+          {renderHiddenCaptureArea()}
+          {renderSystemModals()}
+        </div>
+      );
+    }
+
+    const t1Letter = activeTeams[0];
+    const t2Letter = activeTeams[1];
+    
+    const currentQLogs = (liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter);
+    const t1QScore = currentQLogs.filter(l => l.teamLetter === t1Letter).length;
+    const t2QScore = currentQLogs.filter(l => l.teamLetter === t2Letter).length;
+    
+    return (
+      <div className="bg-slate-900 text-slate-200 font-sans p-5 sm:p-6 max-w-md mx-auto relative flex flex-col h-[100dvh] overflow-hidden animate-in fade-in">
+        {globalStyles}
+        {renderLiveHeader(`${liveState.currentQuarter}Q 라이브`)}
+
+        <div className="bg-slate-800 rounded-3xl p-6 flex justify-between items-center mb-6 border border-slate-700 shadow-xl relative overflow-hidden shrink-0">
+          <div className={`absolute top-0 left-0 w-1/2 h-1.5 bg-current ${TEAM_TEXT_COLORS[t1Letter]}`}></div>
+          <div className={`absolute top-0 right-0 w-1/2 h-1.5 bg-current ${TEAM_TEXT_COLORS[t2Letter]}`}></div>
+          
+          <div className="text-center w-[40%]">
+            <div className={`font-black text-[13px] mb-1 truncate ${TEAM_TEXT_COLORS[t1Letter]}`}>{getTeamDisplayName(liveMatch, t1Letter)}</div>
+            <div className="text-5xl font-black text-white">{t1QScore}</div>
+          </div>
+          <div className="text-xl font-black text-slate-600 italic">VS</div>
+          <div className="text-center w-[40%]">
+            <div className={`font-black text-[13px] mb-1 truncate ${TEAM_TEXT_COLORS[t2Letter]}`}>{getTeamDisplayName(liveMatch, t2Letter)}</div>
+            <div className="text-5xl font-black text-white">{t2QScore}</div>
+          </div>
+        </div>
+
+        <div className="flex gap-4 mb-6 shrink-0">
+          <button 
+            onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: null, quarter: null, teamLetter: t1Letter, scorer: null, isPK: false, remark: '', isMissingAdd: false })} 
+            className={`flex-1 border-2 py-6 rounded-3xl flex flex-col items-center justify-center gap-2 transition shadow-lg ${t1Letter === 'A' ? 'bg-slate-800 border-slate-400 text-white' : TEAM_COLORS[t1Letter]}`}
+          >
+            <Trophy size={28} className="fill-current"/>
+            <span className="font-black text-sm">{getTeamDisplayName(liveMatch, t1Letter)} 득점</span>
+          </button>
+          <button 
+            onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: null, quarter: null, teamLetter: t2Letter, scorer: null, isPK: false, remark: '', isMissingAdd: false })} 
+            className={`flex-1 border-2 py-6 rounded-3xl flex flex-col items-center justify-center gap-2 transition shadow-lg ${t2Letter === 'A' ? 'bg-slate-800 border-slate-400 text-white' : TEAM_COLORS[t2Letter]}`}
+          >
+            <Trophy size={28} className="fill-current"/>
+            <span className="font-black text-sm">{getTeamDisplayName(liveMatch, t2Letter)} 득점</span>
+          </button>
+        </div>
+
+        <div className="flex-1 bg-slate-800/40 border border-slate-700/50 rounded-3xl p-4 sm:p-5 pb-8 overflow-y-auto flex flex-col gap-4 hide-scrollbar">
+          <div className="flex justify-between items-center mb-2 shrink-0">
+             <h3 className="text-sm font-bold text-slate-400 flex items-center gap-2"><List size={16}/> 쿼터별 기록 현황</h3>
+             <button onClick={requestEndQuarter} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs transition border border-slate-600 shadow-sm">현재 쿼터 종료</button>
+          </div>
+          
+          {(liveMatch.quarterScores || []).map(qs => (
+            <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-800 mb-2 shrink-0">
+               <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
+                 <span className="absolute left-0 font-bold text-slate-500 text-sm">{qs.quarter}Q</span>
+                 <span className="font-bold text-white text-[15px]">
+                   <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(liveMatch, qs.team1)}</span>
+                   <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span> 
+                   <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(liveMatch, qs.team2)}</span>
+                 </span>
+               </div>
+               <div className="space-y-3">
+                 {(liveMatch.logs || []).filter(l => l.quarter === qs.quarter).map(l => {
+                    const isLeft = l.teamLetter === qs.team1;
+                    return (
+                      <div 
+                        key={l.id} 
+                        onClick={() => isAdmin && openLogEditModal(l, liveMatch)}
+                        className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5' : ''}`}
+                      >
+                        <span className="text-slate-600 text-[11px] w-8 shrink-0 text-center mt-1">{l.time}</span>
+                        <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
+                         <div className="text-white font-bold text-sm flex items-center gap-1.5">
+                           <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
+                           {l.isPK && <span className="text-[9px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
+                         </div>
+                         {l.remark && <div className="text-[12px] bg-slate-800/80 px-2 py-1 rounded text-slate-300 mt-1 inline-block border border-slate-700">{l.remark}</div>}
+                         {l.assistName && (
+                           <div className="text-slate-400 mt-1 flex items-center gap-1">
+                             <Footprints size={12} className="text-slate-500"/> <span className="text-[13px]">{l.assistName}</span>
+                           </div>
+                         )}
+                        </div>
+                      </div>
+                    )
+                 })}
+                 {(liveMatch.logs || []).filter(l => l.quarter === qs.quarter).length === 0 && <div className="text-sm text-slate-500 italic text-center py-2">득점 없음</div>}
+               </div>
+               {isAdmin && (
+                  <div className="flex justify-center mt-4 pt-3 border-t border-slate-800/50">
+                    <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: liveMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
+                      <Plus size={14}/> 누락된 득점 추가
+                    </button>
+                  </div>
+               )}
+            </div>
+          ))}
+
+          <div className="bg-slate-900 rounded-2xl p-4 border border-blue-500/30 shadow-lg relative overflow-hidden shrink-0">
+             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-transparent"></div>
+             <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-4">
+               <span className="absolute left-0 font-black text-blue-400 flex items-center gap-1">
+                 <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                 {liveState.currentQuarter}Q <span className="text-[10px] text-slate-400 font-normal ml-0.5">진행중</span>
+               </span>
+               <span className="font-bold text-white text-[15px]">
+                   <span className={TEAM_TEXT_COLORS[t1Letter]}>{getTeamDisplayName(liveMatch, t1Letter)}</span>
+                   <span className="text-slate-500 mx-3">{t1QScore} : {t2QScore}</span> 
+                   <span className={TEAM_TEXT_COLORS[t2Letter]}>{getTeamDisplayName(liveMatch, t2Letter)}</span>
+               </span>
+             </div>
+             <div className="space-y-4">
+               {currentQLogs.map(l => {
+                 const isLeft = l.teamLetter === t1Letter;
+                 return (
+                   <div 
+                     key={l.id} 
+                     onClick={() => isAdmin && openLogEditModal(l, liveMatch)}
+                     className={`flex items-start gap-2 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'} ${isAdmin ? 'cursor-pointer hover:bg-slate-800 p-1.5 rounded-lg transition -mx-1.5 px-1.5' : ''}`}
+                   >
+                     <span className="text-slate-500 text-[11px] w-8 shrink-0 text-center mt-1">{l.time}</span>
+                     <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
+                       <div className="text-white font-bold text-sm flex items-center gap-1.5">
+                         <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
+                         {l.isPK && <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
+                       </div>
+                       {l.remark && <div className="text-[12px] bg-slate-800/80 px-2 py-1 rounded text-slate-300 mt-1 inline-block border border-slate-700">{l.remark}</div>}
+                       {l.assistName && (
+                         <div className="text-slate-400 mt-1 flex items-center gap-1">
+                           <Footprints size={12} className="text-slate-500"/> <span className="text-[13px]">{l.assistName}</span>
+                         </div>
+                       )}
+                     </div>
+                   </div>
+                 )
+               })}
+               {currentQLogs.length === 0 && <div className="text-sm text-slate-500 italic text-center py-4">아직 득점이 없습니다.</div>}
+             </div>
+          </div>
+          <div className="h-6 shrink-0 w-full"></div>
+        </div>
+        
+        {/* 팝업 렌더링 영역 */}
+        {renderAssignmentModal()}
+        {renderShareModal()}
+        {renderHiddenCaptureArea()}
+        {renderGoalFlowModal()}
+        {renderLogEditModal()}
+        {renderSystemModals()}
+      </div>
+    );
+  }
+
+  // ==========================================
+  // 메인 탭 반환 (matches, schedule, stats, tactics, roster)
   // ==========================================
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl flex flex-col">
@@ -2550,11 +2400,9 @@ export default function App() {
                 <button onClick={handleUndo} disabled={pastState.length === 0 || isPlaying} className="p-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Undo size={14}/></button>
                 <button onClick={handleRedo} disabled={futureState.length === 0 || isPlaying} className="p-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Redo size={14}/></button>
                 <button onClick={() => { setPitchType(pitchType); saveHistory(getInitialTacticsTokens(pitchType), []); clearFrames(); }} className="px-2.5 py-1.5 bg-slate-800 text-slate-400 rounded-lg font-bold text-[11px] border border-slate-700 hover:bg-slate-700 transition">초기화</button>
-                <button onClick={triggerTacticShare} className="px-2.5 py-1.5 bg-yellow-500/20 text-yellow-500 rounded-lg font-bold text-[11px] border border-yellow-500/30 hover:bg-yellow-500/30 transition flex items-center gap-1"><Share2 size={12}/> 캡처</button>
               </div>
             </div>
 
-            {/* 드로잉 툴바 */}
             <div className="flex justify-between items-center bg-slate-900 rounded-2xl p-1 border border-slate-700 shrink-0 mb-1 gap-1">
                <button onClick={() => setCurrentTool('move')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'move' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
                  <MousePointer2 size={15}/>
@@ -2588,20 +2436,17 @@ export default function App() {
                 onPointerLeave={handleBoardPointerUp}
                 className={`relative bg-emerald-700 border-2 ${isAutoRecording ? 'border-red-500 shadow-[inset_0_0_20px_rgba(239,68,68,0.7)]' : isPlaying ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'border-white/80 shadow-inner'} overflow-hidden tactic-board select-none w-full mx-auto transition-colors duration-300`}
               >
-                {/* --- Pitch Drawings --- */}
                 {pitchType === 'full' && (
                   <>
                     <div className="absolute top-1/2 left-0 w-full border-t-2 border-white/60 pointer-events-none"></div>
                     <div className="absolute top-1/2 left-1/2 w-20 h-20 sm:w-28 sm:h-28 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
                     <div className="absolute top-1/2 left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
                     
-                    {/* Top Penalty Area */}
                     <div className="absolute top-0 left-1/2 w-3/5 h-[15%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-0 left-1/2 w-[25%] h-[6%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-[15%] left-1/2 w-12 h-6 border-b-2 border-white/60 rounded-b-full -translate-x-1/2 pointer-events-none"></div>
 
-                    {/* Bottom Penalty Area */}
                     <div className="absolute bottom-0 left-1/2 w-3/5 h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute bottom-0 left-1/2 w-[25%] h-[6%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute bottom-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
@@ -2621,7 +2466,6 @@ export default function App() {
                   </>
                 )}
 
-                {/* --- User Drawings (Lines, Passes, Zones) --- */}
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
                   <defs>
                     <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -2632,7 +2476,6 @@ export default function App() {
                     </marker>
                   </defs>
                   
-                  {/* 직접 DOM 조작용 레퍼런스 요소 */}
                   <line ref={svgArrowRef} stroke="#FACC15" strokeWidth="4" markerEnd="url(#arrowhead)" style={{display: 'none'}} />
                   <line ref={svgPassRef} stroke="#60A5FA" strokeWidth="4" strokeDasharray="8,8" markerEnd="url(#passhead)" style={{display: 'none'}} />
                   <rect ref={svgZoneRef} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="3" style={{display: 'none'}} />
@@ -2659,13 +2502,12 @@ export default function App() {
                   })}
                 </svg>
 
-                {/* --- Tokens --- */}
                 {tacticTokens.map(t => (
                   <div
                     key={t.id}
                     onPointerDown={(e) => handleTokenPointerDown(e, t)}
                     style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
-                    className={`absolute rounded-full flex flex-col items-center justify-center font-black text-[10px] sm:text-[11px] will-change-transform 
+                    className={`absolute rounded-full flex flex-col items-center justify-center font-black transition-transform duration-75 text-[10px] sm:text-[11px] will-change-transform 
                       ${isPlaying ? 'transition-[left,top] duration-1000 ease-in-out pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
                       ${currentTool !== 'move' && !isPlaying ? 'pointer-events-none z-20' : ''}
                       ${t.team === 'A' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-red-600 text-white border border-red-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
@@ -2690,7 +2532,6 @@ export default function App() {
               </div>
             </div>
             
-            {/* ★ 애니메이션 프레임 제어 및 A/B팀 선수 조절 */}
             <div className="flex flex-col gap-2 shrink-0 border-t border-slate-800 pt-2">
                {animationFrames.length === 0 && !isAutoRecording && (
                  <p className="text-[10px] text-yellow-400 font-bold text-center animate-pulse tracking-wide my-1">💡 [자동 녹화]를 켜고 선수를 움직이면 자동으로 저장됩니다!</p>
@@ -2808,7 +2649,7 @@ export default function App() {
       </nav>
 
       {/* ============================================================================ */}
-      {/* 팝업 모달 영역 (가장 안전한 위치에서 렌더링) */}
+      {/* 팝업 모달 영역 */}
       {/* ============================================================================ */}
       {renderDetailModal()}
       {renderMatchModalForm()}
