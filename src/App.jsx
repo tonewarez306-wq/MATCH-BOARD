@@ -288,20 +288,6 @@ export default function App() {
     return () => { if (playbackRef.current) clearTimeout(playbackRef.current); };
   }, []);
 
-  const getTeamDisplayName = (match, letter) => {
-    if (!match) return `${letter}팀`;
-    if (match.matchType === 'external') {
-      if (letter === 'A') return activeTeam?.name || '우리 팀';
-      if (letter === 'B') return match.opponentName || '상대 팀';
-    }
-    return `${letter}팀`;
-  };
-
-  const prevMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
-  const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
-
-  const openMatchModal = (match) => { setMatchTypeForm(match?.matchType || 'internal'); setMatchModal({ isOpen: true, match }); };
-
   const handleActionClick = (action, match) => {
     const safeDate = match.date.replace(/-/g, '/');
     const matchDateTime = new Date(`${safeDate} ${match.time}`);
@@ -631,23 +617,45 @@ export default function App() {
     }, 500); 
   };
 
+  const triggerTacticShare = () => {
+    if (!boardRef.current) return;
+    setShareModal({ isOpen: true, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
+    setTimeout(async () => {
+      try {
+        const html2canvas = await loadHtml2Canvas();
+        const canvas = await html2canvas(boardRef.current, { scale: 2, useCORS: true, backgroundColor: '#047857' });
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const file = new File([blob], 'matchboard_tactic.png', { type: 'image/png' });
+          const imgUrl = URL.createObjectURL(blob);
+          setShareModal(prev => ({ ...prev, step: 2, file, imgUrl, isVideo: false }));
+        }, 'image/png');
+      } catch (err) { setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' }); setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false }); }
+    }, 500); 
+  };
+
+  const downloadFallback = (file, url) => {
+    const a = document.createElement('a'); a.href = url; a.download = file.name; a.click();
+    setSystemAlert({ isOpen: true, message: '파일이 기기에 다운로드 되었습니다.' });
+  }
+
   const doActualShare = async () => {
     const file = shareModal.file; if (!file) return;
     const isKakaotalk = navigator.userAgent.toLowerCase().includes('kakaotalk');
     if (isKakaotalk) {
-      setSystemAlert({ isOpen: true, message: '🚨 카카오톡 브라우저에서는 공유가 제한됩니다.\n하단 ⠇ 메뉴 > "다른 브라우저로 열기"를 선택하세요.\n(이미지는 길게 눌러 바로 저장할 수 있습니다)' });
+      setSystemAlert({ isOpen: true, message: '🚨 카카오톡 브라우저에서는 자동 공유/복사가 제한됩니다.\n\n💡 해결 방법:\n1. 화면의 이미지를 길게 눌러 저장하시거나\n2. 우측 하단 ⠇ 메뉴를 눌러 "다른 브라우저로 열기(Safari/Chrome)"를 선택해주세요!' });
       return;
     }
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ title: 'MATCHBOARD', files: [file] }); } catch (error) { 
-        if (error.name !== 'AbortError') {
-          const a = document.createElement('a'); a.href = shareModal.imgUrl; a.download = file.name; a.click();
-          setSystemAlert({ isOpen: true, message: '파일이 기기에 다운로드 되었습니다.' });
-        }
-      }
-    } else { 
-      const a = document.createElement('a'); a.href = shareModal.imgUrl; a.download = file.name; a.click();
-      setSystemAlert({ isOpen: true, message: '파일이 기기에 다운로드 되었습니다.' });
+      try { await navigator.share({ title: 'MATCHBOARD', files: [file] }); } catch (error) { if (error.name !== 'AbortError') downloadFallback(file, shareModal.imgUrl); }
+    } else {
+      if (!shareModal.isVideo && navigator.clipboard && window.isSecureContext) {
+        try {
+          const clipboardItem = new ClipboardItem({ [file.type]: file });
+          await navigator.clipboard.write([clipboardItem]);
+          setSystemAlert({ isOpen: true, message: '클립보드에 복사되었습니다!\n원하는 곳에 붙여넣기 해주세요.' });
+        } catch(e) { downloadFallback(file, shareModal.imgUrl); }
+      } else { downloadFallback(file, shareModal.imgUrl); }
     }
   };
 
@@ -710,20 +718,10 @@ export default function App() {
     const rect = boardRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100; const y = ((e.clientY - rect.top) / rect.height) * 100;
     if (currentTool === 'arrow' || currentTool === 'pass' || currentTool === 'zone') {
+       if (currentTool === 'arrow' && svgArrowRef.current) { svgArrowRef.current.style.display = 'block'; svgArrowRef.current.setAttribute('x1', `${x}%`); svgArrowRef.current.setAttribute('y1', `${y}%`); svgArrowRef.current.setAttribute('x2', `${x}%`); svgArrowRef.current.setAttribute('y2', `${y}%`); }
+       if (currentTool === 'pass' && svgPassRef.current) { svgPassRef.current.style.display = 'block'; svgPassRef.current.setAttribute('x1', `${x}%`); svgPassRef.current.setAttribute('y1', `${y}%`); svgPassRef.current.setAttribute('x2', `${x}%`); svgPassRef.current.setAttribute('y2', `${y}%`); }
+       if (currentTool === 'zone' && svgZoneRef.current) { svgZoneRef.current.style.display = 'block'; svgZoneRef.current.setAttribute('x', `${x}%`); svgZoneRef.current.setAttribute('y', `${y}%`); svgZoneRef.current.setAttribute('width', `0%`); svgZoneRef.current.setAttribute('height', `0%`); }
        activeDrawingData.current = { id: Date.now(), type: currentTool, start: {x, y}, end: {x, y} };
-       if (currentTool === 'arrow' && svgArrowRef.current) {
-          svgArrowRef.current.style.display = 'block';
-          svgArrowRef.current.setAttribute('x1', `${x}%`); svgArrowRef.current.setAttribute('y1', `${y}%`);
-          svgArrowRef.current.setAttribute('x2', `${x}%`); svgArrowRef.current.setAttribute('y2', `${y}%`);
-       } else if (currentTool === 'pass' && svgPassRef.current) {
-          svgPassRef.current.style.display = 'block';
-          svgPassRef.current.setAttribute('x1', `${x}%`); svgPassRef.current.setAttribute('y1', `${y}%`);
-          svgPassRef.current.setAttribute('x2', `${x}%`); svgPassRef.current.setAttribute('y2', `${y}%`);
-       } else if (currentTool === 'zone' && svgZoneRef.current) {
-          svgZoneRef.current.style.display = 'block';
-          svgZoneRef.current.setAttribute('x', `${x}%`); svgZoneRef.current.setAttribute('y', `${y}%`);
-          svgZoneRef.current.setAttribute('width', `0%`); svgZoneRef.current.setAttribute('height', `0%`);
-       }
     }
   };
 
@@ -736,18 +734,13 @@ export default function App() {
     if (currentTool === 'move' && draggingToken) {
       setTacticTokens(prev => prev.map(t => t.id === draggingToken ? { ...t, x, y } : t));
     } else if (activeDrawingData.current) {
-      const { type, start } = activeDrawingData.current;
-      activeDrawingData.current.end = { x, y };
-      
-      if (type === 'arrow' && svgArrowRef.current) {
-          svgArrowRef.current.setAttribute('x2', `${x}%`); svgArrowRef.current.setAttribute('y2', `${y}%`);
-      } else if (type === 'pass' && svgPassRef.current) {
-          svgPassRef.current.setAttribute('x2', `${x}%`); svgPassRef.current.setAttribute('y2', `${y}%`);
-      } else if (type === 'zone' && svgZoneRef.current) {
-          const rx = Math.min(start.x, x); const ry = Math.min(start.y, y);
-          const rw = Math.abs(start.x - x); const rh = Math.abs(start.y - y);
-          svgZoneRef.current.setAttribute('x', `${rx}%`); svgZoneRef.current.setAttribute('y', `${ry}%`);
-          svgZoneRef.current.setAttribute('width', `${rw}%`); svgZoneRef.current.setAttribute('height', `${rh}%`);
+      activeDrawingData.current.end = {x, y};
+      if (activeDrawingData.current.type === 'arrow' && svgArrowRef.current) { svgArrowRef.current.setAttribute('x2', `${x}%`); svgArrowRef.current.setAttribute('y2', `${y}%`); }
+      if (activeDrawingData.current.type === 'pass' && svgPassRef.current) { svgPassRef.current.setAttribute('x2', `${x}%`); svgPassRef.current.setAttribute('y2', `${y}%`); }
+      if (activeDrawingData.current.type === 'zone' && svgZoneRef.current) {
+         const sx = activeDrawingData.current.start.x; const sy = activeDrawingData.current.start.y;
+         svgZoneRef.current.setAttribute('x', `${Math.min(sx, x)}%`); svgZoneRef.current.setAttribute('y', `${Math.min(sy, y)}%`);
+         svgZoneRef.current.setAttribute('width', `${Math.abs(sx - x)}%`); svgZoneRef.current.setAttribute('height', `${Math.abs(sy - y)}%`);
       }
     }
   };
@@ -763,9 +756,8 @@ export default function App() {
       } else { saveHistory(tacticTokens); }
       setDraggingToken(null);
     } else if (activeDrawingData.current) {
-      const ad = activeDrawingData.current;
-      const dist = Math.sqrt(Math.pow(ad.start.x - ad.end.x, 2) + Math.pow(ad.start.y - ad.end.y, 2));
-      if (dist > 2) { const newDrawings = [...drawings, ad]; saveHistory(tacticTokens, newDrawings); }
+      const dist = Math.sqrt(Math.pow(activeDrawingData.current.start.x - activeDrawingData.current.end.x, 2) + Math.pow(activeDrawingData.current.start.y - activeDrawingData.current.end.y, 2));
+      if (dist > 2) { const newDrawings = [...drawings, activeDrawingData.current]; saveHistory(tacticTokens, newDrawings); }
       activeDrawingData.current = null;
       if (svgArrowRef.current) svgArrowRef.current.style.display = 'none';
       if (svgPassRef.current) svgPassRef.current.style.display = 'none';
@@ -848,7 +840,7 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
     const stream = canvas.captureStream(30); 
-    const recorder = new MediaRecorder(stream, { mimeType });
+    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
     const chunks = [];
     recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
     
@@ -860,7 +852,6 @@ export default function App() {
         setShareModal(prev => ({ ...prev, step: 2, file, imgUrl: url, isVideo: true }));
     };
     recorder.start();
-    
     let frameIdx = 0; let progress = 0; const fps = 30; const stepsPerFrame = fps * 1.0; 
     
     const draw = () => {
@@ -899,7 +890,8 @@ export default function App() {
                 ctx.fillStyle = t1.team === 'A' ? '#DC2626' : '#2563EB'; ctx.beginPath(); ctx.arc(px, py, 22, 0, Math.PI*2); ctx.fill();
                 ctx.strokeStyle = t1.team === 'A' ? '#991B1B' : '#1E40AF'; ctx.lineWidth = 3; ctx.stroke();
                 
-                ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t1.name ? t1.name.slice(0,2) : t1.position, px, py);
+                ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t1.position || '', px, py);
+
                 if (t1.name) {
                   ctx.font = 'bold 12px sans-serif';
                   const textWidth = ctx.measureText(t1.name).width; const rectWidth = textWidth + 16; const rectHeight = 20; const rectY = py + 32;
@@ -917,7 +909,7 @@ export default function App() {
   };
 
   // ==========================================
-  // 5. 팝업(모달) 렌더링 함수 모음 (안전 구역 선언)
+  // 5. 팝업 렌더링 함수 모음 (모두 최상단 배치)
   // ==========================================
   function renderCalendarDays() {
     const year = viewDate.getFullYear(); const month = viewDate.getMonth(); const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -964,7 +956,7 @@ export default function App() {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200]">
             <div className="bg-slate-800 p-6 rounded-3xl flex flex-col items-center shadow-xl border border-slate-700 animate-in fade-in zoom-in-95">
               <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
-              <p className="text-white font-bold text-sm tracking-wide">데이터 처리 중...</p>
+              <p className="text-white font-bold text-sm tracking-wide">데이터 저장 중...</p>
             </div>
           </div>
         )}
@@ -991,7 +983,7 @@ export default function App() {
               <div className="w-full flex-1 overflow-y-auto rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50 hide-scrollbar flex justify-center items-center">
                 {shareModal.imgUrl && (
                    shareModal.isVideo ? (
-                     <video src={shareModal.imgUrl} autoPlay loop playsInline className="w-full h-auto rounded-lg shadow-sm" />
+                     <video src={shareModal.imgUrl} autoPlay loop playsInline controls className="w-full h-auto rounded-lg shadow-sm" />
                    ) : (
                      <img src={shareModal.imgUrl} alt="Preview" className="w-full h-auto rounded-lg shadow-sm" />
                    )
@@ -1274,7 +1266,6 @@ export default function App() {
                 })}
               </div>
             </div>
-
           </div>
         </div>
       </div>
@@ -1790,7 +1781,7 @@ export default function App() {
   }
 
   // ==========================================
-  // 메인 화면 분기
+  // 메인 컴포넌트 렌더링 분기 시작
   // ==========================================
 
   if (appState === 'login') {
@@ -2106,9 +2097,7 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // 7. 메인 탭 화면 반환 (matches, schedule, stats, tactics, roster)
-  // ==========================================
+  // 메인 탭 반환 (matches, schedule, stats, tactics, roster)
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl flex flex-col">
       {globalStyles}
@@ -2439,20 +2428,21 @@ export default function App() {
                 <button onClick={handleUndo} disabled={pastState.length === 0 || isPlaying} className="p-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Undo size={14}/></button>
                 <button onClick={handleRedo} disabled={futureState.length === 0 || isPlaying} className="p-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-700 transition"><Redo size={14}/></button>
                 <button onClick={() => { setPitchType(pitchType); saveHistory(getInitialTacticsTokens(pitchType), []); clearFrames(); }} className="px-2.5 py-1.5 bg-slate-800 text-slate-400 rounded-lg font-bold text-[11px] border border-slate-700 hover:bg-slate-700 transition">초기화</button>
+                <button onClick={triggerTacticShare} className="px-2.5 py-1.5 bg-yellow-500/20 text-yellow-500 rounded-lg font-bold text-[11px] border border-yellow-500/30 hover:bg-yellow-500/30 transition flex items-center gap-1"><Share2 size={12}/> 캡처</button>
               </div>
             </div>
 
             <div className="flex justify-between items-center bg-slate-900 rounded-2xl p-1 border border-slate-700 shrink-0 mb-1 gap-1">
                <button onClick={() => setCurrentTool('move')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'move' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
-                 <MousePointer size={15}/>
+                 <MousePointer2 size={15}/>
                  <span className="text-[11px] font-bold">이동</span>
                </button>
                <button onClick={() => setCurrentTool('arrow')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'arrow' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
-                 <ArrowUpRight size={15}/>
+                 <MoveUpRight size={15}/>
                  <span className="text-[11px] font-bold">화살표</span>
                </button>
                <button onClick={() => setCurrentTool('pass')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'pass' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
-                 <TrendingUp size={15}/>
+                 <Spline size={15}/>
                  <span className="text-[11px] font-bold">패스</span>
                </button>
                <button onClick={() => setCurrentTool('zone')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'zone' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
@@ -2460,7 +2450,7 @@ export default function App() {
                  <span className="text-[11px] font-bold">지역</span>
                </button>
                <button onClick={() => setCurrentTool('erase')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'erase' ? 'bg-red-500 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}>
-                 <XCircle size={15}/>
+                 <Eraser size={15}/>
                  <span className="text-[11px] font-bold">지우기</span>
                </button>
             </div>
@@ -2468,14 +2458,13 @@ export default function App() {
             <div className="flex-1 w-full flex justify-center items-center min-h-0 relative pb-6 mt-1">
               <div 
                 ref={boardRef}
-                style={{ maxHeight: '100%', maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: currentTool === 'move' ? 'auto' : 'none' }}
+                style={{ maxHeight: '100%', maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: (currentTool !== 'move' || isPlaying || isAutoRecording || draggingToken) ? 'none' : 'auto' }}
                 onPointerDown={handleBoardPointerDown}
                 onPointerMove={handleBoardPointerMove}
                 onPointerUp={handleBoardPointerUp}
                 onPointerLeave={handleBoardPointerUp}
                 className={`relative bg-emerald-700 border-2 ${isAutoRecording ? 'border-red-500 shadow-[inset_0_0_20px_rgba(239,68,68,0.7)]' : isPlaying ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'border-white/80 shadow-inner'} overflow-hidden tactic-board select-none w-full mx-auto transition-colors duration-300`}
               >
-                {/* --- Pitch Drawings --- */}
                 {pitchType === 'full' && (
                   <>
                     <div className="absolute top-1/2 left-0 w-full border-t-2 border-white/60 pointer-events-none"></div>
@@ -2548,8 +2537,8 @@ export default function App() {
                     id={`token-${t.id}`}
                     onPointerDown={(e) => handleTokenPointerDown(e, t)}
                     style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
-                    className={`absolute rounded-full flex flex-col items-center justify-center font-black text-[10px] sm:text-[11px] will-change-transform 
-                      ${isPlaying ? '' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
+                    className={`absolute rounded-full flex flex-col items-center justify-center font-black transition-transform duration-75 text-[10px] sm:text-[11px] will-change-transform 
+                      ${isPlaying ? 'transition-none pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
                       ${currentTool !== 'move' && !isPlaying ? 'pointer-events-none z-20' : ''}
                       ${t.team === 'A' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-red-600 text-white border border-red-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
                       ${t.team === 'B' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 text-white border border-blue-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
@@ -2582,7 +2571,7 @@ export default function App() {
                )}
                <div className="flex items-center gap-2 bg-slate-900 rounded-2xl p-1 border border-slate-700">
                  <div className="bg-slate-800 px-2 py-2 rounded-xl text-xs font-black text-slate-300 border border-slate-700 shadow-inner flex items-center gap-1 shrink-0 w-[55px] justify-center">
-                    <Layers size={14} className="text-slate-400"/> {animationFrames.length}컷
+                    {animationFrames.length}컷
                  </div>
                  <button onClick={toggleAutoRecord} disabled={isPlaying} className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50 ${isAutoRecording ? 'bg-slate-700 text-red-400 border border-red-500/50 animate-pulse' : 'bg-red-500 hover:bg-red-400 text-white'}`}>
                     <Video size={14}/> {isAutoRecording ? '녹화 중지' : '자동 녹화'}
@@ -2690,7 +2679,7 @@ export default function App() {
       </nav>
 
       {/* ============================================================================ */}
-      {/* 팝업 모달 영역 (가장 안전한 위치에서 렌더링) */}
+      {/* 팝업 모달 영역 */}
       {/* ============================================================================ */}
       {renderDetailModal()}
       {renderMatchModalForm()}
