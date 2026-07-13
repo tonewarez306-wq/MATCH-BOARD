@@ -9,9 +9,6 @@ import {
   MousePointer2, MoveUpRight, Spline, Square, Eraser, Video, PlayCircle, Layers, RotateCcw
 } from 'lucide-react';
 
-// ==========================================
-// Firebase 설정
-// ==========================================
 const firebaseConfig = {
   apiKey: "AIzaSyCO99Km34_p0paqFM8wbWD0odUU8UJ9ph4",
   authDomain: "matchboard-d010e.firebaseapp.com",
@@ -26,9 +23,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// ==========================================
-// 상수 및 헬퍼 함수
-// ==========================================
 const TEAM_LETTERS = ['A', 'B', 'C', 'D'];
 const TEAM_COLORS = {
   'A': 'text-red-400 bg-red-500/10 border-red-500/30',
@@ -105,7 +99,8 @@ const formatTimeAmPm = (timeStr) => {
   const [h, m] = timeStr.split(':');
   const hour = parseInt(h, 10);
   const ampm = hour >= 12 ? '오후' : '오전';
-  return `${ampm} ${hour % 12 || 12}:${m}`;
+  const formattedHour = hour % 12 || 12;
+  return `${ampm} ${formattedHour}:${m}`;
 };
 
 const getTodayString = () => {
@@ -129,11 +124,7 @@ const getInitialTacticsTokens = (pitchType) => {
   return tokens;
 };
 
-// ==========================================
-// 메인 App 컴포넌트
-// ==========================================
 export default function App() {
-  // --- 상태 (State) 관리 ---
   const [user, setUser] = useState(null);
   const [appState, setAppState] = useState('login'); 
   const [activeTab, setActiveTab] = useState('matches'); 
@@ -190,21 +181,15 @@ export default function App() {
   const [draggingToken, setDraggingToken] = useState(null);
   const [tokenEditModal, setTokenEditModal] = useState({ isOpen: false, token: null });
   
-  // 애니메이션 관련 State
   const [animationFrames, setAnimationFrames] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAutoRecording, setIsAutoRecording] = useState(false); 
-
-  // --- Refs ---
+  
   const playbackRef = useRef(null);
   const boardRef = useRef(null);
   const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 });
   const dragStartTokensRef = useRef(null);
-  const svgArrowRef = useRef(null);
-  const svgPassRef = useRef(null);
-  const svgZoneRef = useRef(null);
 
-  // --- 데이터 메모이제이션 ---
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
@@ -264,7 +249,6 @@ export default function App() {
     `}</style>
   );
 
-  // --- Effects ---
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) setUser(currentUser);
@@ -286,10 +270,12 @@ export default function App() {
   }, [activeTeamId]);
 
   useEffect(() => {
-    return () => { if (playbackRef.current) clearTimeout(playbackRef.current); };
+    return () => { 
+      if (playbackRef.current) cancelAnimationFrame(playbackRef.current);
+      if (playbackRef.current) clearTimeout(playbackRef.current);
+    };
   }, []);
 
-  // --- 이벤트 핸들러 ---
   const getTeamDisplayName = (match, letter) => {
     if (!match) return `${letter}팀`;
     if (match.matchType === 'external') {
@@ -667,6 +653,7 @@ export default function App() {
     } else { downloadFallback(file, shareModal.imgUrl); }
   };
 
+  // --- 전술 보드 애니메이션 기능 ---
   const saveHistory = (newTokens, newDrawings = drawings) => {
     setPastState(prev => [...prev, { tokens: tacticTokens, drawings }].slice(-20)); 
     setFutureState([]);
@@ -790,15 +777,52 @@ export default function App() {
 
   const clearFrames = () => { setAnimationFrames([]); setIsPlaying(false); setIsAutoRecording(false); if (playbackRef.current) clearTimeout(playbackRef.current); };
 
+  // ★ 뚝뚝 끊기지 않는 60fps 부드러운 애니메이션 엔진 (React DOM 우회)
   const playAnimation = () => {
     if (animationFrames.length < 2) { setSystemAlert({ isOpen: true, message: '최소 2장면이 필요합니다.' }); return; }
-    setIsPlaying(true); let frameIdx = 0;
-    const playNext = () => {
-      if (frameIdx >= animationFrames.length) { setIsPlaying(false); return; }
-      setTacticTokens(animationFrames[frameIdx].tokens); setDrawings(animationFrames[frameIdx].drawings);
-      frameIdx++; playbackRef.current = setTimeout(playNext, 1200);
+    setIsPlaying(true); 
+    
+    let currentFrameIdx = 0;
+    let startTime = null;
+    const transitionDuration = 800; // 이동 속도
+
+    setTacticTokens(animationFrames[0].tokens);
+    setDrawings(animationFrames[0].drawings);
+
+    const animate = (timestamp) => {
+      if (!startTime) startTime = timestamp;
+      let progress = (timestamp - startTime) / transitionDuration;
+      if (progress > 1) progress = 1;
+
+      const ease = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
+      const startTokens = animationFrames[currentFrameIdx].tokens;
+      const endTokens = animationFrames[currentFrameIdx + 1].tokens;
+
+      startTokens.forEach(t1 => {
+        const t2 = endTokens.find(t => t.id === t1.id) || t1;
+        const currentX = t1.x + (t2.x - t1.x) * ease;
+        const currentY = t1.y + (t2.y - t1.y) * ease;
+        const el = document.getElementById(`token-${t1.id}`);
+        if (el) { el.style.left = `${currentX}%`; el.style.top = `${currentY}%`; }
+      });
+
+      if (progress < 1) {
+        playbackRef.current = requestAnimationFrame(animate);
+      } else {
+        currentFrameIdx++;
+        setTacticTokens(animationFrames[currentFrameIdx].tokens);
+        setDrawings(animationFrames[currentFrameIdx].drawings);
+        
+        if (currentFrameIdx >= animationFrames.length - 1) {
+           setIsPlaying(false);
+        } else {
+           startTime = null;
+           playbackRef.current = setTimeout(() => { playbackRef.current = requestAnimationFrame(animate); }, 300); // 프레임 사이 멈춤 0.3초
+        }
+      }
     };
-    playNext();
+    
+    playbackRef.current = setTimeout(() => { playbackRef.current = requestAnimationFrame(animate); }, 300);
   };
 
   const exportAnimationToVideo = async () => {
@@ -807,21 +831,28 @@ export default function App() {
 
     const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = pitchType === 'full' ? 900 : 800;
     const ctx = canvas.getContext('2d');
-    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+    
+    // 더미 프레임 강제 주입
+    ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    let mimeType = 'video/mp4';
+    if (!MediaRecorder.isTypeSupported('video/mp4')) mimeType = 'video/webm';
+    
     const stream = canvas.captureStream(30); 
-    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
+    const recorder = new MediaRecorder(stream, { mimeType });
     const chunks = [];
-    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
     
     recorder.onstop = () => {
-        const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+        const ext = 'mp4'; // 카카오톡 강제 호환
         const blob = new Blob(chunks, { type: mimeType });
         const file = new File([blob], `tactic_animation.${ext}`, { type: mimeType });
         const url = URL.createObjectURL(blob);
         setShareModal(prev => ({ ...prev, step: 2, file, imgUrl: url, isVideo: true }));
     };
     recorder.start();
-    let frameIdx = 0; let progress = 0; const fps = 30; const stepsPerFrame = fps * 1.2; 
+    
+    let frameIdx = 0; let progress = 0; const fps = 30; const stepsPerFrame = fps * 1.0; 
     
     const draw = () => {
         ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -858,9 +889,9 @@ export default function App() {
             } else {
                 ctx.fillStyle = t1.team === 'A' ? '#DC2626' : '#2563EB'; ctx.beginPath(); ctx.arc(px, py, 22, 0, Math.PI*2); ctx.fill();
                 ctx.strokeStyle = t1.team === 'A' ? '#991B1B' : '#1E40AF'; ctx.lineWidth = 3; ctx.stroke();
-                
                 ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t1.position || '', px, py);
-
+                
+                // 이름 잘림 현상 방지 동적 계산 배지
                 if (t1.name) {
                   ctx.font = 'bold 12px sans-serif';
                   const textWidth = ctx.measureText(t1.name).width; const rectWidth = textWidth + 16; const rectHeight = 20; const rectY = py + 32;
@@ -874,13 +905,13 @@ export default function App() {
         progress++; if (progress > stepsPerFrame) { progress = 0; frameIdx++; }
         if (frameIdx < animationFrames.length - 1 || (frameIdx === animationFrames.length - 1 && progress < fps * 0.5)) { setTimeout(draw, 1000 / fps); } else { setTimeout(() => recorder.stop(), 200); }
     };
-    draw();
+    setTimeout(draw, 100);
   };
 
   // ==========================================
-  // 5. 팝업 모달 렌더링 함수 모음
+  // 5. 팝업(모달) 렌더링 함수 모음 (안전 구역 선언)
   // ==========================================
-  const renderCalendarDays = () => {
+  function renderCalendarDays() {
     const year = viewDate.getFullYear(); const month = viewDate.getMonth(); const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate();
     const days = [];
     for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="p-2" />);
@@ -897,9 +928,9 @@ export default function App() {
       );
     }
     return days;
-  };
+  }
 
-  const renderSystemModals = () => {
+  function renderSystemModals() {
     return (
       <>
         {systemAlert.isOpen && (
@@ -925,15 +956,15 @@ export default function App() {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200]">
             <div className="bg-slate-800 p-6 rounded-3xl flex flex-col items-center shadow-xl border border-slate-700 animate-in fade-in zoom-in-95">
               <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
-              <p className="text-white font-bold text-sm tracking-wide">데이터 저장 중...</p>
+              <p className="text-white font-bold text-sm tracking-wide">데이터 처리 중...</p>
             </div>
           </div>
         )}
       </>
     );
-  };
+  }
 
-  const renderShareModal = () => {
+  function renderShareModal() {
     if (!shareModal.isOpen) return null;
     return (
       <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-[90]">
@@ -942,17 +973,17 @@ export default function App() {
             <div className="bg-slate-800 border border-slate-700 p-6 rounded-3xl w-full shadow-xl flex flex-col items-center text-center animate-in zoom-in-95">
               <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4 mt-8"></div>
               <h2 className="text-lg font-black text-white mb-1">리포트 미디어 생성 중...</h2>
-              <p className="text-sm text-slate-400 font-medium mb-8">화면을 캡처하고 있습니다.</p>
+              <p className="text-sm text-slate-400 font-medium mb-8">화면을 렌더링하고 있습니다.</p>
             </div>
           ) : (
             <div className="bg-slate-800 border border-slate-700 p-5 rounded-3xl w-full shadow-xl flex flex-col items-center text-center flex-1 min-h-0 animate-in fade-in">
               <h2 className="text-lg font-black text-white flex items-center gap-1 mb-4 shrink-0">
-                <MessageCircle size={18} className="text-blue-500"/> 캡처 완료
+                <MessageCircle size={18} className="text-blue-500"/> 미디어 생성 완료
               </h2>
               <div className="w-full flex-1 overflow-y-auto rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50 hide-scrollbar flex justify-center items-center">
                 {shareModal.imgUrl && (
                    shareModal.isVideo ? (
-                     <video src={shareModal.imgUrl} autoPlay loop playsInline className="w-full h-auto rounded-lg shadow-sm" />
+                     <video src={shareModal.imgUrl} autoPlay loop playsInline controls className="w-full h-auto rounded-lg shadow-sm" />
                    ) : (
                      <img src={shareModal.imgUrl} alt="Preview" className="w-full h-auto rounded-lg shadow-sm" />
                    )
@@ -971,9 +1002,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderHiddenCaptureArea = () => {
+  function renderHiddenCaptureArea() {
     if (!shareModal.isOpen || !shareModal.data || shareModal.isVideo) return null;
     return (
       <div className="fixed top-0 left-0 w-[500px] opacity-0 pointer-events-none z-[-100] overflow-visible">
@@ -1084,9 +1115,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderDetailModal = () => {
+  function renderDetailModal() {
     if (!detailModal.isOpen || !detailMatch) return null;
     return (
       <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-[100] animate-in fade-in">
@@ -1239,9 +1270,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderMatchModalForm = () => {
+  function renderMatchModalForm() {
     if (!matchModal.isOpen) return null;
     return (
       <div className="fixed inset-0 bg-black/80 flex items-end justify-center z-[100]">
@@ -1327,9 +1358,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderAssignmentModal = () => {
+  function renderAssignmentModal() {
     if (!assignmentModal.isOpen || !assignmentModal.match) return null;
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
@@ -1361,9 +1392,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderRosterModalForm = () => {
+  function renderRosterModalForm() {
     if (!rosterModal.isOpen) return null;
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
@@ -1386,9 +1417,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderAuthModal = () => {
+  function renderAuthModal() {
     if (!authModal.isOpen) return null;
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
@@ -1417,9 +1448,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderCreateTeamModal = () => {
+  function renderCreateTeamModal() {
     if (!isCreateTeamOpen) return null;
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
@@ -1455,9 +1486,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderEditTeamModal = () => {
+  function renderEditTeamModal() {
     if (!editTeamModal.isOpen) return null;
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
@@ -1493,9 +1524,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderAdminPwdChangeModal = () => {
+  function renderAdminPwdChangeModal() {
     if (!adminPwdChangeModal) return null;
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
@@ -1514,9 +1545,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const renderGoalFlowModal = () => {
+  function renderGoalFlowModal() {
     if (!goalFlow.isOpen) return null;
     const gfMatchId = goalFlow.matchId || liveMatchId;
     const gfMatch = matches.find(m => m.id === gfMatchId);
@@ -1751,7 +1782,7 @@ export default function App() {
 
 
   // ==========================================
-  // 메인 컴포넌트 JSX 렌더링 분기 시작
+  // 6. 메인 컴포넌트 JSX 렌더링 분기 시작
   // ==========================================
 
   if (appState === 'login') {
@@ -2068,7 +2099,7 @@ export default function App() {
   }
 
   // ==========================================
-  // 메인 탭 반환 (matches, schedule, stats, tactics, roster)
+  // 7. 메인 탭 반환 (matches, schedule, stats, tactics, roster)
   // ==========================================
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl flex flex-col">
@@ -2436,17 +2467,20 @@ export default function App() {
                 onPointerLeave={handleBoardPointerUp}
                 className={`relative bg-emerald-700 border-2 ${isAutoRecording ? 'border-red-500 shadow-[inset_0_0_20px_rgba(239,68,68,0.7)]' : isPlaying ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'border-white/80 shadow-inner'} overflow-hidden tactic-board select-none w-full mx-auto transition-colors duration-300`}
               >
+                {/* --- Pitch Drawings --- */}
                 {pitchType === 'full' && (
                   <>
                     <div className="absolute top-1/2 left-0 w-full border-t-2 border-white/60 pointer-events-none"></div>
                     <div className="absolute top-1/2 left-1/2 w-20 h-20 sm:w-28 sm:h-28 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
                     <div className="absolute top-1/2 left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
                     
+                    {/* Top Penalty Area */}
                     <div className="absolute top-0 left-1/2 w-3/5 h-[15%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-0 left-1/2 w-[25%] h-[6%] border-2 border-t-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute top-[15%] left-1/2 w-12 h-6 border-b-2 border-white/60 rounded-b-full -translate-x-1/2 pointer-events-none"></div>
 
+                    {/* Bottom Penalty Area */}
                     <div className="absolute bottom-0 left-1/2 w-3/5 h-[15%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute bottom-0 left-1/2 w-[25%] h-[6%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                     <div className="absolute bottom-[11%] left-1/2 w-1.5 h-1.5 bg-white/80 rounded-full -translate-x-1/2 pointer-events-none"></div>
@@ -2466,6 +2500,7 @@ export default function App() {
                   </>
                 )}
 
+                {/* --- User Drawings (Lines, Passes, Zones) --- */}
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
                   <defs>
                     <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -2476,6 +2511,7 @@ export default function App() {
                     </marker>
                   </defs>
                   
+                  {/* 직접 DOM 조작용 레퍼런스 요소 */}
                   <line ref={svgArrowRef} stroke="#FACC15" strokeWidth="4" markerEnd="url(#arrowhead)" style={{display: 'none'}} />
                   <line ref={svgPassRef} stroke="#60A5FA" strokeWidth="4" strokeDasharray="8,8" markerEnd="url(#passhead)" style={{display: 'none'}} />
                   <rect ref={svgZoneRef} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="3" style={{display: 'none'}} />
@@ -2502,13 +2538,15 @@ export default function App() {
                   })}
                 </svg>
 
+                {/* --- Tokens --- */}
                 {tacticTokens.map(t => (
                   <div
                     key={t.id}
+                    id={`token-${t.id}`}
                     onPointerDown={(e) => handleTokenPointerDown(e, t)}
                     style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
                     className={`absolute rounded-full flex flex-col items-center justify-center font-black transition-transform duration-75 text-[10px] sm:text-[11px] will-change-transform 
-                      ${isPlaying ? 'transition-[left,top] duration-1000 ease-in-out pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
+                      ${isPlaying ? 'pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
                       ${currentTool !== 'move' && !isPlaying ? 'pointer-events-none z-20' : ''}
                       ${t.team === 'A' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-red-600 text-white border border-red-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
                       ${t.team === 'B' ? 'w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 text-white border border-blue-800 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.5),_0_2px_5px_rgba(0,0,0,0.5)]' : ''}
@@ -2532,6 +2570,7 @@ export default function App() {
               </div>
             </div>
             
+            {/* ★ 애니메이션 프레임 제어 및 A/B팀 선수 조절 */}
             <div className="flex flex-col gap-2 shrink-0 border-t border-slate-800 pt-2">
                {animationFrames.length === 0 && !isAutoRecording && (
                  <p className="text-[10px] text-yellow-400 font-bold text-center animate-pulse tracking-wide my-1">💡 [자동 녹화]를 켜고 선수를 움직이면 자동으로 저장됩니다!</p>
@@ -2649,7 +2688,7 @@ export default function App() {
       </nav>
 
       {/* ============================================================================ */}
-      {/* 팝업 모달 영역 */}
+      {/* 팝업 모달 영역 (가장 안전한 위치에서 렌더링) */}
       {/* ============================================================================ */}
       {renderDetailModal()}
       {renderMatchModalForm()}
