@@ -5,13 +5,13 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
-    <!-- PWA manifest 연결 (Vite 환경에 맞는 올바른 경로) -->
+    <!-- PWA manifest 연결 -->
     <link rel="manifest" href="/manifest.json" />
     
     <title>MATCHBOARD</title>
     
-    <!-- 카카오 스크립트 -->
-    <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.6.0/kakao.min.js" integrity="sha384-6MFdIr0zOira1CHQkedUqJVql0YtcZA1P0nbPrQYJ5/FbtbOzk03+eG0K/P7Xn/I" crossorigin="anonymous"></script>
+    <!-- 에러가 나던 카카오 스크립트 수정 (integrity와 crossorigin 속성 삭제) -->
+    <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.6.0/kakao.min.js"></script>
   </head>
   <body>
     <div id="root"></div>
