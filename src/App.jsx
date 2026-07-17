@@ -9,9 +9,6 @@ import {
   MousePointer, ArrowUpRight, TrendingUp, Square, XCircle, Video, PlayCircle, Layers, RotateCcw
 } from 'lucide-react';
 
-// ==========================================
-// Firebase 설정 (고객님 개인 DB 설정)
-// ==========================================
 const firebaseConfig = {
   apiKey: "AIzaSyCO99Km34_p0paqFM8wbWD0odUU8UJ9ph4",
   authDomain: "matchboard-d010e.firebaseapp.com",
@@ -26,9 +23,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// ==========================================
-// 상수 및 헬퍼 함수
-// ==========================================
 const TEAM_LETTERS = ['A', 'B', 'C', 'D'];
 const TEAM_COLORS = {
   'A': 'text-red-400 bg-red-500/10 border-red-500/30',
@@ -114,6 +108,12 @@ const getTodayString = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+const formatTopPlayers = (players) => {
+  if (!players || players.length === 0) return '없음';
+  if (players.length === 1) return players[0].name;
+  return `${players[0].name} 외 ${players.length - 1}명`;
+};
+
 const getInitialTacticsTokens = (pitchType) => {
   const tokens = [];
   if (pitchType === 'full') {
@@ -130,15 +130,11 @@ const getInitialTacticsTokens = (pitchType) => {
   return tokens;
 };
 
-// ==========================================
-// 메인 App 컴포넌트
-// ==========================================
 export default function App() {
-  // --- 1. 상태 관리 ---
   const [user, setUser] = useState(null);
   const [appState, setAppState] = useState('login'); 
   const [activeTab, setActiveTab] = useState('matches'); 
-  const [statsViewMode, setStatsViewMode] = useState('month'); // 통계 뷰 모드 추가 ('month' | 'year')
+  const [statsViewMode, setStatsViewMode] = useState('month');
   const [isAdmin, setIsAdmin] = useState(false); 
   const [adminPassword, setAdminPassword] = useState('admin');
   
@@ -182,7 +178,6 @@ export default function App() {
   const [goalFlow, setGoalFlow] = useState({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false });
   const [logEditModal, setLogEditModal] = useState({ isOpen: false, match: null, log: null });
 
-  // 전술 보드 상태
   const [pitchType, setPitchType] = useState('full'); 
   const [currentTool, setCurrentTool] = useState('move'); 
   const [tacticTokens, setTacticTokens] = useState(getInitialTacticsTokens('full'));
@@ -192,12 +187,12 @@ export default function App() {
   const [draggingToken, setDraggingToken] = useState(null);
   const [tokenEditModal, setTokenEditModal] = useState({ isOpen: false, token: null });
   
-  // 애니메이션 관련 상태
   const [animationFrames, setAnimationFrames] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAutoRecording, setIsAutoRecording] = useState(false); 
+
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
   
-  // --- 2. Refs ---
   const playbackRef = useRef(null);
   const boardRef = useRef(null);
   const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 });
@@ -208,7 +203,6 @@ export default function App() {
   const svgPassRef = useRef(null);
   const svgZoneRef = useRef(null);
 
-  // --- 3. 메모이제이션 ---
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
@@ -284,14 +278,6 @@ export default function App() {
     return Object.values(statsMap).sort((a, b) => b.goals !== a.goals ? b.goals - a.goals : (b.assists !== a.assists ? b.assists - a.assists : b.caps - a.caps));
   }, [yearlyMatches, currentTeamPlayers]);
 
-  // 공동 1위 문자열 포맷팅 헬퍼
-  const formatTopPlayers = (players) => {
-    if (!players || players.length === 0) return '없음';
-    if (players.length === 1) return players[0].name;
-    return `${players[0].name} 외 ${players.length - 1}명`;
-  };
-
-  // 통계 화면 변수 할당 (현재 선택된 통계 모드에 따라 데이터 분기)
   const currentDisplayStats = statsViewMode === 'month' ? monthlyStats : yearlyStats;
   const titlePrefix = statsViewMode === 'month' ? '이달의' : '올해의';
 
@@ -318,7 +304,6 @@ export default function App() {
     `}</style>
   );
 
-  // --- 4. Effects ---
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) setUser(currentUser);
@@ -343,7 +328,31 @@ export default function App() {
     return () => { if (playbackRef.current) cancelAnimationFrame(playbackRef.current); };
   }, []);
 
-  // --- 5. 이벤트 핸들러 ---
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e); 
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') console.log('User accepted the install prompt');
+      setDeferredPrompt(null);
+    } else {
+      const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
+      if (isIos) {
+        setSystemAlert({isOpen: true, message: "아이폰(iOS)에서는 브라우저 하단의 [공유] 버튼(↑)을 누른 후\n'홈 화면에 추가'를 선택하시면 앱처럼 사용하실 수 있습니다."});
+      } else {
+        setSystemAlert({isOpen: true, message: "현재 환경에서는 자동 설치 팝업을 지원하지 않습니다.\n\n브라우저 우측 상단 설정 메뉴(⋮)에서\n'홈 화면에 추가' 또는 '앱 설치'를 선택해 주세요."});
+      }
+    }
+  };
+
   const prevMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
   const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
   const prevYear = () => setViewDate(new Date(viewDate.getFullYear() - 1, viewDate.getMonth(), 1));
@@ -613,7 +622,7 @@ export default function App() {
 
   const handleLogDelete = async () => {
     const m = matches.find(match => match.id === logEditModal.match.id); const l = logEditModal.log;
-    setSystemConfirm({ isOpen: true, message: '정말 이 득점 기록을 삭제하시겠습니까?\n(선수 개인 기록과 팀 점도 함께 차감됩니다.)', onConfirm: async () => {
+    setSystemConfirm({ isOpen: true, message: '정말 이 득점 기록을 삭제하시겠습니까?\n(선수 개인 기록과 팀 점수도 함께 차감됩니다.)', onConfirm: async () => {
             if(isProcessing) return; setIsProcessing(true);
             try {
               const updatePromises = [];
@@ -965,9 +974,6 @@ export default function App() {
     }
   };
 
-  // ==========================================
-  // 렌더링 헬퍼 함수
-  // ==========================================
   const renderQuarterLogsBlock = (match, qs, isAdminView) => {
     const qLogs = (match.logs || []).filter(l => l.quarter === qs.quarter);
     if (qLogs.length === 0) {
@@ -1795,10 +1801,6 @@ export default function App() {
     );
   };
 
-  // ==========================================
-  // 메인 화면 분기
-  // ==========================================
-
   if (appState === 'login') {
     return (
       <div className="min-h-screen bg-slate-900 text-slate-200 font-sans p-6 flex flex-col justify-center max-w-md mx-auto relative">
@@ -1882,6 +1884,14 @@ export default function App() {
             </button>
             <button onClick={() => setAdminPwdChangeModal(true)} className="w-full py-4 border-2 border-dashed border-slate-700 rounded-2xl text-slate-400 font-bold flex items-center justify-center gap-2 hover:text-white hover:border-slate-500 bg-slate-800/50 transition">
               <Shield size={20} /> 관리자 마스터 비밀번호 변경
+            </button>
+          </div>
+        )}
+
+        {!isLoginAdminMode && (
+          <div className="mt-6 animate-in fade-in slide-in-from-bottom">
+            <button onClick={handleInstallClick} className="w-full py-4 bg-slate-800 text-white rounded-2xl font-bold flex items-center justify-center gap-2 border border-slate-700 shadow-lg hover:bg-slate-700 transition text-[15px]">
+              📱 홈 화면에 앱 설치하기
             </button>
           </div>
         )}
