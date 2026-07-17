@@ -178,6 +178,7 @@ export default function App() {
   const [goalFlow, setGoalFlow] = useState({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false });
   const [logEditModal, setLogEditModal] = useState({ isOpen: false, match: null, log: null });
 
+  // 전술 보드 상태
   const [pitchType, setPitchType] = useState('full'); 
   const [currentTool, setCurrentTool] = useState('move'); 
   const [tacticTokens, setTacticTokens] = useState(getInitialTacticsTokens('full'));
@@ -190,7 +191,6 @@ export default function App() {
   const [animationFrames, setAnimationFrames] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAutoRecording, setIsAutoRecording] = useState(false); 
-
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   
   const playbackRef = useRef(null);
@@ -293,6 +293,16 @@ export default function App() {
   const topCaps = currentDisplayStats.filter(s => s.caps === maxCaps && maxCaps > 0);
   const topCapsText = formatTopPlayers(topCaps);
 
+  // 경기 기록/수정 권한 확인 함수 (관리자이거나, 경기 시작 시간이 지났을 경우 권한 부여)
+  const canEditRecord = (match) => {
+    if (!match) return false;
+    if (isAdmin) return true;
+    const safeDate = match.date.replace(/-/g, '/');
+    const matchDateTime = new Date(`${safeDate} ${match.time}`);
+    const now = new Date();
+    return now >= matchDateTime;
+  };
+
   const globalStyles = (
     <style>{`
       *::-webkit-scrollbar { display: none !important; width: 0 !important; }
@@ -303,6 +313,15 @@ export default function App() {
       .will-change-transform { will-change: transform, left, top; }
     `}</style>
   );
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
@@ -328,27 +347,20 @@ export default function App() {
     return () => { if (playbackRef.current) cancelAnimationFrame(playbackRef.current); };
   }, []);
 
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (e) => {
-      e.preventDefault();
-      setDeferredPrompt(e); 
-    };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-  }, []);
-
   const handleInstallClick = async () => {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    
     if (deferredPrompt) {
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') console.log('User accepted the install prompt');
-      setDeferredPrompt(null);
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
     } else {
-      const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
-      if (isIos) {
-        setSystemAlert({isOpen: true, message: "아이폰(iOS)에서는 브라우저 하단의 [공유] 버튼(↑)을 누른 후\n'홈 화면에 추가'를 선택하시면 앱처럼 사용하실 수 있습니다."});
+      if (isIOS) {
+        setSystemAlert({ isOpen: true, message: "iOS(아이폰)에서는 자동 설치를 지원하지 않습니다.\n\n하단의 공유[↑] 버튼을 누른 후,\n'홈 화면에 추가'를 선택해 주세요." });
       } else {
-        setSystemAlert({isOpen: true, message: "현재 환경에서는 자동 설치 팝업을 지원하지 않습니다.\n\n브라우저 우측 상단 설정 메뉴(⋮)에서\n'홈 화면에 추가' 또는 '앱 설치'를 선택해 주세요."});
+        setSystemAlert({ isOpen: true, message: "현재 환경에서는 자동 설치 팝업을 지원하지 않습니다.\n\n브라우저 우측 상단 설정 메뉴(⋮)에서\n'홈 화면에 추가' 또는 '앱 설치'를 선택해 주세요.\n(카카오톡 브라우저인 경우 '다른 브라우저로 열기'를 이용해 주세요)" });
       }
     }
   };
@@ -361,15 +373,8 @@ export default function App() {
   const openMatchModal = (match) => { setMatchTypeForm(match?.matchType || 'internal'); setMatchModal({ isOpen: true, match }); };
 
   const handleActionClick = (action, match) => {
-    const safeDate = match.date.replace(/-/g, '/');
-    const matchDateTime = new Date(`${safeDate} ${match.time}`);
-    const now = new Date();
-    if (!isAdmin) {
-      if (matchDateTime > now) {
-        setSystemAlert({ isOpen: true, message: `해당 기능은 경기 시작 전에는 이용할 수 없습니다.\n\n미리 기록 및 편성을 원하시면 우측 상단의\n[관리자 전환]을 이용해 주세요.` });
-      } else {
-        setSystemAlert({ isOpen: true, message: `해당 기능은 조회 모드에서는 이용할 수 없습니다.\n\n기록 및 편성을 원하시면 우측 상단의\n[관리자 전환]을 이용해 주세요.` });
-      }
+    if (!canEditRecord(match)) {
+      setSystemAlert({ isOpen: true, message: `해당 기능은 경기 시작 전에는 이용할 수 없습니다.\n\n미리 기록 및 편성을 원하시면 우측 상단의\n[관리자 전환]을 이용해 주세요.` });
       return;
     }
     if (action === 'assign') setAssignmentModal({ isOpen: true, match });
@@ -584,7 +589,7 @@ export default function App() {
   };
 
   const openLogEditModal = (log, match) => {
-    if (!isAdmin) { setSystemAlert({isOpen: true, message: '기록 수정은 팀 관리자만 가능합니다.'}); return; }
+    if (!canEditRecord(match)) { setSystemAlert({isOpen: true, message: '경기 시작 전 기록 수정은 팀 관리자만 가능합니다.'}); return; }
     const enrichedLog = { ...log };
     if (!enrichedLog.scorerId && enrichedLog.scorerName) enrichedLog.scorerId = players.find(p => p.name === enrichedLog.scorerName)?.id;
     if (!enrichedLog.assistId && enrichedLog.assistName) enrichedLog.assistId = players.find(p => p.name === enrichedLog.assistName)?.id;
@@ -1420,8 +1425,8 @@ export default function App() {
                      <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(detailMatch, qs.team2)}</span>
                    </span>
                  </div>
-                 {renderQuarterLogsBlock(detailMatch, qs, isAdmin)}
-                 {isAdmin && (
+                 {renderQuarterLogsBlock(detailMatch, qs, canEditRecord(detailMatch))}
+                 {canEditRecord(detailMatch) && (
                     <div className="flex justify-center mt-4 pt-4 border-t border-slate-800/50">
                       <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: detailMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
                         <Plus size={12}/> 누락된 득점 추가
@@ -1434,7 +1439,7 @@ export default function App() {
             <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
               <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-800 pb-2 flex justify-between items-end">
                   <span>참석자 최종 편성 명단</span>
-                  {isAdmin && (
+                  {canEditRecord(detailMatch) && (
                     <div className="flex gap-2 mb-1">
                       <button 
                         onClick={() => {
@@ -1446,16 +1451,18 @@ export default function App() {
                       >
                         <Users size={12}/> 편성 수정
                       </button>
-                      <button 
-                        onClick={() => {
-                          setDetailModal({isOpen: false, match: null});
-                          setDetailModalMatchId(null);
-                          openMatchModal(detailMatch);
-                        }}
-                        className="bg-slate-800 text-blue-400 px-2.5 py-1 rounded text-[10px] font-bold border border-blue-500/30 flex items-center gap-1 hover:bg-slate-700 transition"
-                      >
-                        <Edit size={12}/> 명단 수정
-                      </button>
+                      {isAdmin && (
+                        <button 
+                          onClick={() => {
+                            setDetailModal({isOpen: false, match: null});
+                            setDetailModalMatchId(null);
+                            openMatchModal(detailMatch);
+                          }}
+                          className="bg-slate-800 text-blue-400 px-2.5 py-1 rounded text-[10px] font-bold border border-blue-500/30 flex items-center gap-1 hover:bg-slate-700 transition"
+                        >
+                          <Edit size={12}/> 명단 수정
+                        </button>
+                      )}
                     </div>
                   )}
               </div>
@@ -2030,8 +2037,8 @@ export default function App() {
                    <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(liveMatch, qs.team2)}</span>
                  </span>
                </div>
-               {renderQuarterLogsBlock(liveMatch, qs, isAdmin)}
-               {isAdmin && (
+               {renderQuarterLogsBlock(liveMatch, qs, canEditRecord(liveMatch))}
+               {canEditRecord(liveMatch) && (
                   <div className="flex justify-center mt-4 pt-3 border-t border-slate-800/50">
                     <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: liveMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
                       <Plus size={14}/> 누락된 득점 추가
@@ -2054,7 +2061,7 @@ export default function App() {
                    <span className={TEAM_TEXT_COLORS[t2Letter]}>{getTeamDisplayName(liveMatch, t2Letter)}</span>
                </span>
              </div>
-             {renderQuarterLogsBlock(liveMatch, { quarter: liveState.currentQuarter, team1: t1Letter }, isAdmin)}
+             {renderQuarterLogsBlock(liveMatch, { quarter: liveState.currentQuarter, team1: t1Letter }, canEditRecord(liveMatch))}
           </div>
           <div className="h-6 shrink-0 w-full"></div>
         </div>
@@ -2291,19 +2298,19 @@ export default function App() {
               <>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
-                    <span className="text-xs font-black text-slate-300 mb-2">{titlePrefix} 득점왕</span>
+                    <span className="text-[10px] font-bold text-slate-400 mb-2">{titlePrefix} 득점왕</span>
                     <span className="text-2xl mb-1">⚽</span>
                     <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{ wordBreak: 'keep-all' }}>{topScorersText}</span>
                     <span className="text-xs font-bold text-blue-400">{maxGoals > 0 ? `${maxGoals}골` : ''}</span>
                   </div>
                   <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
-                    <span className="text-xs font-black text-slate-300 mb-2">{titlePrefix} 도움왕</span>
+                    <span className="text-[10px] font-bold text-slate-400 mb-2">{titlePrefix} 도움왕</span>
                     <span className="text-2xl mb-1">👟</span>
                     <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{ wordBreak: 'keep-all' }}>{topAssistsText}</span>
                     <span className="text-xs font-bold text-blue-400">{maxAssists > 0 ? `${maxAssists}도움` : ''}</span>
                   </div>
                   <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
-                    <span className="text-xs font-black text-slate-300 mb-2">{titlePrefix} 참석왕</span>
+                    <span className="text-[10px] font-bold text-slate-400 mb-2">{titlePrefix} 참석왕</span>
                     <span className="text-2xl mb-1">🔥</span>
                     <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{ wordBreak: 'keep-all' }}>{topCapsText}</span>
                     <span className="text-xs font-bold text-blue-400">{maxCaps > 0 ? `${maxCaps}회` : ''}</span>
