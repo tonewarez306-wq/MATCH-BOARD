@@ -1543,7 +1543,7 @@ export default function App() {
               )}
               <div className={matchTypeForm === 'external' ? 'w-full' : 'flex-1'}>
                 <label className="block text-xs font-bold text-slate-400 mb-1">총 쿼터 수</label>
-                <input type="number" name="totalQuarters" required defaultValue={matchModal.match?.totalQuarters || 4} min="1" max="10" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
+                <input type="number" name="totalQuarters" required defaultValue={matchModal.match?.totalQuarters || 4} min="1" max="20" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" />
               </div>
             </div>
             <div className="pt-2">
