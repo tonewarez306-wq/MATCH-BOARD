@@ -1340,8 +1340,8 @@ export default function App() {
   const renderShareModal = () => {
     if (!shareModal.isOpen) return null;
     return (
-      <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-[150]">
-        <div className="w-full max-w-sm flex flex-col items-center max-h-[90vh]">
+      <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-[150] overscroll-none touch-none">
+        <div className="w-full max-w-sm flex flex-col items-center max-h-[90vh] touch-auto">
           {shareModal.step === 1 ? (
             <div className="bg-slate-800 border border-slate-700 p-6 rounded-3xl w-full shadow-xl flex flex-col items-center text-center animate-in zoom-in-95">
               <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4 mt-8"></div>
@@ -1353,7 +1353,8 @@ export default function App() {
               <h2 className="text-lg font-black text-white flex items-center gap-1 mb-4 shrink-0">
                 <MessageCircle size={18} className="text-blue-500"/> 미디어 생성 완료
               </h2>
-              <div className="w-full flex-1 overflow-y-auto rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50 hide-scrollbar flex justify-center items-center">
+              {/* 위쪽 잘림 현상 해결(items-start), 당겨서 새로고침 방지(overscroll-contain) 적용 */}
+              <div className="w-full flex-1 overflow-y-auto overscroll-contain rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50 hide-scrollbar flex justify-center items-start">
                 {shareModal.imgUrl && (
                    shareModal.isVideo ? (
                      <video src={shareModal.imgUrl} autoPlay loop playsInline controls className="w-full h-auto rounded-lg shadow-sm" />
@@ -1383,63 +1384,63 @@ export default function App() {
     const actualTeamCount = getMatchTeamCount(shareMatch); 
     const standings = calculateStandings(shareMatch);
     
-    // ★ w-[750px]로 캔버스 가로를 크게 넓히고 폰트 크기 대폭 상향
+    // 캡처 사이즈 대폭 증가: w-[960px] 및 내부 폰트 사이즈 상향 조정
     return (
-      <div className="fixed top-0 left-0 w-[750px] opacity-0 pointer-events-none z-[-100] overflow-visible">
-        <div id="capture-area-hidden" className="bg-slate-900 p-10 w-full flex flex-col items-center text-left text-slate-200 border-none pb-16">
+      <div className="fixed top-0 left-0 w-[960px] opacity-0 pointer-events-none z-[-100] overflow-visible">
+        <div id="capture-area-hidden" className="bg-slate-900 p-12 w-full flex flex-col items-center text-left text-slate-200 border-none pb-20">
           
-          <div className="mb-8 w-full pb-6 border-b border-slate-700">
-            <h3 className="font-black text-white text-[42px] leading-tight mb-3">
+          <div className="mb-10 w-full pb-8 border-b border-slate-700">
+            <h3 className="font-black text-white text-[54px] leading-tight mb-4">
                {shareMatch.matchType === 'external' ? `[교류전] vs ${shareMatch.opponentName}` : shareMatch.matchType === 'futsal' ? `[풋살] ${shareMatch.location}` : `[자체전] ${shareMatch.location}`}
             </h3>
-            <p className="text-slate-400 text-[20px] font-medium">
+            <p className="text-slate-400 text-[26px] font-medium">
                {new Date(shareMatch.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} {formatTimeAmPm(shareMatch.time)} · 참석 {(shareMatch.attendees || []).length}명
             </p>
           </div>
 
-          <div className="w-full bg-slate-800 rounded-3xl p-8 mb-8 border border-slate-700/50 shadow-md">
-             <div className="font-black text-slate-400 text-[20px] border-b border-slate-700/50 pb-4 mb-5">
+          <div className="w-full bg-slate-800 rounded-3xl p-10 mb-10 border border-slate-700/50 shadow-md">
+             <div className="font-black text-slate-400 text-[26px] border-b border-slate-700/50 pb-5 mb-6">
                {shareMatch.isSetTournament ? '🏆 세트 순위표' : '순위표'}
              </div>
              
              {shareMatch.isSetTournament ? (
-                <table className="w-full text-[20px] text-center">
+                <table className="w-full text-[26px] text-center">
                   <thead>
                     <tr className="text-slate-500 font-bold border-b border-slate-700/50">
-                      <th className="pb-5">순위</th><th className="pb-5 text-left">팀</th><th className="pb-5">총점</th><th className="pb-5">1세트</th><th className="pb-5">2세트</th><th className="pb-5">3세트</th><th className="pb-5">득실</th>
+                      <th className="pb-6">순위</th><th className="pb-6 text-left">팀</th><th className="pb-6">총점</th><th className="pb-6">1세트</th><th className="pb-6">2세트</th><th className="pb-6">3세트</th><th className="pb-6">득실</th>
                     </tr>
                   </thead>
                   <tbody>
                     {standings.map((st, i) => (
                       <tr key={st.team} className="border-t border-slate-700/30">
-                        <td className={`py-5 font-black ${i === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{i + 1}</td>
-                        <td className={`py-5 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareMatch, st.team)}</td>
-                        <td className="py-5 text-yellow-400 font-black text-[24px]">{st.pts}</td>
-                        <td className="py-5 text-white">{st.s1Pts || '-'}</td>
-                        <td className="py-5 text-white">{st.s2Pts || '-'}</td>
-                        <td className="py-5 text-white">{st.s3Pts || '-'}</td>
-                        <td className="py-5 text-slate-400">{st.gd > 0 ? `+${st.gd}` : st.gd}</td>
+                        <td className={`py-6 font-black ${i === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{i + 1}</td>
+                        <td className={`py-6 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareMatch, st.team)}</td>
+                        <td className="py-6 text-yellow-400 font-black text-[32px]">{st.pts}</td>
+                        <td className="py-6 text-white">{st.s1Pts || '-'}</td>
+                        <td className="py-6 text-white">{st.s2Pts || '-'}</td>
+                        <td className="py-6 text-white">{st.s3Pts || '-'}</td>
+                        <td className="py-6 text-slate-400">{st.gd > 0 ? `+${st.gd}` : st.gd}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
              ) : (
-                <table className="w-full text-[20px] text-center">
+                <table className="w-full text-[26px] text-center">
                   <thead>
                     <tr className="text-slate-500 font-bold border-b border-slate-700/50">
-                      <th className="pb-5">순위</th><th className="pb-5 text-left">팀</th><th className="pb-5">승점</th><th className="pb-5">승</th><th className="pb-5">무</th><th className="pb-5">패</th><th className="pb-5">득실</th>
+                      <th className="pb-6">순위</th><th className="pb-6 text-left">팀</th><th className="pb-6">승점</th><th className="pb-6">승</th><th className="pb-6">무</th><th className="pb-6">패</th><th className="pb-6">득실</th>
                     </tr>
                   </thead>
                   <tbody>
                     {standings.map((st, i) => (
                       <tr key={st.team} className="border-t border-slate-700/30">
-                        <td className={`py-5 font-black ${i === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{i + 1}</td>
-                        <td className={`py-5 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareMatch, st.team)}</td>
-                        <td className="py-5 text-blue-400 font-black text-[24px]">{st.pts}</td>
-                        <td className="py-5 text-white">{st.w}</td>
-                        <td className="py-5 text-slate-400">{st.d}</td>
-                        <td className="py-5 text-slate-400">{st.l}</td>
-                        <td className="py-5 text-white">{st.gd > 0 ? `+${st.gd}` : st.gd}</td>
+                        <td className={`py-6 font-black ${i === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{i + 1}</td>
+                        <td className={`py-6 text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(shareMatch, st.team)}</td>
+                        <td className="py-6 text-blue-400 font-black text-[32px]">{st.pts}</td>
+                        <td className="py-6 text-white">{st.w}</td>
+                        <td className="py-6 text-slate-400">{st.d}</td>
+                        <td className="py-6 text-slate-400">{st.l}</td>
+                        <td className="py-6 text-white">{st.gd > 0 ? `+${st.gd}` : st.gd}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1447,65 +1448,65 @@ export default function App() {
              )}
           </div>
 
-          <div className="w-full space-y-6 mb-8">
+          <div className="w-full space-y-8 mb-10">
                {(shareMatch.quarterScores || []).length > 0 ? (shareMatch.quarterScores || []).map(qs => {
                  const qLogs = (shareMatch.logs || []).filter(l => l.quarter === qs.quarter);
                  return (
-                   <div key={qs.quarter} className="w-full bg-slate-800 rounded-3xl p-8 border border-slate-700/50 shadow-md">
-                      <div className="relative flex justify-center items-center border-b border-slate-700/50 pb-5 mb-5">
-                        <span className="absolute left-0 font-black text-blue-400 text-[24px]">{qs.quarter}Q</span>
-                        <span className="font-black text-white text-[28px] text-center flex items-center">
+                   <div key={qs.quarter} className="w-full bg-slate-800 rounded-3xl p-10 border border-slate-700/50 shadow-md">
+                      <div className="relative flex justify-center items-center border-b border-slate-700/50 pb-6 mb-6">
+                        <span className="absolute left-0 font-black text-blue-400 text-[32px]">{qs.quarter}Q</span>
+                        <span className="font-black text-white text-[36px] text-center flex items-center">
                           <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(shareMatch, qs.team1)}</span> 
-                          <span className="text-slate-500 mx-6">{qs.score1} : {qs.score2}</span> 
+                          <span className="text-slate-500 mx-8">{qs.score1} : {qs.score2}</span> 
                           <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(shareMatch, qs.team2)}</span>
                         </span>
                       </div>
-                      <div className="space-y-5">
+                      <div className="space-y-6">
                         {qLogs.length > 0 ? qLogs.map(l => {
                           const isLeft = l.teamLetter === qs.team1;
                           return (
-                            <div key={l.id} className={`flex items-start gap-5 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
-                              <span className="text-slate-500 text-[16px] w-16 shrink-0 text-center">{l.time}</span>
+                            <div key={l.id} className={`flex items-start gap-6 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
+                              <span className="text-slate-500 text-[22px] w-20 shrink-0 text-center">{l.time}</span>
                               <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
-                                <div className="text-slate-100 font-bold text-[22px] flex items-center gap-3">
+                                <div className="text-slate-100 font-bold text-[28px] flex items-center gap-3">
                                   <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
-                                  {l.isPK && <span className="text-[14px] bg-red-500/20 text-red-400 px-2 py-1 rounded ml-2 border border-red-500/30">PK</span>}
+                                  {l.isPK && <span className="text-[18px] bg-red-500/20 text-red-400 px-3 py-1.5 rounded ml-3 border border-red-500/30">PK</span>}
                                 </div>
-                                {l.remark && <div className="text-[18px] bg-slate-900/80 px-3 py-2 rounded text-slate-300 mt-2 inline-block border border-slate-700/50">{l.remark}</div>}
+                                {l.remark && <div className="text-[22px] bg-slate-900/80 px-4 py-2.5 rounded text-slate-300 mt-2.5 inline-block border border-slate-700/50">{l.remark}</div>}
                                 {l.assistName && (
-                                  <div className="text-slate-500 mt-1.5 flex items-center gap-2">
-                                    <Footprints size={18} className="text-slate-500"/> <span className="text-[18px]">{l.assistName}</span>
+                                  <div className="text-slate-500 mt-2 flex items-center gap-2">
+                                    <Footprints size={24} className="text-slate-500"/> <span className="text-[22px]">{l.assistName}</span>
                                   </div>
                                 )}
                               </div>
                             </div>
                           )
-                        }) : <div className="text-[18px] text-slate-500 text-center py-5 italic">득점 기록이 없습니다.</div>}
+                        }) : <div className="text-[22px] text-slate-500 text-center py-6 italic">득점 기록이 없습니다.</div>}
                       </div>
                    </div>
                  )
                }) : (
-                 <div className="text-[18px] text-slate-500 text-center py-8 bg-slate-800 rounded-3xl border border-slate-700/50 shadow-md">아직 기록이 없습니다.</div>
+                 <div className="text-[22px] text-slate-500 text-center py-10 bg-slate-800 rounded-3xl border border-slate-700/50 shadow-md">아직 기록이 없습니다.</div>
                )}
           </div>
 
-          <div className="w-full bg-slate-800 rounded-3xl p-8 border border-slate-700/50 shadow-md">
-              <div className="text-[20px] text-slate-400 mb-6 font-black border-b border-slate-700/50 pb-4 flex justify-between items-end">
+          <div className="w-full bg-slate-800 rounded-3xl p-10 border border-slate-700/50 shadow-md">
+              <div className="text-[26px] text-slate-400 mb-8 font-black border-b border-slate-700/50 pb-5 flex justify-between items-end">
                   <span>참석자 최종 편성 명단</span>
               </div>
-              <div className="space-y-8">
+              <div className="space-y-10">
                 {TEAM_LETTERS.slice(0, actualTeamCount).map(teamLetter => {
                   const teamPlayers = players.filter(p => (shareMatch.attendees || []).includes(p.id) && ((shareMatch.teamAssignments || {})[p.id]) === teamLetter);
                   if(teamPlayers.length === 0) return null;
                   return (
                     <div key={teamLetter}>
-                      <div className={`text-[18px] font-black mb-4 ${TEAM_TEXT_COLORS[teamLetter]}`}>
+                      <div className={`text-[24px] font-black mb-5 ${TEAM_TEXT_COLORS[teamLetter]}`}>
                         {getTeamDisplayName(shareMatch, teamLetter)}
                       </div>
-                      <div className="flex flex-wrap gap-3">
+                      <div className="flex flex-wrap gap-4">
                         {teamPlayers.map(p => (
-                          <div key={p.id} className="bg-slate-900 px-4 py-3 rounded-full border border-slate-600/50 shadow-sm flex items-center">
-                            <span className="font-bold text-white text-[18px] tracking-wide">{p.name}</span>
+                          <div key={p.id} className="bg-slate-900 px-5 py-3.5 rounded-full border border-slate-600/50 shadow-sm flex items-center">
+                            <span className="font-bold text-white text-[24px] tracking-wide">{p.name}</span>
                           </div>
                         ))}
                       </div>
