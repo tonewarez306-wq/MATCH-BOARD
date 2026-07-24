@@ -6,7 +6,7 @@ import {
   Calendar, Users, BarChart2, Plus, 
   MapPin, Trophy, Shield, 
   ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings, Target, Undo, Redo,
-  MousePointer, ArrowUpRight, TrendingUp, Square, XCircle, Video, PlayCircle, RotateCcw
+  MousePointer, ArrowUpRight, TrendingUp, Square, XCircle, Video, PlayCircle, RotateCcw, Camera
 } from 'lucide-react';
 
 // ==========================================
@@ -287,6 +287,10 @@ export default function App() {
   const [draggingToken, setDraggingToken] = useState(null);
   const [tokenEditModal, setTokenEditModal] = useState({ isOpen: false, token: null });
   
+  // 갤러리 팝업 관련 상태
+  const [galleryModal, setGalleryModal] = useState({ isOpen: false, match: null, currentIndex: 0 });
+  
+  // 애니메이션 관련 상태
   const [animationFrames, setAnimationFrames] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAutoRecording, setIsAutoRecording] = useState(false); 
@@ -306,9 +310,18 @@ export default function App() {
   const liveMatch = useMemo(() => matches.find(m => m.id === liveMatchId), [matches, liveMatchId]);
   const detailMatch = useMemo(() => matches.find(m => m.id === detailModalMatchId), [matches, detailModalMatchId]);
 
+  // ★ 경기 기록(수정) 권한 체크: 
+  // 1. 관리자는 항상 가능
+  // 2. '종료된(completed)' 경기는 오직 관리자만 수정 가능
+  // 3. '예정/진행중'인 경기 중 시간이 지난 경우 일반 유저도 라이브 기록 가능
   const checkCanEdit = (match) => {
     if (isAdmin) return true;
     if (!match) return false;
+    
+    // 종료된 경기라면 일반 유저는 무조건 수정 불가
+    if (match.status === 'completed') return false;
+
+    // 아직 종료되지 않은 경기(진행 중) 중, 경기 시간이 지난 경우에만 일반 유저 기록 허용
     const safeDate = match.date.replace(/-/g, '/');
     const matchDateTime = new Date(`${safeDate} ${match.time}`);
     return new Date() >= matchDateTime;
@@ -1031,6 +1044,53 @@ export default function App() {
     saveHistory(newTokens); setTokenEditModal({ isOpen: false, token: null });
   };
 
+  // ==========================================
+  // 사진 갤러리 관련 함수
+  // ==========================================
+  const handlePhotoUpload = async (e, match) => {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+    if (isProcessing) return; setIsProcessing(true);
+    try {
+      const newPhotos = [...(match.photos || [])];
+      for (let i = 0; i < files.length; i++) {
+        // 모바일 및 DB 용량 최적화를 위해 800x800 사이즈로 자동 압축
+        const compressed = await resizeImage(files[i], 800, 800);
+        newPhotos.push({ id: `photo_${Date.now()}_${i}`, url: compressed });
+      }
+      await setDoc(doc(db, 'matches', match.id), { ...match, photos: newPhotos });
+      setSystemAlert({ isOpen: true, message: `${files.length}장의 사진이 등록되었습니다.` });
+    } catch (err) {
+      setSystemAlert({ isOpen: true, message: '사진 업로드 중 오류가 발생했습니다.' });
+    } finally {
+      setIsProcessing(false);
+      e.target.value = ''; // input 초기화
+    }
+  };
+
+  const requestDeletePhoto = (photoId) => {
+    if (!isAdmin) return;
+    setSystemConfirm({
+      isOpen: true,
+      message: '이 사진을 정말 삭제하시겠습니까?',
+      onConfirm: async () => {
+        if(isProcessing) return; setIsProcessing(true);
+        try {
+          const m = matches.find(match => match.id === galleryModal.match.id);
+          if(!m) return;
+          const newPhotos = (m.photos || []).filter(p => p.id !== photoId);
+          await setDoc(doc(db, 'matches', m.id), { ...m, photos: newPhotos });
+          
+          if (newPhotos.length === 0) {
+            setGalleryModal({ isOpen: false, match: null, currentIndex: 0 });
+          } else {
+            setGalleryModal(prev => ({ ...prev, match: { ...prev.match, photos: newPhotos }, currentIndex: Math.min(prev.currentIndex, newPhotos.length - 1) }));
+          }
+        } finally { setIsProcessing(false); }
+      }
+    });
+  };
+
   const toggleAutoRecord = () => {
     if (!isAutoRecording) {
       setAnimationFrames([{ tokens: JSON.parse(JSON.stringify(tacticTokens)), drawings: JSON.parse(JSON.stringify(drawings)) }]);
@@ -1267,7 +1327,7 @@ export default function App() {
   const renderSystemModals = () => (
     <>
       {systemAlert.isOpen && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[210] p-4">
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[300] p-4">
           <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
             <p className="text-white font-bold mb-6 whitespace-pre-line">{systemAlert.message}</p>
             <button onClick={() => setSystemAlert({isOpen: false, message: ''})} className="w-full py-3 bg-blue-500 hover:bg-blue-400 transition text-white rounded-xl font-bold">확인</button>
@@ -1275,7 +1335,7 @@ export default function App() {
         </div>
       )}
       {systemConfirm.isOpen && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[210] p-4">
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[300] p-4">
           <div className="bg-slate-800 p-6 rounded-2xl max-w-sm w-full border border-slate-700 shadow-xl text-center animate-in fade-in zoom-in-95 duration-200">
             <p className="text-white font-bold mb-6 whitespace-pre-line">{systemConfirm.message}</p>
             <div className="flex gap-3">
@@ -1286,7 +1346,7 @@ export default function App() {
         </div>
       )}
       {isProcessing && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200]">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[300]">
           <div className="bg-slate-800 p-6 rounded-3xl flex flex-col items-center shadow-xl border border-slate-700 animate-in fade-in zoom-in-95">
             <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
             <p className="text-white font-bold text-sm tracking-wide">데이터 처리 중...</p>
@@ -1295,6 +1355,48 @@ export default function App() {
       )}
     </>
   );
+
+  const renderShareModal = () => {
+    if (!shareModal.isOpen) return null;
+    return (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[200] animate-in fade-in">
+        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl flex flex-col items-center text-center">
+          <div className="w-full flex justify-between items-center mb-4">
+            <h2 className="text-xl font-black text-white flex items-center gap-2">
+              <Share2 className="text-yellow-500" /> 공유하기
+            </h2>
+            <button onClick={() => setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false })} className="text-slate-400 hover:text-white p-2">
+              <X size={24} />
+            </button>
+          </div>
+          
+          {shareModal.step === 1 ? (
+            <div className="py-10 flex flex-col items-center">
+              <div className="w-12 h-12 border-4 border-yellow-500/20 border-t-yellow-500 rounded-full animate-spin mb-4"></div>
+              <p className="text-slate-300 font-bold">이미지를 생성하고 있습니다...</p>
+              <p className="text-xs text-slate-500 mt-2">잠시만 기다려주세요.</p>
+            </div>
+          ) : (
+            <div className="w-full flex flex-col items-center">
+              <div className="w-full bg-slate-900 rounded-xl p-2 mb-4 border border-slate-700 max-h-[40vh] overflow-y-auto overscroll-contain flex justify-start flex-col">
+                {shareModal.isVideo ? (
+                   <video src={shareModal.imgUrl} controls autoPlay loop className="max-w-full h-auto rounded-lg mx-auto" />
+                ) : (
+                   <img src={shareModal.imgUrl} alt="Share preview" className="max-w-full h-auto rounded-lg object-contain mx-auto" />
+                )}
+              </div>
+              <p className="text-[11px] text-yellow-400 font-bold mb-4 bg-yellow-500/10 px-3 py-1.5 rounded-lg border border-yellow-500/20">
+                {shareModal.isVideo ? "영상이 준비되었습니다!" : "이미지가 준비되었습니다!"}
+              </p>
+              <button onClick={doActualShare} className="w-full py-4 bg-[#FEE500] hover:bg-[#FEE500]/90 text-slate-900 rounded-xl font-black text-lg transition flex justify-center items-center gap-2 shadow-lg">
+                <MessageCircle size={22}/> {shareModal.isVideo ? "영상 전송하기" : "결과 전송하기"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const renderQuarterEditModal = () => {
     if (!quarterEditModal.isOpen || !quarterEditModal.match || !quarterEditModal.quarterScore) return null;
@@ -1338,41 +1440,55 @@ export default function App() {
     );
   };
 
-  const renderShareModal = () => {
-    if (!shareModal.isOpen) return null;
+  const renderGalleryModal = () => {
+    if (!galleryModal.isOpen || !galleryModal.match || !(galleryModal.match.photos?.length > 0)) return null;
+    const photos = galleryModal.match.photos;
+    const currentIndex = galleryModal.currentIndex;
+    const currentPhoto = photos[currentIndex];
+
+    const handleNext = (e) => { if(e) e.stopPropagation(); setGalleryModal(p => ({ ...p, currentIndex: (p.currentIndex + 1) % photos.length })); };
+    const handlePrev = (e) => { if(e) e.stopPropagation(); setGalleryModal(p => ({ ...p, currentIndex: (p.currentIndex - 1 + photos.length) % photos.length })); };
+
+    // 스와이프 로직
+    const handleTouchStart = (e) => { pointerDownInfo.current = { ...pointerDownInfo.current, startX: e.touches[0].clientX }; };
+    const handleTouchEnd = (e) => {
+      const endX = e.changedTouches[0].clientX;
+      const diff = pointerDownInfo.current.startX - endX;
+      if (diff > 50) handleNext();
+      else if (diff < -50) handlePrev();
+    };
+
     return (
-      <div className="fixed inset-0 bg-black/90 flex justify-center items-center p-4 z-[150] overscroll-none touch-none">
-        <div className="w-full max-w-sm flex flex-col items-center max-h-[90vh] touch-auto">
-          {shareModal.step === 1 ? (
-            <div className="bg-slate-800 border border-slate-700 p-6 rounded-3xl w-full shadow-xl flex flex-col items-center text-center animate-in zoom-in-95">
-              <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4 mt-8"></div>
-              <h2 className="text-lg font-black text-white mb-1">리포트 미디어 생성 중...</h2>
-              <p className="text-sm text-slate-400 font-medium mb-8">화면을 렌더링하고 있습니다.</p>
-            </div>
-          ) : (
-            <div className="bg-slate-800 border border-slate-700 p-5 rounded-3xl w-full shadow-xl flex flex-col items-center text-center flex-1 min-h-0 animate-in fade-in">
-              <h2 className="text-lg font-black text-white flex items-center gap-1 mb-4 shrink-0">
-                <MessageCircle size={18} className="text-blue-500"/> 미디어 생성 완료
-              </h2>
-              {/* 위쪽 잘림 현상 해결(items-start), 당겨서 새로고침 방지(overscroll-contain) 적용 */}
-              <div className="w-full flex-1 overflow-y-auto overscroll-contain rounded-xl bg-slate-900 p-2 shadow-inner border border-slate-700/50 hide-scrollbar flex justify-center items-start">
-                {shareModal.imgUrl && (
-                   shareModal.isVideo ? (
-                     <video src={shareModal.imgUrl} autoPlay loop playsInline controls className="w-full h-auto rounded-lg shadow-sm" />
-                   ) : (
-                     <img src={shareModal.imgUrl} alt="Preview" className="w-full h-auto rounded-lg shadow-sm" />
-                   )
-                )}
-              </div>
-              <div className="w-full mt-5 space-y-3 shrink-0">
-                <button onClick={doActualShare} className="w-full py-4 bg-[#FEE500] text-slate-900 rounded-2xl font-black text-lg hover:bg-[#FEE500]/90 transition shadow-lg flex items-center justify-center gap-2">
-                  <Share2 size={20} /> 공유 및 저장
-                </button>
-                <button onClick={() => setShareModal({isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false})} className="w-full py-3 text-slate-400 font-bold hover:text-white transition bg-slate-700/50 rounded-xl border border-slate-700">
-                  닫기
-                </button>
-              </div>
-            </div>
+      <div className="fixed inset-0 bg-black/95 z-[250] flex flex-col animate-in fade-in touch-none overscroll-none">
+        <div className="flex justify-between items-center p-4 text-white shrink-0">
+          <div className="text-sm font-bold bg-slate-800 px-4 py-1.5 rounded-full border border-slate-700 shadow-sm">
+            {currentIndex + 1} / {photos.length}
+          </div>
+          <div className="flex gap-2 items-center">
+            {isAdmin && (
+              <button onClick={() => requestDeletePhoto(currentPhoto.id)} className="text-slate-400 hover:text-red-400 p-3 transition bg-slate-800 rounded-full border border-slate-700">
+                <Trash2 size={20}/>
+              </button>
+            )}
+            <button onClick={() => setGalleryModal({isOpen: false, match: null, currentIndex: 0})} className="text-slate-400 hover:text-white p-3 transition bg-slate-800 rounded-full border border-slate-700 ml-2">
+              <X size={24}/>
+            </button>
+          </div>
+        </div>
+        
+        <div 
+          className="flex-1 flex justify-center items-center relative overflow-hidden"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
+          {photos.length > 1 && (
+            <button onClick={handlePrev} className="absolute left-2 p-3 bg-black/30 text-white rounded-full hover:bg-black/60 z-10 backdrop-blur-sm"><ChevronLeft size={32}/></button>
+          )}
+          
+          <img src={currentPhoto.url} className="max-w-full max-h-full object-contain select-none pointer-events-none transition-transform duration-300" alt="Gallery" />
+          
+          {photos.length > 1 && (
+            <button onClick={handleNext} className="absolute right-2 p-3 bg-black/30 text-white rounded-full hover:bg-black/60 z-10 backdrop-blur-sm"><ChevronRight size={32}/></button>
           )}
         </div>
       </div>
@@ -2556,9 +2672,9 @@ export default function App() {
                                <span className="text-[10px] text-slate-500">{m.date.split('-')[1]}월</span>
                                <span className="text-lg font-black text-white">{m.date.split('-')[2]}</span>
                            </div>
-                           <div className="flex-1 min-w-0">
+                           <div className="flex-1 min-w-0 pr-1">
                                <div className="flex items-center gap-2 mb-0.5">
-                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${m.status === 'completed' ? 'bg-slate-700 text-slate-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${m.status === 'completed' ? 'bg-slate-700 text-slate-400' : 'bg-blue-500/20 text-blue-400'}`}>
                                         {m.status === 'completed' ? '종료' : '예정'}
                                     </span>
                                     <span className="text-sm font-bold text-white truncate">{m.location}</span>
@@ -2566,6 +2682,26 @@ export default function App() {
                                <div className="text-[11px] text-slate-400 truncate">
                                     {formatTimeAmPm(m.time)} • {m.matchType === 'external' ? `vs ${m.opponentName}` : m.matchType === 'futsal' ? `${m.teamCount || 2}팀 풋살` : `${m.teamCount || 2}팀 자체전`}
                                </div>
+                           </div>
+                           <div className="flex items-center gap-1.5 shrink-0 pl-2 border-l border-slate-700/50">
+                               {(m.photos && m.photos.length > 0) && (
+                                   <div 
+                                       onClick={() => setGalleryModal({isOpen: true, match: m, currentIndex: 0})}
+                                       className="relative w-11 h-11 rounded-lg overflow-hidden border border-slate-600 cursor-pointer shadow-sm flex-shrink-0"
+                                   >
+                                       <img src={m.photos[0].url} className="w-full h-full object-cover" alt="thumb" />
+                                       {m.photos.length > 1 && (
+                                           <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-[10px] font-bold backdrop-blur-[1px]">
+                                               +{m.photos.length - 1}
+                                           </div>
+                                       )}
+                                   </div>
+                               )}
+                               <label className="w-11 h-11 bg-slate-700 hover:bg-slate-600 rounded-lg flex flex-col items-center justify-center cursor-pointer transition shadow-sm border border-slate-600 flex-shrink-0">
+                                   <Camera size={18} className="text-slate-400 mb-0.5" />
+                                   <span className="text-[7px] text-slate-300 font-bold tracking-tighter">사진추가</span>
+                                   <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handlePhotoUpload(e, m)} />
+                               </label>
                            </div>
                         </div>
                     ))
@@ -2930,6 +3066,7 @@ export default function App() {
       {renderGoalFlowModal()}
       {renderLogEditModal()}
       {renderQuarterEditModal()}
+      {renderGalleryModal()}
       {renderHiddenCaptureArea()}
     </div>
   );
