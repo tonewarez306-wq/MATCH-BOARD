@@ -398,6 +398,7 @@ export default function App() {
     <style>{`
       *::-webkit-scrollbar { display: none !important; width: 0 !important; }
       * { -ms-overflow-style: none !important; scrollbar-width: none !important; }
+      body, html { overscroll-behavior-y: none; overscroll-behavior-x: none; } /* ★ 모바일 브라우저 당겨서 새로고침 완벽 차단 */
       .tactic-board { touch-action: none; }
       input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
       input[type="number"] { -moz-appearance: textfield; }
