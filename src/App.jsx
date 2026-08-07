@@ -431,14 +431,12 @@ export default function App() {
 
   const globalStyles = (
     <style>{`
-      body { overscroll-behavior-y: none; }
+      html, body { overscroll-behavior: none !important; overscroll-behavior-y: none !important; }
       *::-webkit-scrollbar { display: none !important; width: 0 !important; }
       * { -ms-overflow-style: none !important; scrollbar-width: none !important; }
-      .tactic-board { touch-action: none; }
       input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
       input[type="number"] { -moz-appearance: textfield; }
       .will-change-transform { will-change: transform, left, top; }
-      input, select, textarea { font-size: 16px !important; }
     `}</style>
   );
 
@@ -447,20 +445,30 @@ export default function App() {
       if (currentUser) setUser(currentUser);
       else signInAnonymously(auth).catch(console.error);
     });
-    const unsubTeams = onSnapshot(collection(db, 'teams'), snap => {
-      setTeams(snap.docs.map(d => d.data())); setIsLoaded(true); 
-    });
-    return () => { unsubscribeAuth(); unsubTeams(); };
+    return () => unsubscribeAuth();
   }, []);
 
   useEffect(() => {
-    if (!activeTeamId) { setPlayers([]); setMatches([]); return; }
+    if (!user) return; // 인증이 완료된 후에만 데이터베이스 접근 허용
+    const unsubTeams = onSnapshot(collection(db, 'teams'), snap => {
+      setTeams(snap.docs.map(d => d.data())); setIsLoaded(true); 
+    }, (error) => {
+      console.error("Firestore Teams Snapshot Error:", error);
+      if (error.code === 'permission-denied') {
+        setSystemAlert({ isOpen: true, message: '데이터베이스 접근 권한이 거부되었습니다.\nFirebase Console에서 Firestore Security Rules를 확인해 주세요.' });
+      }
+    });
+    return () => unsubTeams();
+  }, [user]);
+
+  useEffect(() => {
+    if (!activeTeamId || !user) { setPlayers([]); setMatches([]); return; }
     const qPlayers = query(collection(db, 'players'), where('teamId', '==', activeTeamId));
-    const unsubPlayers = onSnapshot(qPlayers, snap => setPlayers(snap.docs.map(d => d.data())));
+    const unsubPlayers = onSnapshot(qPlayers, snap => setPlayers(snap.docs.map(d => d.data())), console.error);
     const qMatches = query(collection(db, 'matches'), where('teamId', '==', activeTeamId));
-    const unsubMatches = onSnapshot(qMatches, snap => setMatches(snap.docs.map(d => d.data())));
+    const unsubMatches = onSnapshot(qMatches, snap => setMatches(snap.docs.map(d => d.data())), console.error);
     return () => { unsubPlayers(); unsubMatches(); };
-  }, [activeTeamId]);
+  }, [activeTeamId, user]);
 
   useEffect(() => {
     return () => { if (playbackRef.current) cancelAnimationFrame(playbackRef.current); };
@@ -2518,7 +2526,7 @@ export default function App() {
             <div className="flex-1 w-full flex justify-center items-center min-h-0 relative pb-6 mt-1">
               <div 
                 ref={boardRef}
-                style={{ maxHeight: '100%', maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: 'none' }}
+                style={{ maxHeight: '100%', maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: currentTool === 'move' ? 'auto' : 'none' }}
                 onPointerDown={handleBoardPointerDown} onPointerMove={handleBoardPointerMove} onPointerUp={handleBoardPointerUp} onPointerLeave={handleBoardPointerUp}
                 className={`relative bg-emerald-700 border-2 ${isAutoRecording ? 'border-red-500 shadow-[inset_0_0_20px_rgba(239,68,68,0.7)]' : isPlaying ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'border-white/80 shadow-inner'} overflow-hidden tactic-board select-none w-full mx-auto transition-colors duration-300`}
               >
@@ -2566,7 +2574,7 @@ export default function App() {
                       dragStartTokensRef.current = [...tacticTokens];
                       setDraggingToken(t.id);
                     }}
-                    style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)' }}
+                    style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
                     className={`absolute rounded-full flex flex-col items-center justify-center font-black transition-transform duration-75 text-[10px] sm:text-[11px] will-change-transform 
                       ${isPlaying ? 'pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
                       ${currentTool !== 'move' && !isPlaying ? 'pointer-events-none z-20' : ''}
