@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { getStorage, ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
 import { 
   Calendar, Users, BarChart2, Plus, 
   MapPin, Trophy, Shield, 
@@ -22,6 +23,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 const TEAM_LETTERS = ['A', 'B', 'C', 'D'];
 const TEAM_COLORS = {
@@ -457,14 +459,12 @@ export default function App() {
       if (currentUser) {
          setUser(currentUser);
          
-         // 1. 로그인 인증이 완료된 후에만 팀 목록을 불러오도록 수정
          unsubTeams = onSnapshot(collection(db, 'teams'), snap => {
            setTeams(snap.docs.map(d => d.data())); setIsLoaded(true); 
          }, error => {
            console.error("Teams fetch error:", error);
          });
 
-         // 2. 선택된 팀이 있다면 해당 팀의 선수와 경기 목록 불러오기
          if (activeTeamId) {
             const qPlayers = query(collection(db, 'players'), where('teamId', '==', activeTeamId));
             unsubPlayers = onSnapshot(qPlayers, snap => setPlayers(snap.docs.map(d => d.data())));
@@ -542,6 +542,68 @@ export default function App() {
 
   const logout = () => { setActiveTeamId(null); setIsAdmin(false); setAppState('login'); setAuthModal({ isOpen: false, type: '', targetTeam: null }); };
 
+  const handleUploadPhotos = async (e, matchId) => {
+    const files = e.target.files; 
+    if (!files || files.length === 0) return;
+    setIsProcessing(true);
+    try {
+      const match = matches.find(m => m.id === matchId);
+      let newPhotos = [...(match.photos || [])];
+      
+      for (let i = 0; i < files.length; i++) {
+        // 이미지를 캔버스로 리사이징 후 dataURL (Base64) 획득
+        const resized = await resizeImage(files[i], 1200, 1200);
+        
+        // Firestore에 직접 Base64를 넣으면 1MB 제한에 걸리므로 Storage 사용
+        const photoId = Date.now() + i;
+        const storagePath = `matches/${matchId}/photo_${photoId}.jpg`;
+        const storageRef = ref(storage, storagePath);
+        
+        // Data URL을 Storage에 업로드
+        await uploadString(storageRef, resized, 'data_url');
+        const downloadUrl = await getDownloadURL(storageRef);
+        
+        newPhotos.push({ id: photoId, url: downloadUrl, storagePath: storagePath });
+      }
+      await setDoc(doc(db, 'matches', matchId), { ...match, photos: newPhotos });
+    } catch(err) { 
+      console.error("Photo upload error: ", err);
+      setSystemAlert({ isOpen: true, message: '사진 업로드 중 오류가 발생했습니다.\n(용량 초과 또는 권한 문제)' }); 
+    } finally { 
+      setIsProcessing(false); 
+      e.target.value = ''; // 동일한 파일 다시 업로드 가능하도록 초기화
+    }
+  };
+
+  const requestDeletePhoto = (photoId) => {
+    setSystemConfirm({ isOpen: true, message: '이 사진을 삭제하시겠습니까?', onConfirm: async () => {
+      setIsProcessing(true);
+      try {
+        const match = matches.find(m => m.id === galleryModal.matchId);
+        const photoToDelete = (match.photos || []).find(p => p.id === photoId);
+        
+        // Storage에 저장된 파일인 경우 삭제 시도
+        if (photoToDelete && photoToDelete.storagePath) {
+            try {
+                await deleteObject(ref(storage, photoToDelete.storagePath));
+            } catch (err) {
+                console.warn("Storage delete failed, proceeding with DB update", err);
+            }
+        }
+        
+        const newPhotos = (match.photos || []).filter(p => p.id !== photoId);
+        await setDoc(doc(db, 'matches', match.id), { ...match, photos: newPhotos });
+        if (newPhotos.length === 0) setGalleryModal({ isOpen: false, photos: [], currentIndex: 0, matchId: null });
+        else setGalleryModal(prev => ({ ...prev, photos: newPhotos, currentIndex: Math.max(0, prev.currentIndex - 1) }));
+      } catch (err) {
+        console.error(err);
+        setSystemAlert({ isOpen: true, message: '사진 삭제 중 오류가 발생했습니다.' });
+      } finally { 
+        setIsProcessing(false); 
+      }
+    }});
+  };
+
   const saveMatch = async (e) => {
     e.preventDefault(); if(isProcessing) return; setIsProcessing(true);
     try {
@@ -600,33 +662,6 @@ export default function App() {
     }
   };
 
-  const handleUploadPhotos = async (e, matchId) => {
-    const files = e.target.files; if (!files || files.length === 0) return;
-    setIsProcessing(true);
-    try {
-      const match = matches.find(m => m.id === matchId);
-      let newPhotos = [...(match.photos || [])];
-      for (let i = 0; i < files.length; i++) {
-        const resized = await resizeImage(files[i], 1200, 1200);
-        newPhotos.push({ id: Date.now() + i, url: resized });
-      }
-      await setDoc(doc(db, 'matches', matchId), { ...match, photos: newPhotos });
-    } catch(err) { setSystemAlert({ isOpen: true, message: '사진 업로드 중 오류가 발생했습니다.' }); } finally { setIsProcessing(false); }
-  };
-
-  const requestDeletePhoto = (photoId) => {
-    setSystemConfirm({ isOpen: true, message: '이 사진을 삭제하시겠습니까?', onConfirm: async () => {
-      setIsProcessing(true);
-      try {
-        const match = matches.find(m => m.id === galleryModal.matchId);
-        const newPhotos = (match.photos || []).filter(p => p.id !== photoId);
-        await setDoc(doc(db, 'matches', match.id), { ...match, photos: newPhotos });
-        if (newPhotos.length === 0) setGalleryModal({ isOpen: false, photos: [], currentIndex: 0, matchId: null });
-        else setGalleryModal(prev => ({ ...prev, photos: newPhotos, currentIndex: Math.max(0, prev.currentIndex - 1) }));
-      } finally { setIsProcessing(false); }
-    }});
-  };
-  
   let touchStartX = 0;
   const handleTouchStart = (e) => { touchStartX = e.changedTouches[0].screenX; };
   const handleTouchEnd = (e) => {
@@ -2478,10 +2513,12 @@ export default function App() {
                                   {m.photos.length > 1 && <div className="absolute bottom-0 right-0 bg-black/70 text-[9px] font-black text-white px-1 leading-tight">+{m.photos.length - 1}</div>}
                                </div>
                                )}
-                               <label className="text-slate-400 hover:text-white p-2 cursor-pointer bg-slate-700 rounded-lg border border-slate-600 transition" onClick={e => e.stopPropagation()}>
-                                  <Plus size={16}/>
-                                  <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleUploadPhotos(e, m.id)} />
-                               </label>
+                               <div onClick={e => e.stopPropagation()} className="shrink-0 flex items-center justify-center">
+                                 <label className="text-slate-400 hover:text-white cursor-pointer bg-slate-700 rounded-lg border border-slate-600 transition flex items-center justify-center w-10 h-10">
+                                    <Plus size={16}/>
+                                    <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleUploadPhotos(e, m.id)} onClick={e => e.stopPropagation()} />
+                                 </label>
+                               </div>
                            </div>
                         </div>
                     ))
