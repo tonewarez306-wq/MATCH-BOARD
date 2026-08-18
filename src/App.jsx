@@ -380,25 +380,38 @@ export default function App() {
 
     try {
       const match = matches.find(m => m.id === matchId); let newPhotos = [...(match.photos || [])];
+      
       if (newPhotos.length + files.length > 30) {
         setSystemAlert({ isOpen: true, message: `쾌적한 앱 사용을 위해 경기당 사진은\n최대 30장까지만 등록할 수 있습니다.\n\n(현재 ${newPhotos.length}장 / 추가 시도 ${files.length}장)` });
         setIsProcessing(false); e.target.value = ''; return;
       }
+      
       for (let i = 0; i < files.length; i++) { 
         const resized = await resizeImage(files[i], 1920, 1920, 0.9); 
         const base64Data = resized.split(',')[1]; 
+
         const formData = new FormData();
         formData.append('image', base64Data);
-        const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, { method: 'POST', body: formData });
+
+        const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+          method: 'POST',
+          body: formData
+        });
+
         const result = await response.json();
-        if (result.success) { newPhotos.push({ id: Date.now() + i + Math.floor(Math.random() * 1000), url: result.data.url }); } 
-        else { throw new Error("ImgBB API 업로드 실패"); }
+        if (result.success) {
+           newPhotos.push({ id: Date.now() + i + Math.floor(Math.random() * 1000), url: result.data.url }); 
+        } else {
+           throw new Error("ImgBB API 업로드 실패");
+        }
       }
       await setDoc(doc(db, 'matches', matchId), { ...match, photos: newPhotos });
     } catch(err) { 
       console.error(err); 
       setSystemAlert({ isOpen: true, message: '서버로 사진을 전송하는 중 오류가 발생했습니다.\n네트워크 상태를 확인해주세요.' }); 
-    } finally { setIsProcessing(false); e.target.value = ''; }
+    } finally { 
+      setIsProcessing(false); e.target.value = ''; 
+    }
   };
 
   const requestDeletePhoto = (photoId) => {
@@ -1427,6 +1440,7 @@ export default function App() {
           </div>
         )}
 
+        {}
         {activeTab === 'schedule' && (
           <div className="space-y-6 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar">
             <h2 className="text-xl font-black text-white">팀 스케쥴</h2>
@@ -1563,6 +1577,7 @@ export default function App() {
           </div>
         )}
 
+        {}
         {activeTab === 'tactics' && (
           <div className="animate-in fade-in flex-1 flex flex-col min-h-0 relative pb-2 -mx-2 px-2">
             <div className="flex justify-between items-center shrink-0 mb-3">
@@ -1707,6 +1722,7 @@ export default function App() {
           </div>
         )}
 
+        {}
         {activeTab === 'roster' && (
           <div className="space-y-4 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar">
             <div className="flex justify-between items-center">
@@ -1759,6 +1775,7 @@ export default function App() {
         )}
       </main>
 
+      {}
       <nav className="fixed bottom-0 w-full max-w-md bg-slate-900 border-t border-slate-800 flex justify-around p-2 pb-6 z-[60]">
         <button onClick={() => setActiveTab('matches')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'matches' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}><List size={20} className="mb-1" /><span className="text-[10px] font-bold">경기</span></button>
         <button onClick={() => setActiveTab('schedule')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'schedule' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}><Calendar size={20} className="mb-1" /><span className="text-[10px] font-bold">일정</span></button>
@@ -1792,8 +1809,14 @@ export default function App() {
             </div>
           </div>
           <div className="flex-1 flex items-center justify-center relative overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+             <div className="hidden">
+               {galleryModal.currentIndex > 0 && <img src={(galleryModal.photos||[])[galleryModal.currentIndex - 1]?.url} alt="preload-prev" />}
+               {galleryModal.currentIndex < (galleryModal.photos||[]).length - 1 && <img src={(galleryModal.photos||[])[galleryModal.currentIndex + 1]?.url} alt="preload-next1" />}
+               {galleryModal.currentIndex < (galleryModal.photos||[]).length - 2 && <img src={(galleryModal.photos||[])[galleryModal.currentIndex + 2]?.url} alt="preload-next2" />}
+             </div>
+
              {galleryModal.currentIndex > 0 && ( <button onClick={() => setGalleryModal(p => ({...p, currentIndex: p.currentIndex - 1}))} className="absolute left-4 p-3 bg-black/50 text-white rounded-full z-10 hidden sm:block"><ChevronLeft size={24}/></button> )}
-             <img src={(galleryModal.photos||[])[galleryModal.currentIndex]?.url} alt="gallery" className="max-w-full max-h-full object-contain animate-in fade-in duration-300" />
+             <img key={(galleryModal.photos||[])[galleryModal.currentIndex]?.id} src={(galleryModal.photos||[])[galleryModal.currentIndex]?.url} alt="gallery" className="max-w-full max-h-full object-contain animate-in fade-in zoom-in-95 duration-200" />
              {galleryModal.currentIndex < (galleryModal.photos||[]).length - 1 && ( <button onClick={() => setGalleryModal(p => ({...p, currentIndex: p.currentIndex + 1}))} className="absolute right-4 p-3 bg-black/50 text-white rounded-full z-10 hidden sm:block"><ChevronRight size={24}/></button> )}
           </div>
         </div>
