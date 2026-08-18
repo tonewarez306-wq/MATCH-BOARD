@@ -168,11 +168,13 @@ export default function App() {
   const [adminPassword, setAdminPassword] = useState('admin');
   const [isLoaded, setIsLoaded] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
+
   const [teams, setTeams] = useState([]);
   const [activeTeamId, setActiveTeamId] = useState(null);
   const [players, setPlayers] = useState([]);
   const [matches, setMatches] = useState([]);
   const [memos, setMemos] = useState({});
+
   const [viewDate, setViewDate] = useState(new Date());
 
   const [systemAlert, setSystemAlert] = useState({ isOpen: false, message: '' });
@@ -217,6 +219,7 @@ export default function App() {
   const [futureState, setFutureState] = useState([]);
   const [draggingToken, setDraggingToken] = useState(null);
   const [tokenEditModal, setTokenEditModal] = useState({ isOpen: false, token: null });
+  
   const [animationFrames, setAnimationFrames] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAutoRecording, setIsAutoRecording] = useState(false); 
@@ -359,6 +362,7 @@ export default function App() {
       await setDoc(doc(db, 'players', playerId), newPlayer); setRosterModal({ isOpen: false, player: null });
     } finally { setIsProcessing(false); }
   };
+
   const requestDeleteRoster = (id) => { setSystemConfirm({ isOpen: true, message: '명단에서 삭제하시겠습니까?', onConfirm: async () => { if(isProcessing) return; setIsProcessing(true); await deleteDoc(doc(db, 'players', id)); setRosterModal({ isOpen: false, player: null }); setIsProcessing(false); } }); };
 
   const assignTeam = (playerId, teamLetter) => {
@@ -370,30 +374,31 @@ export default function App() {
     }
   };
 
-  // ✅ BASE64 사진 업로드 복구
   const handleUploadPhotos = async (e, matchId) => {
     const files = e.target.files; if (!files || files.length === 0) return; setIsProcessing(true);
+    const IMGBB_API_KEY = "c6a6f7f6fae434795cf2eaf848aece24";
+
     try {
       const match = matches.find(m => m.id === matchId); let newPhotos = [...(match.photos || [])];
-      
-      // 화질을 높이는 대신 1MB 제한을 피하기 위해 경기당 최대 10장으로 제한
-      if (newPhotos.length + files.length > 10) {
-        setSystemAlert({ isOpen: true, message: `고화질 저장을 위해 현재 무료 모드에서는\n경기당 최대 10장까지만 등록할 수 있습니다.\n\n(현재 ${newPhotos.length}장 / 추가 시도 ${files.length}장)` });
+      if (newPhotos.length + files.length > 30) {
+        setSystemAlert({ isOpen: true, message: `쾌적한 앱 사용을 위해 경기당 사진은\n최대 30장까지만 등록할 수 있습니다.\n\n(현재 ${newPhotos.length}장 / 추가 시도 ${files.length}장)` });
         setIsProcessing(false); e.target.value = ''; return;
       }
-      
       for (let i = 0; i < files.length; i++) { 
-        // 화질 대폭 상향: 1080x1080 해상도, 0.8 압축률 (장당 약 80~120KB 내외)
-        const resized = await resizeImage(files[i], 1080, 1080, 0.8); 
-        newPhotos.push({ id: Date.now() + i + Math.floor(Math.random() * 1000), url: resized }); 
+        const resized = await resizeImage(files[i], 1920, 1920, 0.9); 
+        const base64Data = resized.split(',')[1]; 
+        const formData = new FormData();
+        formData.append('image', base64Data);
+        const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, { method: 'POST', body: formData });
+        const result = await response.json();
+        if (result.success) { newPhotos.push({ id: Date.now() + i + Math.floor(Math.random() * 1000), url: result.data.url }); } 
+        else { throw new Error("ImgBB API 업로드 실패"); }
       }
       await setDoc(doc(db, 'matches', matchId), { ...match, photos: newPhotos });
     } catch(err) { 
       console.error(err); 
-      setSystemAlert({ isOpen: true, message: '사진 용량이 너무 커서 데이터베이스 제한(1MB)을 초과했습니다.\n(사진 용량이 유독 큰 경우 장수를 줄여주세요)' }); 
-    } finally { 
-      setIsProcessing(false); e.target.value = ''; 
-    }
+      setSystemAlert({ isOpen: true, message: '서버로 사진을 전송하는 중 오류가 발생했습니다.\n네트워크 상태를 확인해주세요.' }); 
+    } finally { setIsProcessing(false); e.target.value = ''; }
   };
 
   const requestDeletePhoto = (photoId) => {
@@ -1444,16 +1449,8 @@ export default function App() {
                         <div key={day} onClick={() => setDateMemoModal({ isOpen: true, dateStr, matches: dayMatches, memo: memos[dateStr] || '' })} className="p-1 sm:p-1.5 min-h-[75px] border border-slate-700/50 rounded-lg relative flex flex-col bg-slate-800/30 cursor-pointer hover:bg-slate-800 transition overflow-hidden">
                           <span className="text-[10px] font-bold text-slate-400 text-center mb-0.5">{day}</span>
                           <div className="flex flex-col gap-0.5 w-full flex-1 justify-start overflow-hidden">
-                            {dayMatches.map((m, idx) => (
-                              <div key={idx} className={`w-full text-center text-[10px] sm:text-[11px] font-black truncate tracking-tighter ${m.status === 'completed' ? 'text-slate-500' : 'text-blue-400'}`}>
-                                {m.matchType === 'external' ? m.opponentName : m.matchType === 'futsal' ? '풋살' : '자체전'}
-                              </div>
-                            ))}
-                            {memos[dateStr] && (
-                              <div className="w-full text-center text-[10px] sm:text-[11px] font-bold text-yellow-500 truncate tracking-tighter mt-0.5">
-                                {memos[dateStr]}
-                              </div>
-                            )}
+                            {dayMatches.map((m, idx) => ( <div key={idx} className={`w-full text-center text-[10px] sm:text-[11px] font-black truncate tracking-tighter ${m.status === 'completed' ? 'text-slate-500' : 'text-blue-400'}`}>{m.matchType === 'external' ? m.opponentName : m.matchType === 'futsal' ? '풋살' : '자체전'}</div> ))}
+                            {memos[dateStr] && <div className="w-full text-center text-[10px] sm:text-[11px] font-bold text-yellow-500 truncate tracking-tighter mt-0.5">{memos[dateStr]}</div>}
                           </div>
                         </div>
                       );
@@ -1621,7 +1618,7 @@ export default function App() {
                   <line ref={svgArrowRef} stroke="#FACC15" strokeWidth="4" markerEnd="url(#arrowhead)" style={{display: 'none'}} />
                   <line ref={svgPassRef} stroke="#60A5FA" strokeWidth="4" strokeDasharray="8,8" markerEnd="url(#passhead)" style={{display: 'none'}} />
                   <rect ref={svgZoneRef} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="3" style={{display: 'none'}} />
-                  {(drawings || []).filter(Boolean).map(d => {
+                  {(drawings||[]).filter(Boolean).map(d => {
                     const isEraseMode = currentTool === 'erase' && !isPlaying;
                     const pClass = isEraseMode ? 'pointer-events-auto cursor-pointer hover:stroke-red-500 hover:stroke-[5px]' : '';
                     if (d.type === 'arrow') return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#FACC15" strokeWidth="4" markerEnd="url(#arrowhead)" className={pClass} onPointerDown={(e) => { if(isEraseMode){ e.stopPropagation(); setDrawings(prev => prev.filter(x => x.id !== d.id)); } }} />
@@ -1631,14 +1628,14 @@ export default function App() {
                   })}
                 </svg>
 
-                {(tacticTokens || []).map(t => (
+                {(tacticTokens||[]).map(t => (
                   <div
                     key={t.id} id={`token-${t.id}`}
                     onPointerDown={(e) => {
                       if (currentTool !== 'move' || isPlaying) return;
                       e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId);
                       pointerDownInfo.current = { x: e.clientX, y: e.clientY, time: Date.now() };
-                      dragStartTokensRef.current = [...(tacticTokens || [])];
+                      dragStartTokensRef.current = [...(tacticTokens||[])];
                       setDraggingToken(t.id);
                     }}
                     style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)' }}
@@ -1659,13 +1656,13 @@ export default function App() {
 
             <div className="flex flex-col gap-2 shrink-0 border-t border-slate-800 pt-2 mt-auto">
                <div className="flex items-center gap-2 bg-slate-900 rounded-2xl p-1 border border-slate-700">
-                 <div className="bg-slate-800 px-2 py-2 rounded-xl text-xs font-black text-slate-300 border border-slate-700 shadow-inner flex items-center gap-1 shrink-0 w-[55px] justify-center">{(animationFrames || []).length}컷</div>
+                 <div className="bg-slate-800 px-2 py-2 rounded-xl text-xs font-black text-slate-300 border border-slate-700 shadow-inner flex items-center gap-1 shrink-0 w-[55px] justify-center">{(animationFrames||[]).length}컷</div>
                  <button onClick={() => {
-                   if (!isAutoRecording) { setAnimationFrames([{ tokens: JSON.parse(JSON.stringify(tacticTokens || [])), drawings: JSON.parse(JSON.stringify(drawings || [])) }]); setIsAutoRecording(true); } 
+                   if (!isAutoRecording) { setAnimationFrames([{ tokens: JSON.parse(JSON.stringify(tacticTokens||[])), drawings: JSON.parse(JSON.stringify(drawings||[])) }]); setIsAutoRecording(true); } 
                    else setIsAutoRecording(false);
                  }} disabled={isPlaying} className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50 ${isAutoRecording ? 'bg-slate-700 text-red-400 border border-red-500/50 animate-pulse' : 'bg-red-500 hover:bg-red-400 text-white'}`}><Video size={14}/> {isAutoRecording ? '녹화 중지' : '자동 녹화'}</button>
                  <button onClick={() => {
-                    if ((animationFrames || []).length < 2) return; setIsPlaying(true); let idx = 0; let start = null;
+                    if ((animationFrames||[]).length < 2) return; setIsPlaying(true); let idx = 0; let start = null;
                     const transitionDuration = 400; setTacticTokens(animationFrames[0].tokens); setDrawings(animationFrames[0].drawings);
                     const animate = (timestamp) => {
                       if (!start) start = timestamp;
@@ -1684,25 +1681,25 @@ export default function App() {
                       }
                     };
                     playbackRef.current = requestAnimationFrame(animate);
-                 }} disabled={isPlaying || (animationFrames || []).length < 2 || isAutoRecording} className="flex-1 py-2.5 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50"><PlayCircle size={14}/> 재생</button>
-                 <button onClick={exportAnimationToVideo} disabled={isPlaying || (animationFrames || []).length < 2 || isAutoRecording} className="flex-1 py-2.5 bg-[#FEE500] hover:bg-[#FEE500]/90 text-slate-900 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50"><Share2 size={14}/> 영상공유</button>
-                 <button onClick={() => { setAnimationFrames([]); setIsPlaying(false); setIsAutoRecording(false); if (playbackRef.current) cancelAnimationFrame(playbackRef.current); }} disabled={isPlaying || (animationFrames || []).length === 0} className="w-10 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl flex items-center justify-center transition disabled:opacity-50 shrink-0"><Trash2 size={14}/></button>
+                 }} disabled={isPlaying || (animationFrames||[]).length < 2 || isAutoRecording} className="flex-1 py-2.5 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50"><PlayCircle size={14}/> 재생</button>
+                 <button onClick={exportAnimationToVideo} disabled={isPlaying || (animationFrames||[]).length < 2 || isAutoRecording} className="flex-1 py-2.5 bg-[#FEE500] hover:bg-[#FEE500]/90 text-slate-900 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50"><Share2 size={14}/> 영상공유</button>
+                 <button onClick={() => { setAnimationFrames([]); setIsPlaying(false); setIsAutoRecording(false); if (playbackRef.current) cancelAnimationFrame(playbackRef.current); }} disabled={isPlaying || (animationFrames||[]).length === 0} className="w-10 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl flex items-center justify-center transition disabled:opacity-50 shrink-0"><Trash2 size={14}/></button>
                </div>
                <div className="flex gap-2">
                  <div className="flex-1 flex items-center justify-between bg-red-500/5 border border-red-500/20 rounded-xl p-1 pl-3">
                    <span className="text-[11px] font-bold text-red-400">A팀 선수</span>
                    <div className="flex items-center gap-0.5">
-                     <button onClick={() => handleUpdatePlayerCount('A', (tacticTokens || []).filter(t=>t.team==='A').length - 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-slate-700/50 text-red-400 rounded-lg hover:bg-slate-600 transition font-black text-sm disabled:opacity-50">-</button>
-                     <input type="number" value={(tacticTokens || []).filter(t=>t.team==='A').length === 0 ? '' : (tacticTokens || []).filter(t=>t.team==='A').length} readOnly className="w-7 text-center bg-transparent text-white text-[13px] font-black outline-none disabled:opacity-50" />
-                     <button onClick={() => handleUpdatePlayerCount('A', (tacticTokens || []).filter(t=>t.team==='A').length + 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-slate-700/50 text-red-400 rounded-lg hover:bg-slate-600 transition font-black text-sm disabled:opacity-50">+</button>
+                     <button onClick={() => handleUpdatePlayerCount('A', (tacticTokens||[]).filter(t=>t.team==='A').length - 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-slate-700/50 text-red-400 rounded-lg hover:bg-slate-600 transition font-black text-sm disabled:opacity-50">-</button>
+                     <input type="number" value={(tacticTokens||[]).filter(t=>t.team==='A').length === 0 ? '' : (tacticTokens||[]).filter(t=>t.team==='A').length} readOnly className="w-7 text-center bg-transparent text-white text-[13px] font-black outline-none disabled:opacity-50" />
+                     <button onClick={() => handleUpdatePlayerCount('A', (tacticTokens||[]).filter(t=>t.team==='A').length + 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-slate-700/50 text-red-400 rounded-lg hover:bg-slate-600 transition font-black text-sm disabled:opacity-50">+</button>
                    </div>
                  </div>
                  <div className="flex-1 flex items-center justify-between bg-blue-500/5 border border-blue-500/20 rounded-xl p-1 pl-3">
                    <span className="text-[11px] font-bold text-blue-400">B팀 선수</span>
                    <div className="flex items-center gap-0.5">
-                     <button onClick={() => handleUpdatePlayerCount('B', (tacticTokens || []).filter(t=>t.team==='B').length - 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-slate-700/50 text-blue-400 rounded-lg hover:bg-slate-600 transition font-black text-sm disabled:opacity-50">-</button>
-                     <input type="number" value={(tacticTokens || []).filter(t=>t.team==='B').length === 0 ? '' : (tacticTokens || []).filter(t=>t.team==='B').length} readOnly className="w-7 text-center bg-transparent text-white text-[13px] font-black outline-none disabled:opacity-50" />
-                     <button onClick={() => handleUpdatePlayerCount('B', (tacticTokens || []).filter(t=>t.team==='B').length + 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-slate-700/50 text-blue-400 rounded-lg hover:bg-slate-600 transition font-black text-sm disabled:opacity-50">+</button>
+                     <button onClick={() => handleUpdatePlayerCount('B', (tacticTokens||[]).filter(t=>t.team==='B').length - 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-slate-700/50 text-blue-400 rounded-lg hover:bg-slate-600 transition font-black text-sm disabled:opacity-50">-</button>
+                     <input type="number" value={(tacticTokens||[]).filter(t=>t.team==='B').length === 0 ? '' : (tacticTokens||[]).filter(t=>t.team==='B').length} readOnly className="w-7 text-center bg-transparent text-white text-[13px] font-black outline-none disabled:opacity-50" />
+                     <button onClick={() => handleUpdatePlayerCount('B', (tacticTokens||[]).filter(t=>t.team==='B').length + 1)} disabled={isPlaying} className="w-7 h-7 flex items-center justify-center bg-slate-700/50 text-blue-400 rounded-lg hover:bg-slate-600 transition font-black text-sm disabled:opacity-50">+</button>
                    </div>
                  </div>
                </div>
@@ -1801,7 +1798,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {/* 누락되었던 팝업창 렌더링 복구 */}
+
       {renderDetailModal()}
       {renderMatchModalForm()}
       {renderAssignmentModal()}
