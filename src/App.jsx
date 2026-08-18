@@ -375,9 +375,25 @@ export default function App() {
     const files = e.target.files; if (!files || files.length === 0) return; setIsProcessing(true);
     try {
       const match = matches.find(m => m.id === matchId); let newPhotos = [...(match.photos || [])];
-      for (let i = 0; i < files.length; i++) { const resized = await resizeImage(files[i], 800, 800, 0.6); newPhotos.push({ id: Date.now() + i, url: resized }); }
+      
+      // Firestore 무료 1MB 제한 보호를 위해 30장 컷 설정
+      if (newPhotos.length + files.length > 30) {
+        setSystemAlert({ isOpen: true, message: `무료 데이터베이스 용량 제한(1MB)으로 인해\n사진은 경기당 최대 30장까지만 등록 가능합니다.\n\n(현재 ${newPhotos.length}장 / 추가 시도 ${files.length}장)` });
+        setIsProcessing(false); e.target.value = ''; return;
+      }
+      
+      for (let i = 0; i < files.length; i++) { 
+        // 30장 모두 1MB 안에 거뜬히 들어가도록 600x600, 0.5 압축률로 극한 최적화
+        const resized = await resizeImage(files[i], 600, 600, 0.5); 
+        newPhotos.push({ id: Date.now() + i + Math.floor(Math.random() * 1000), url: resized }); 
+      }
       await setDoc(doc(db, 'matches', matchId), { ...match, photos: newPhotos });
-    } catch(err) { console.error(err); setSystemAlert({ isOpen: true, message: '사진 업로드 중 오류가 발생했습니다.' }); } finally { setIsProcessing(false); e.target.value = ''; }
+    } catch(err) { 
+      console.error(err); 
+      setSystemAlert({ isOpen: true, message: '사진 용량이 너무 커서 데이터베이스 제한(1MB)을 초과했습니다.' }); 
+    } finally { 
+      setIsProcessing(false); e.target.value = ''; 
+    }
   };
 
   const requestDeletePhoto = (photoId) => {
