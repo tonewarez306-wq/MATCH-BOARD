@@ -1425,9 +1425,20 @@ export default function App() {
                       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                       const dayMatches = matchesByDate[dateStr] || [];
                       days.push(
-                        <div key={day} onClick={() => setDateMemoModal({ isOpen: true, dateStr, matches: dayMatches, memo: memos[dateStr] || '' })} className="p-1 sm:p-2 min-h-[70px] sm:min-h-[90px] border border-slate-700/50 rounded-xl relative flex flex-col items-center bg-slate-800/30 cursor-pointer hover:bg-slate-800 transition overflow-hidden">
-                          <span className="text-xs font-bold text-slate-300 mb-1">{day}</span>
-                        <div className="flex flex-col gap-1 w-full flex-1 overflow-y-auto hide-scrollbar">{dayMatches.map((m, idx) => ( <div key={idx} className={`w-full rounded text-center px-1 py-1.5 text-[10px] font-bold leading-tight ${m.status === 'completed' ? 'bg-slate-700 text-slate-400' : 'bg-blue-500/20 text-blue-400'}`} style={{wordBreak: 'keep-all'}}>{m.matchType === 'external' ? m.opponentName : m.matchType === 'futsal' ? '풋살' : '자체전'}</div> ))}</div>                          {memos[dateStr] && <div className="mt-1 w-full text-[9px] text-yellow-400 bg-yellow-500/10 rounded px-1.5 py-1 text-center leading-tight border border-yellow-500/20" style={{wordBreak: 'keep-all'}}>{memos[dateStr]}</div>}
+                        <div key={day} onClick={() => setDateMemoModal({ isOpen: true, dateStr, matches: dayMatches, memo: memos[dateStr] || '' })} className="p-1 sm:p-1.5 min-h-[75px] border border-slate-700/50 rounded-lg relative flex flex-col bg-slate-800/30 cursor-pointer hover:bg-slate-800 transition overflow-hidden">
+                          <span className="text-[10px] font-bold text-slate-400 text-center mb-0.5">{day}</span>
+                          <div className="flex flex-col gap-0.5 w-full flex-1 justify-start overflow-hidden">
+                            {dayMatches.map((m, idx) => (
+                              <div key={idx} className={`w-full text-center text-[10px] sm:text-[11px] font-black truncate tracking-tighter ${m.status === 'completed' ? 'text-slate-500' : 'text-blue-400'}`}>
+                                {m.matchType === 'external' ? m.opponentName : m.matchType === 'futsal' ? '풋살' : '자체전'}
+                              </div>
+                            ))}
+                            {memos[dateStr] && (
+                              <div className="w-full text-center text-[10px] sm:text-[11px] font-bold text-yellow-500 truncate tracking-tighter mt-0.5">
+                                {memos[dateStr]}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     }
