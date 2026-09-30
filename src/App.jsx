@@ -60,40 +60,6 @@ const calculateTournamentStandings = (match) => {
     stats[team1].gd += (score1 - score2); stats[team2].gd += (score2 - score1);
     if (score1 > score2) { stats[team1].w++; stats[team2].l++; } else if (score1 < score2) { stats[team1].l++; stats[team2].w++; } else { stats[team1].d++; stats[team2].d++; }
   });
-  for (let setNum = 1; setNum <= 3; setNum++) {
-    const qs1 = (match.quarterScores || []).find(q => q.quarter === (setNum - 1) * 4 + 1);
-    const qs2 = (match.quarterScores || []).find(q => q.quarter === (setNum - 1) * 4 + 2);
-    const qs3 = (match.quarterScores || []).find(q => q.quarter === (setNum - 1) * 4 + 3);
-    const qs4 = (match.quarterScores || []).find(q => q.quarter === (setNum - 1) * 4 + 4);
-    let tempSetStats = {}; TEAM_LETTERS.forEach(t => tempSetStats[t] = { gd: 0, gf: 0 });
-    if (qs1) { tempSetStats[qs1.team1].gd += (qs1.score1 - qs1.score2); tempSetStats[qs1.team1].gf += qs1.score1; tempSetStats[qs1.team2].gd += (qs1.score2 - qs1.score1); tempSetStats[qs1.team2].gf += qs1.score2; }
-    if (qs2) { tempSetStats[qs2.team1].gd += (qs2.score1 - qs2.score2); tempSetStats[qs2.team1].gf += qs2.score1; tempSetStats[qs2.team2].gd += (qs2.score2 - qs2.score1); tempSetStats[qs2.team2].gf += qs2.score2; }
-    if (qs3) { tempSetStats[qs3.team1].gd += (qs3.score1 - qs3.score2); tempSetStats[qs3.team1].gf += qs3.score1; tempSetStats[qs3.team2].gd += (qs3.score2 - qs3.score1); tempSetStats[qs3.team2].gf += qs3.score2; }
-    if (qs4) { tempSetStats[qs4.team1].gd += (qs4.score1 - qs4.score2); tempSetStats[qs4.team1].gf += qs4.score1; tempSetStats[qs4.team2].gd += (qs4.score2 - qs4.score1); tempSetStats[qs4.team2].gf += qs4.score2; }
-    let ranks = []; 
-    if (qs4) {
-      let w = qs4.team1, l = qs4.team2;
-      if (qs4.score1 > qs4.score2) { w = qs4.team1; l = qs4.team2; } else if (qs4.score1 < qs4.score2) { w = qs4.team2; l = qs4.team1; }
-      else {
-        if (tempSetStats[qs4.team1].gd > tempSetStats[qs4.team2].gd) { w = qs4.team1; l = qs4.team2; } else if (tempSetStats[qs4.team1].gd < tempSetStats[qs4.team2].gd) { w = qs4.team2; l = qs4.team1; }
-        else { if (tempSetStats[qs4.team1].gf > tempSetStats[qs4.team2].gf) { w = qs4.team1; l = qs4.team2; } else if (tempSetStats[qs4.team1].gf < tempSetStats[qs4.team2].gf) { w = qs4.team2; l = qs4.team1; } else { w = qs4.team1; l = qs4.team2; } }
-      }
-      ranks[0] = w; ranks[1] = l;
-    }
-    if (qs3) {
-      let w = qs3.team1, l = qs3.team2;
-      if (qs3.score1 > qs3.score2) { w = qs3.team1; l = qs3.team2; } else if (qs3.score1 < qs3.score2) { w = qs3.team2; l = qs3.team1; }
-      else {
-        if (tempSetStats[qs3.team1].gd > tempSetStats[qs3.team2].gd) { w = qs3.team1; l = qs3.team2; } else if (tempSetStats[qs3.team1].gd < tempSetStats[qs3.team2].gd) { w = qs3.team2; l = qs3.team1; }
-        else { if (tempSetStats[qs3.team1].gf > tempSetStats[qs3.team2].gf) { w = qs3.team1; l = qs3.team2; } else if (tempSetStats[qs3.team1].gf < tempSetStats[qs3.team2].gf) { w = qs3.team2; l = qs3.team1; } else { w = qs3.team1; l = qs3.team2; } }
-      }
-      ranks[2] = w; ranks[3] = l;
-    }
-    if (ranks[0]) { stats[ranks[0]].setPts += 4; stats[ranks[0]][`s${setNum}`] = 4; }
-    if (ranks[1]) { stats[ranks[1]].setPts += 3; stats[ranks[1]][`s${setNum}`] = 3; }
-    if (ranks[2]) { stats[ranks[2]].setPts += 2; stats[ranks[2]][`s${setNum}`] = 2; }
-    if (ranks[3]) { stats[ranks[3]].setPts += 1; stats[ranks[3]][`s${setNum}`] = 1; }
-  }
   return Object.values(stats).sort((a, b) => { if (b.setPts !== a.setPts) return b.setPts - a.setPts; if (b.gd !== a.gd) return b.gd - a.gd; return b.gf - a.gf; });
 };
 
@@ -233,7 +199,14 @@ export default function App() {
   const detailMatch = useMemo(() => matches.find(m => m.id === detailModalMatchId), [matches, detailModalMatchId]);
 
   const checkCanEdit = (match) => { if (isAdmin) return true; if (!match) return false; if (match.status === 'completed') return false; const safeDate = match.date.replace(/-/g, '/'); const matchDateTime = new Date(`${safeDate} ${match.time}`); return new Date() >= matchDateTime; };
-  const getTeamDisplayName = (match, letter) => { if (!match) return `${letter}팀`; if (match.matchType === 'external') { if (letter === 'A') return activeTeam?.name || '우리 팀'; if (letter === 'B') return match.opponentName || '상대 팀'; } return `${letter}팀`; };
+  const getTeamDisplayName = (match, letter) => {
+    if (!match) return `${letter}팀`;
+    if (match.matchType === 'external') {
+    if (letter === 'A') return '우리 팀';
+    if (letter === 'B') return match.opponentName || '상대 팀';
+  }
+    return `${letter}팀`;
+  };
 
   const viewYearMonth = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
   const viewYear = `${viewDate.getFullYear()}`;
@@ -2022,4 +1995,3 @@ const renderGoalFlowModal = () => {
       {renderSystemModals()}
     </div>
   );
-}
