@@ -1057,33 +1057,117 @@ const renderGoalFlowModal = () => {
 
   const renderLogEditModal = () => {
     if (!logEditModal.isOpen || !logEditModal.match || !logEditModal.log) return null;
-    const m = logEditModal.match; const l = logEditModal.log;
-    const teamPlayers = players.filter(p => p.teamId === activeTeamId && (m.attendees || []).includes(p.id) && ((m.teamAssignments || {})[p.id]) === l.teamLetter);
-    const otherPlayers = players.filter(p => p.teamId === activeTeamId && (m.attendees || []).includes(p.id) && ((m.teamAssignments || {})[p.id]) !== l.teamLetter);
+
+    const { match, log } = logEditModal;
+    
+    // 해당 득점 팀의 명단 추출
+    const selectedTeamPlayers = players.filter(p => 
+      p.teamId === activeTeamId && 
+      (match?.attendees || []).includes(p.id) && 
+      ((match?.teamAssignments || {})[p.id]) === log.teamLetter
+    );
+
+    // 상대팀(교류전이면서 우리 앱에 등록된 선수가 없는 팀)인지 판별
+    const isExternalOpponent = match?.matchType === 'external' && selectedTeamPlayers.length === 0;
+
     return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[150] animate-in fade-in">
-        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
-          <div className="flex justify-between items-center mb-6"><h2 className="text-lg font-bold text-white flex items-center gap-2"><Edit size={18}/> 득점 기록 수정</h2><button onClick={() => setLogEditModal({isOpen: false, match: null, log: null})} className="text-slate-400 hover:text-white"><X size={20}/></button></div>
-          <form onSubmit={handleLogEditSave} className="space-y-4">
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[70]">
+        <div className="bg-slate-800 rounded-2xl w-full max-w-sm p-6 border border-slate-700 shadow-2xl">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-lg font-black text-white flex items-center gap-2">
+              <Edit3 size={18} className="text-blue-400" />
+              기록 수정 ({log.quarter}쿼터)
+            </h2>
+            <button 
+              onClick={() => setLogEditModal({ isOpen: false, match: null, log: null })} 
+              className="text-slate-400 hover:text-white transition"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          <form onSubmit={handleUpdateLog} className="space-y-4">
+            {/* 득점자 수정 */}
             <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">득점자</label>
-              <select name="scorerId" defaultValue={l.scorerName === '용병' ? 'mercenary' : (l.scorerId || 'none')} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
-                <option value="none">자책골 / 기타</option><optgroup label="우리 팀"><option value="mercenary">👤 용병 (팀 외 인원)</option>{teamPlayers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>{m.matchType !== 'external' && <optgroup label="타팀 지원">{otherPlayers.map(p => <option key={p.id} value={p.id}>({(m.teamAssignments || {})[p.id]}팀) {p.name}</option>)}</optgroup>}
+              <label className="block text-sm font-bold text-slate-400 mb-2">득점자</label>
+              <select 
+                name="scorerId" 
+                defaultValue={log.scorerId || 'mercenary'} 
+                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-3 outline-none focus:border-blue-500 transition"
+              >
+                {selectedTeamPlayers.map(p => (
+                  <option key={`scorer-${p.id}`} value={p.id}>{p.name}</option>
+                ))}
+                
+                {/* 핵심 수정 부분: 외부 상대팀일 경우 상대팀 이름 표시 */}
+                <option value="mercenary" className="text-blue-300 font-bold">
+                  {isExternalOpponent 
+                    ? `⚽ ${getTeamDisplayName(match, log.teamLetter)} 득점` 
+                    : '👤 용병 (팀 외 인원)'}
+                </option>
+                <option value="own_goal">상대팀 자책골</option>
               </select>
             </div>
+
+            {/* 어시스트 수정 */}
             <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">도움 (어시스트)</label>
-              <select name="assistId" defaultValue={l.assistName === '용병' ? 'mercenary' : (l.assistId || 'none')} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
-                <option value="none">없음</option><optgroup label="우리 팀"><option value="mercenary">👤 용병 (팀 외 인원)</option>{teamPlayers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>{m.matchType !== 'external' && <optgroup label="타팀 지원">{otherPlayers.map(p => <option key={p.id} value={p.id}>({(m.teamAssignments || {})[p.id]}팀) {p.name}</option>)}</optgroup>}
+              <label className="block text-sm font-bold text-slate-400 mb-2">도움 (어시스트)</label>
+              <select 
+                name="assistId" 
+                defaultValue={log.assistId || 'none'} 
+                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-3 outline-none focus:border-blue-500 transition"
+              >
+                <option value="none">도움 없음 (단독 득점)</option>
+                {selectedTeamPlayers.map(p => (
+                  <option key={`assist-${p.id}`} value={p.id}>{p.name}</option>
+                ))}
+                
+                {/* 도움 부분도 동일하게 외부 상대팀 이름 표시 */}
+                <option value="mercenary" className="text-blue-300 font-bold">
+                  {isExternalOpponent 
+                    ? `🤝 ${getTeamDisplayName(match, log.teamLetter)} 도움` 
+                    : '👤 용병 (팀 외 인원) 도움'}
+                </option>
               </select>
             </div>
-            <div className="flex items-center gap-3 bg-slate-900 p-3 rounded-xl border border-slate-700"><input type="checkbox" name="isPK" defaultChecked={l.isPK} className="w-5 h-5 accent-red-500" /><span className="text-sm font-bold text-white">PK 득점 여부</span></div>
-            <div><input type="text" name="remark" defaultValue={l.remark || ''} placeholder="특이사항 (선택)" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none" /></div>
-            <div className="flex gap-2 pt-2 border-t border-slate-700"><button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">수정 완료</button></div>
-            <button type="button" onClick={() => { setSystemConfirm({ isOpen: true, message: '이 득점 기록을 삭제하시겠습니까?', onConfirm: async () => { if(isProcessing) return; setIsProcessing(true); try { const updatePromises = []; if (l.scorerId) { const p = players.find(p => p.id === l.scorerId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, goals: Math.max(0, (p.goals || 0) - 1) })); } if (l.assistId) { const p = players.find(p => p.id === l.assistId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, assists: Math.max(0, (p.assists || 0) - 1) })); } const updatedLogs = (m.logs || []).filter(log => log.id !== l.id); let updatedQuarterScores = [...(m.quarterScores || [])]; const qsIndex = updatedQuarterScores.findIndex(qs => qs.quarter === l.quarter); if (qsIndex > -1) { const qs = updatedQuarterScores[qsIndex]; const isTeam1 = qs.team1 === l.teamLetter; updatedQuarterScores[qsIndex] = { ...qs, score1: isTeam1 ? Math.max(0, qs.score1 - 1) : qs.score1, score2: !isTeam1 ? Math.max(0, qs.score2 - 1) : qs.score2 }; } const updatedScores = { ...(m.scores || {}) }; if (updatedScores[l.teamLetter] !== undefined) updatedScores[l.teamLetter] = Math.max(0, updatedScores[l.teamLetter] - 1); updatePromises.push(setDoc(doc(db, 'matches', m.id), { ...m, logs: updatedLogs, scores: updatedScores, quarterScores: updatedQuarterScores })); await Promise.all(updatePromises); setLogEditModal({ isOpen: false, match: null, log: null }); } finally { setIsProcessing(false); } } }); }} className="w-full py-3 mt-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold text-sm flex items-center justify-center gap-1"><Trash2 size={16}/> 삭제</button>
+
+            {/* 하단 버튼 */}
+            <div className="pt-4 mt-2 border-t border-slate-700 flex gap-2">
+              <button 
+                type="button" 
+                onClick={() => setLogEditModal({ isOpen: false, match: null, log: null })}
+                className="flex-1 py-3 rounded-xl font-bold text-sm bg-slate-700 text-white hover:bg-slate-600 transition"
+              >
+                취소
+              </button>
+              <button 
+                type="submit" 
+                className="flex-1 py-3 rounded-xl font-bold text-sm bg-blue-600 text-white hover:bg-blue-500 flex items-center justify-center gap-2 transition"
+              >
+                <Save size={16} /> 저장
+              </button>
+            </div>
           </form>
         </div>
       </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 p-8 flex flex-col items-center justify-center">
+      <div className="text-center mb-8">
+        <p className="text-slate-400 mb-4">현재 <strong className="text-blue-400">교류전 상대팀(FC바르셀로나)</strong>의 득점 기록을 수정하는 상황입니다.</p>
+        <button 
+          onClick={() => setLogEditModal(prev => ({ ...prev, isOpen: true }))}
+          className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl transition"
+        >
+          기록 수정 팝업 열기
+        </button>
+      </div>
+      
+      {/* 모달 렌더링 */}
+      {renderLogEditModal()}
+    </div>
     );
   };
 
