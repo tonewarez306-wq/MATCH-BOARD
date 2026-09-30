@@ -956,18 +956,92 @@ export default function App() {
     return (
       <div className="fixed inset-0 bg-black/80 flex items-end justify-center z-[150]">
         <div className="bg-slate-800 p-6 rounded-t-3xl w-full max-w-md border-t border-slate-700 animate-in slide-in-from-bottom">
-          <div className="flex justify-between items-center mb-6"><h2 className="text-lg font-black text-white flex items-center gap-2"><Trophy size={18} className="text-yellow-400"/> {goalFlow.step === 1 ? '득점자 선택' : '어시스트 선택'}</h2><button onClick={() => {setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false }); setShowOtherTeams(false);}} className="text-slate-400 hover:text-white"><X size={20}/></button></div>
+          <div className="flex justify-between items-center mb-6">
+      <h2 className="text-lg font-black text-white flex items-center gap-2">
+        <Trophy size={18} className="text-yellow-400"/> 
+        {goalFlow.step === 1 ? '득점자 선택' : '어시스트 선택'}
+      </h2>
+      <button 
+        onClick={() => {
+          setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false }); 
+          setShowOtherTeams(false);
+        }} 
+        className="text-slate-400 hover:text-white"
+      >
+        <X size={20}/>
+      </button>
+    </div>
+    <div className="flex justify-between items-center mb-6"><h2 className="text-lg font-black text-white flex items-center gap-2"><Trophy size={18} className="text-yellow-400"/> {goalFlow.step === 1 ? '득점자 선택' : '어시스트 선택'}</h2><button onClick={() => {setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false }); setShowOtherTeams(false);}} className="text-slate-400 hover:text-white"><X size={20}/></button></div>
           <div className="mb-4">
-            <div className="flex justify-between items-center mb-3"><div className="text-sm font-bold text-slate-400">{getTeamDisplayName(currentGoalMatch, goalFlow.teamLetter)} 명단</div>{currentGoalMatch?.matchType !== 'external' && ( <button onClick={() => setShowOtherTeams(!showOtherTeams)} className={`text-[11px] px-2 py-1 rounded border font-bold transition ${showOtherTeams ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-slate-700 text-slate-400 border-slate-600'}`}>🔄 타팀 지원 {showOtherTeams ? '닫기' : '보기'}</button> )}</div>
-            <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto hide-scrollbar">{selectedTeamPlayers.map(p => ( <button key={p.id} onClick={() => handleGoalSubmit(p.id, goalFlow.teamLetter)} className="bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl border border-slate-600 transition text-sm">{p.name}</button> ))}</div>
-            {showOtherTeams && ( <div className="mt-4 pt-3 border-t border-slate-700"><div className="text-xs font-bold text-slate-500 mb-2">타팀 인원 (지원)</div><div className="grid grid-cols-3 gap-2 max-h-32 overflow-y-auto hide-scrollbar">{otherPlayers.map(p => ( <button key={p.id} onClick={() => handleGoalSubmit(p.id, goalFlow.teamLetter)} className="bg-slate-900 hover:bg-slate-700 text-slate-300 font-bold py-2 rounded-xl border border-slate-700 transition text-xs truncate px-1">{p.name} <span className="text-[9px] text-slate-500">({(currentGoalMatch?.teamAssignments || {})[p.id]}팀)</span></button> ))}</div></div> )}
-          </div>
-          <div className="space-y-2 mt-4 pt-4 border-t border-slate-700">
-             <button onClick={() => handleGoalSubmit('mercenary', goalFlow.teamLetter)} className="w-full bg-slate-900 border border-slate-600 hover:bg-slate-700 text-slate-300 font-bold py-3 rounded-xl flex items-center justify-center gap-2 text-sm transition">👤 용병 (팀 외 인원) {goalFlow.step === 1 ? '득점' : '도움'}</button>
-             {goalFlow.step === 1 ? ( <button onClick={() => handleGoalSubmit(null, goalFlow.teamLetter)} className="w-full bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-400 font-bold py-3 rounded-xl text-sm transition">상대팀 자책골</button> ) : ( <button onClick={() => handleGoalSubmit(null, goalFlow.teamLetter)} className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl shadow-lg text-sm transition">도움 없음 (단독 득점)</button> )}
-          </div>
+      <div className="flex justify-between items-center mb-3">
+        <div className="text-sm font-bold text-slate-400">
+          {getTeamDisplayName(currentGoalMatch, goalFlow.teamLetter)} 명단
         </div>
+        {currentGoalMatch?.matchType !== 'external' && ( 
+          <button 
+            onClick={() => setShowOtherTeams(!showOtherTeams)} 
+            className={`text-[11px] px-2 py-1 rounded border font-bold transition ${showOtherTeams ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-slate-700 text-slate-400 border-slate-600'}`}
+          >
+            🔄 타팀 지원 {showOtherTeams ? '닫기' : '보기'}
+          </button> 
+        )}
       </div>
+            <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto hide-scrollbar">
+        {selectedTeamPlayers.map(p => ( 
+          <button 
+            key={p.id} 
+            onClick={() => handleGoalSubmit(p.id, goalFlow.teamLetter)} 
+            className="bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl border border-slate-600 transition text-sm"
+          >
+            {p.name}
+          </button> 
+        ))}
+      </div>
+            {showOtherTeams && ( 
+        <div className="mt-4 pt-3 border-t border-slate-700">
+          <div className="text-xs font-bold text-slate-500 mb-2">타팀 인원 (지원)</div>
+          <div className="grid grid-cols-3 gap-2 max-h-32 overflow-y-auto hide-scrollbar">
+            {otherPlayers.map(p => ( 
+              <button 
+                key={p.id} 
+                onClick={() => handleGoalSubmit(p.id, goalFlow.teamLetter)} 
+                className="bg-slate-900 hover:bg-slate-700 text-slate-300 font-bold py-2 rounded-xl border border-slate-700 transition text-xs truncate px-1"
+              >
+                {p.name} <span className="text-[9px] text-slate-500">({(currentGoalMatch?.teamAssignments || {})[p.id]}팀)</span>
+              </button> 
+            ))}
+          </div>
+        </div> 
+      )}
+    </div>
+          <div className="space-y-2 mt-4 pt-4 border-t border-slate-700">
+      <button 
+        onClick={() => handleGoalSubmit('mercenary', goalFlow.teamLetter)} 
+        className="w-full bg-slate-900 border border-slate-600 hover:bg-slate-700 text-slate-300 font-bold py-3 rounded-xl flex items-center justify-center gap-2 text-sm transition"
+      >
+        {isExternalOpponent 
+          ? `⚽ ${getTeamDisplayName(currentGoalMatch, goalFlow.teamLetter)} ${goalFlow.step === 1 ? '득점' : '도움'}` 
+          : `👤 용병 (팀 외 인원) ${goalFlow.step === 1 ? '득점' : '도움'}`}
+      </button>
+      
+      {goalFlow.step === 1 ? ( 
+        <button 
+          onClick={() => handleGoalSubmit(null, goalFlow.teamLetter)} 
+          className="w-full bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-400 font-bold py-3 rounded-xl text-sm transition"
+        >
+          상대팀 자책골
+        </button> 
+      ) : ( 
+        <button 
+          onClick={() => handleGoalSubmit(null, goalFlow.teamLetter)} 
+          className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl shadow-lg text-sm transition"
+        >
+          도움 없음 (단독 득점)
+        </button> 
+      )}
+    </div>
+  </div>
+</div>
     );
   };
 
