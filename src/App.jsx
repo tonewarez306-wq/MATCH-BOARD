@@ -287,7 +287,7 @@ export default function App() {
         if (topPts === secondPts && top.gd === second.gd && top.gf === second.gf) {
           return makeBadge('무', '동률', 'bg-slate-600/30 text-slate-300 border-slate-500/40');
         }
-        return makeBadge(`${top.team}승`, `${top.team}팀 1위`, 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40');
+        return makeBadge(`${top.team}팀 승`, `${top.team}팀 1위`, 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40');
       }
     }
     return null;
@@ -1479,7 +1479,33 @@ const renderGoalFlowModal = () => {
           <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-700 pb-4"><h2 className="text-lg font-bold text-white flex items-center gap-2"><Calendar size={18}/> {dateMemoModal.dateStr} 일정</h2><button onClick={() => setDateMemoModal({ isOpen: false, dateStr: null, matches: [], memo: '' })} className="text-slate-400 hover:text-white"><X size={20}/></button></div>
           <div className="flex-1 overflow-y-auto pr-1 space-y-4 hide-scrollbar">
              {dateMemoModal.matches.length > 0 ? (
-                <div className="space-y-3"><h3 className="text-xs font-bold text-slate-500">예정/종료된 경기</h3>{dateMemoModal.matches.map(m => { const badge = getMatchResultBadge(m); return ( <div key={m.id} className="bg-slate-900 p-3 rounded-xl border border-slate-700"><div className="flex items-center gap-2 mb-1 flex-wrap"><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${m.status === 'completed' ? 'bg-slate-700 text-slate-400' : 'bg-blue-500/20 text-blue-400'}`}>{m.status === 'completed' ? '종료' : '예정'}</span>{badge && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${badge.className}`}>{badge.label} ({badge.detail})</span>}<span className="text-sm font-bold text-white">{m.location}</span></div><div className="text-[11px] text-slate-400">{formatTimeAmPm(m.time)} • {m.matchType === 'external' ? `vs ${m.opponentName}` : m.matchType === 'futsal' ? `${m.teamCount || 2}팀 풋살` : `${m.teamCount || 2}팀 자체전`}</div></div> ); })}</div>
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold text-slate-500">예정/종료된 경기</h3>
+                  {dateMemoModal.matches.map(m => {
+                    const badge = getMatchResultBadge(m);
+                    const matchTitle = m.matchType === 'external' ? (m.opponentName || '상대팀') : m.matchType === 'futsal' ? `${m.teamCount || 2}팀 풋살` : `${m.teamCount || 2}팀 자체전`;
+                    return (
+                      <div key={m.id} className="bg-slate-900 p-3.5 rounded-xl border border-slate-700 space-y-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${m.status === 'completed' ? 'bg-slate-700 text-slate-300' : 'bg-blue-500/20 text-blue-400'}`}>
+                            {m.status === 'completed' ? '종료' : '예정'}
+                          </span>
+                          <span className="text-sm font-black text-white break-all">{matchTitle}</span>
+                        </div>
+                        <div className="text-xs text-slate-400 break-all">
+                          {formatTimeAmPm(m.time)} / {m.location}
+                        </div>
+                        {badge && (
+                          <div className="pt-0.5">
+                            <span className={`inline-block text-[11px] font-black px-2 py-0.5 rounded border ${badge.className}`}>
+                              {badge.label}{badge.detail ? ` (${badge.detail})` : ''}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
              ) : ( <div className="text-sm text-slate-500 text-center py-4">이 날짜에 등록된 경기가 없습니다.</div> )}
              <div className="pt-2 border-t border-slate-700">
                 <h3 className="text-xs font-bold text-slate-500 mb-2">날짜 메모 (관리자 전용)</h3>
@@ -1856,7 +1882,7 @@ const renderGoalFlowModal = () => {
                                   <span className="w-full text-[9px] sm:text-[10px] font-black leading-[1.15] break-all whitespace-normal">{label}</span>
                                   {badge && (
                                     <span className={`text-[8px] sm:text-[9px] font-black px-1 py-0.2 rounded border leading-tight ${badge.color}`}>
-                                      {badge.text}{badge.score ? ` ${badge.score}` : ''}
+                                      {badge.label}
                                     </span>
                                   )}
                                 </div>
@@ -2132,17 +2158,17 @@ const renderGoalFlowModal = () => {
 
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
                   <defs>
-                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#FACC15" /></marker>
-                    <marker id="passhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#60A5FA" /></marker>
+                    <marker id="arrowhead" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="9" refX="10" refY="4.5" orient="auto"><polygon points="0 0, 12 4.5, 0 9" fill="#FACC15" /></marker>
+                    <marker id="passhead" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="9" refX="10" refY="4.5" orient="auto"><polygon points="0 0, 12 4.5, 0 9" fill="#60A5FA" /></marker>
                   </defs>
-                  <line ref={svgArrowRef} stroke="#FACC15" strokeWidth="4" markerEnd="url(#arrowhead)" style={{display: 'none'}} />
-                  <line ref={svgPassRef} stroke="#60A5FA" strokeWidth="4" strokeDasharray="8,8" markerEnd="url(#passhead)" style={{display: 'none'}} />
-                  <rect ref={svgZoneRef} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="3" style={{display: 'none'}} />
+                  <line ref={svgArrowRef} stroke="#FACC15" strokeWidth="2.5" markerEnd="url(#arrowhead)" style={{display: 'none'}} />
+                  <line ref={svgPassRef} stroke="#60A5FA" strokeWidth="2.5" strokeDasharray="6,6" markerEnd="url(#passhead)" style={{display: 'none'}} />
+                  <rect ref={svgZoneRef} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="2.5" style={{display: 'none'}} />
                   {(drawings||[]).filter(Boolean).map(d => {
                     const isEraseMode = currentTool === 'erase' && !isPlaying;
-                    const pClass = isEraseMode ? 'pointer-events-auto cursor-pointer hover:stroke-red-500 hover:stroke-[5px]' : '';
-                    if (d.type === 'arrow') return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#FACC15" strokeWidth="4" markerEnd="url(#arrowhead)" className={pClass} onPointerDown={(e) => { if(isEraseMode){ e.stopPropagation(); setDrawings(prev => prev.filter(x => x.id !== d.id)); } }} />
-                    if (d.type === 'pass') return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#60A5FA" strokeWidth="4" strokeDasharray="8,8" markerEnd="url(#passhead)" className={pClass} onPointerDown={(e) => { if(isEraseMode){ e.stopPropagation(); setDrawings(prev => prev.filter(x => x.id !== d.id)); } }} />
+                    const pClass = isEraseMode ? 'pointer-events-auto cursor-pointer hover:stroke-red-500 hover:stroke-[4px]' : '';
+                    if (d.type === 'arrow') return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#FACC15" strokeWidth="2.5" markerEnd="url(#arrowhead)" className={pClass} onPointerDown={(e) => { if(isEraseMode){ e.stopPropagation(); setDrawings(prev => prev.filter(x => x.id !== d.id)); } }} />
+                    if (d.type === 'pass') return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#60A5FA" strokeWidth="2.5" strokeDasharray="6,6" markerEnd="url(#passhead)" className={pClass} onPointerDown={(e) => { if(isEraseMode){ e.stopPropagation(); setDrawings(prev => prev.filter(x => x.id !== d.id)); } }} />
                     if (d.type === 'zone') return <rect key={d.id} x={`${Math.min(d.start.x, d.end.x)}%`} y={`${Math.min(d.start.y, d.end.y)}%`} width={`${Math.abs(d.start.x - d.end.x)}%`} height={`${Math.abs(d.start.y - d.end.y)}%`} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="3" className={isEraseMode ? 'pointer-events-auto cursor-pointer hover:fill-red-500/30' : ''} onPointerDown={(e) => { if(isEraseMode){ e.stopPropagation(); setDrawings(prev => prev.filter(x => x.id !== d.id)); } }} />
                     return null;
                   })}
