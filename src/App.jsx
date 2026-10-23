@@ -206,7 +206,7 @@ export default function App() {
   const [galleryModal, setGalleryModal] = useState({ isOpen: false, photos: [], currentIndex: 0, matchId: null });
 
   const [liveMatchId, setLiveMatchId] = useState(null);
-  const [liveState, setLiveState] = useState({ currentQuarter: 1, playingTeams: ['A', 'B'], isQuarterActive: false });
+  const [liveState, setLiveState] = useState({ currentQuarter: 1, playingTeams: ['A', 'B'], isQuarterActive: false, gk1: null, gk2: null });
   const [goalFlow, setGoalFlow] = useState({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false });
   const [logEditModal, setLogEditModal] = useState({ isOpen: false, match: null, log: null });
   const [showOtherTeams, setShowOtherTeams] = useState(false);
@@ -234,6 +234,63 @@ export default function App() {
 
   const checkCanEdit = (match) => { if (isAdmin) return true; if (!match) return false; if (match.status === 'completed') return false; const safeDate = match.date.replace(/-/g, '/'); const matchDateTime = new Date(`${safeDate} ${match.time}`); return new Date() >= matchDateTime; };
   const getTeamDisplayName = (match, letter) => { if (!match) return `${letter}팀`; if (match.matchType === 'external') { if (letter === 'A') return activeTeam?.name || '우리 팀'; if (letter === 'B') return match.opponentName || '상대 팀'; } return `${letter}팀`; };
+  const getGkDisplayName = (gkId) => { if (!gkId) return null; if (gkId === 'mercenary') return '용병'; return players.find(p => p.id === gkId)?.name || null; };
+  const getTeamCandidatePlayers = (match, teamLetter) => {
+    const isExternalOpponent = match?.matchType === 'external' && teamLetter === 'B';
+    if (isExternalOpponent) return { teamPlayers: [], otherPlayers: [] };
+    const teamRoster = players.filter(p => p.teamId === activeTeamId);
+    const hasAttendees = (match?.attendees || []).length > 0;
+    const basePlayers = hasAttendees ? teamRoster.filter(p => (match.attendees || []).includes(p.id)) : teamRoster;
+    if (match?.matchType === 'external') return { teamPlayers: basePlayers, otherPlayers: [] };
+    const assignedTeamPlayers = basePlayers.filter(p => ((match?.teamAssignments || {})[p.id]) === teamLetter);
+    const teamPlayers = assignedTeamPlayers.length > 0 ? assignedTeamPlayers : basePlayers;
+    const otherPlayers = assignedTeamPlayers.length > 0
+      ? basePlayers.filter(p => ((match?.teamAssignments || {})[p.id]) !== teamLetter)
+      : teamRoster.filter(p => !basePlayers.some(bp => bp.id === p.id));
+    return { teamPlayers, otherPlayers };
+  };
+  const getLastGkForTeam = (match, teamLetter) => {
+    const qScores = [...(match?.quarterScores || [])].sort((a, b) => b.quarter - a.quarter);
+    for (const qs of qScores) {
+      if (qs.team1 === teamLetter && qs.gk1) return qs.gk1;
+      if (qs.team2 === teamLetter && qs.gk2) return qs.gk2;
+    }
+    return null;
+  };
+  const getMatchResultBadge = (m) => {
+    if (!m || m.status !== 'completed') return null;
+    const qScores = m.quarterScores || [];
+    if (m.matchType === 'external') {
+      const standings = calculateStandings(m);
+      const sA = standings.find(s => s.team === 'A');
+      const sB = standings.find(s => s.team === 'B');
+      if (qScores.length > 0 && sA && sB) {
+        const diff = sA.pts !== sB.pts ? sA.pts - sB.pts : (sA.gd !== sB.gd ? sA.gd - sB.gd : sA.gf - sB.gf);
+        const recordText = `${sA.w}승${sA.d ? ` ${sA.d}무` : ''}${sA.l ? ` ${sA.l}패` : ''}`;
+        if (diff > 0) return { label: '승', detail: recordText, className: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' };
+        if (diff < 0) return { label: '패', detail: recordText, className: 'bg-red-500/20 text-red-400 border-red-500/40' };
+        return { label: '무', detail: recordText, className: 'bg-slate-600/30 text-slate-300 border-slate-500/40' };
+      }
+      const scoreA = m.scores?.A || 0; const scoreB = m.scores?.B || 0;
+      if (scoreA > scoreB) return { label: '승', detail: `${scoreA}:${scoreB}`, className: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' };
+      if (scoreA < scoreB) return { label: '패', detail: `${scoreA}:${scoreB}`, className: 'bg-red-500/20 text-red-400 border-red-500/40' };
+      return { label: '무', detail: `${scoreA}:${scoreB}`, className: 'bg-slate-600/30 text-slate-300 border-slate-500/40' };
+    }
+    if (qScores.length > 0) {
+      const standings = calculateStandings(m);
+      const top = standings[0]; const second = standings[1];
+      if (top && second) {
+        const topPts = m.isTournament ? top.setPts : top.pts;
+        const secondPts = m.isTournament ? second.setPts : second.pts;
+        if (topPts === 0 && secondPts === 0) return null;
+        if (topPts === secondPts && top.gd === second.gd && top.gf === second.gf) {
+          return { label: '무', detail: '동률', className: 'bg-slate-600/30 text-slate-300 border-slate-500/40' };
+        }
+        return { label: `${top.team}승`, detail: `${top.team}팀 1위`, className: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' };
+      }
+    }
+    return null;
+  };
 
   const viewYearMonth = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
   const viewYear = `${viewDate.getFullYear()}`;
@@ -244,33 +301,69 @@ export default function App() {
   const matchesByDate = useMemo(() => { const map = {}; monthlyMatches.forEach(m => { if (!map[m.date]) map[m.date] = []; map[m.date].push(m); }); return map; }, [monthlyMatches]);
 
   const calculatedPlayersList = useMemo(() => {
-    const stats = {}; currentTeamPlayers.forEach(p => { stats[p.id] = { ...p, trueCaps: 0, trueGoals: 0, trueAssists: 0 }; });
+    const stats = {}; currentTeamPlayers.forEach(p => { stats[p.id] = { ...p, trueCaps: 0, trueGoals: 0, trueAssists: 0, trueGkQuarters: 0, trueGoalsConceded: 0, trueCleanSheets: 0 }; });
     const completedMatches = currentTeamMatches.filter(m => m.status === 'completed' && m.matchType !== 'futsal');
     completedMatches.forEach(m => {
       (m.attendees || []).forEach(pid => { if (stats[pid]) stats[pid].trueCaps += 1; });
       (m.logs || []).forEach(log => { if (log.scorerId && stats[log.scorerId]) stats[log.scorerId].trueGoals += 1; if (log.assistId && stats[log.assistId]) stats[log.assistId].trueAssists += 1; });
+      (m.quarterScores || []).forEach(qs => {
+        if (qs.gk1 && stats[qs.gk1]) {
+          stats[qs.gk1].trueGkQuarters += 1;
+          stats[qs.gk1].trueGoalsConceded += (qs.score2 || 0);
+          if ((qs.score2 || 0) === 0) stats[qs.gk1].trueCleanSheets += 1;
+        }
+        if (qs.gk2 && stats[qs.gk2]) {
+          stats[qs.gk2].trueGkQuarters += 1;
+          stats[qs.gk2].trueGoalsConceded += (qs.score1 || 0);
+          if ((qs.score1 || 0) === 0) stats[qs.gk2].trueCleanSheets += 1;
+        }
+      });
     });
     return Object.values(stats).sort((a,b) => b.trueCaps !== a.trueCaps ? b.trueCaps - a.trueCaps : b.trueGoals - a.trueGoals);
   }, [currentTeamPlayers, currentTeamMatches]);
 
   const filteredStats = useMemo(() => {
-    const statsMap = {}; currentTeamPlayers.forEach(p => { statsMap[p.id] = { id: p.id, name: p.name, caps: 0, goals: 0, assists: 0 }; });
+    const statsMap = {}; currentTeamPlayers.forEach(p => { statsMap[p.id] = { id: p.id, name: p.name, caps: 0, goals: 0, assists: 0, gkQuarters: 0, goalsConceded: 0, cleanSheets: 0 }; });
     let targetMatches = currentTeamMatches.filter(m => m.status === 'completed');
     if (statsPeriod === 'month') targetMatches = targetMatches.filter(m => m.date.startsWith(viewYearMonth)); else if (statsPeriod === 'year') targetMatches = targetMatches.filter(m => m.date.startsWith(viewYear));
     if (statsType === 'total') targetMatches = targetMatches.filter(m => m.matchType === 'internal' || m.matchType === 'external'); else targetMatches = targetMatches.filter(m => m.matchType === statsType);
     targetMatches.forEach(m => {
       (m.attendees || []).forEach(pId => { if(statsMap[pId]) statsMap[pId].caps += 1; });
       (m.logs || []).forEach(log => { if (log.scorerId && statsMap[log.scorerId]) statsMap[log.scorerId].goals += 1; if (log.assistId && statsMap[log.assistId]) statsMap[log.assistId].assists += 1; });
+      (m.quarterScores || []).forEach(qs => {
+        if (qs.gk1 && statsMap[qs.gk1]) {
+          statsMap[qs.gk1].gkQuarters += 1;
+          statsMap[qs.gk1].goalsConceded += (qs.score2 || 0);
+          if ((qs.score2 || 0) === 0) statsMap[qs.gk1].cleanSheets += 1;
+        }
+        if (qs.gk2 && statsMap[qs.gk2]) {
+          statsMap[qs.gk2].gkQuarters += 1;
+          statsMap[qs.gk2].goalsConceded += (qs.score1 || 0);
+          if ((qs.score1 || 0) === 0) statsMap[qs.gk2].cleanSheets += 1;
+        }
+      });
     });
-    return Object.values(statsMap).sort((a, b) => b.goals !== a.goals ? b.goals - a.goals : (b.assists !== a.assists ? b.assists - a.assists : b.caps - a.caps));
+    return Object.values(statsMap).map(s => ({
+      ...s,
+      gaRate: s.gkQuarters > 0 ? s.goalsConceded / s.gkQuarters : null,
+      cleanSheetRate: s.gkQuarters > 0 ? Math.round((s.cleanSheets / s.gkQuarters) * 100) : 0
+    })).sort((a, b) => b.goals !== a.goals ? b.goals - a.goals : (b.assists !== a.assists ? b.assists - a.assists : b.caps - a.caps));
   }, [currentTeamMatches, currentTeamPlayers, statsPeriod, viewYearMonth, viewYear, statsType]);
+
+  const gkStatsList = useMemo(() => {
+    return filteredStats
+      .filter(s => s.gkQuarters > 0)
+      .sort((a, b) => a.gaRate !== b.gaRate ? a.gaRate - b.gaRate : (b.cleanSheets !== a.cleanSheets ? b.cleanSheets - a.cleanSheets : b.gkQuarters - a.gkQuarters));
+  }, [filteredStats]);
 
   const titlePrefix = statsPeriod === 'month' ? '이달의' : '올해의';
   const maxGoals = filteredStats.length > 0 ? Math.max(...filteredStats.map(s => s.goals)) : 0; const topScorers = filteredStats.filter(s => s.goals === maxGoals && maxGoals > 0);
   const maxAssists = filteredStats.length > 0 ? Math.max(...filteredStats.map(s => s.assists)) : 0; const topAssists = filteredStats.filter(s => s.assists === maxAssists && maxAssists > 0);
   const maxCaps = filteredStats.length > 0 ? Math.max(...filteredStats.map(s => s.caps)) : 0; const topCaps = filteredStats.filter(s => s.caps === maxCaps && maxCaps > 0);
+  const minGaRate = gkStatsList.length > 0 ? Math.min(...gkStatsList.map(s => s.gaRate)) : null;
+  const topGks = minGaRate !== null ? gkStatsList.filter(s => Math.abs(s.gaRate - minGaRate) < 1e-6) : [];
 
-  const globalStyles = ( <style>{` body { overscroll-behavior: none !important; } html { overscroll-behavior: none !important; } *::-webkit-scrollbar { display: none !important; width: 0 !important; } * { -ms-overflow-style: none !important; scrollbar-width: none !important; } .tactic-board { touch-action: none; } input, select, textarea { font-size: 16px !important; } input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; } input[type="number"] { -moz-appearance: textfield; } .will-change-transform { will-change: transform, left, top; } `}</style> );
+  const globalStyles = ( <style>{` body { overscroll-behavior: none !important; } html { overscroll-behavior: none !important; } *::-webkit-scrollbar { display: none !important; width: 0 !important; } * { -ms-overflow-style: none !important; scrollbar-width: none !important; } input, select, textarea { font-size: 16px !important; } input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; } input[type="number"] { -moz-appearance: textfield; } .will-change-transform { will-change: transform, left, top; } `}</style> );
 
   useEffect(() => {
     let unsubTeams = () => {}; let unsubPlayers = () => {}; let unsubMatches = () => {}; let unsubMemos = () => {};
@@ -317,7 +410,9 @@ export default function App() {
       let playingTeams = match.isTournament ? getTournamentMatchup(currentQ, match, stats) : ['A', 'B']; let isQuarterActive = false;
       if (match.matchType === 'external') { if (currentLogs.length > 0) isQuarterActive = true; } 
       else { if (currentLogs.length > 0) { const teamsInLogs = [...new Set(currentLogs.map(l => l.teamLetter))]; if (teamsInLogs.length === 2) playingTeams = teamsInLogs; else if (teamsInLogs.length === 1) playingTeams = [teamsInLogs[0], TEAM_LETTERS.find(t => t !== teamsInLogs[0])]; isQuarterActive = true; } }
-      setLiveMatchId(match.id); setLiveState({ currentQuarter: currentQ, playingTeams: playingTeams, isQuarterActive: isQuarterActive }); setAppState('liveMatch');
+      const initialGk1 = getLastGkForTeam(match, playingTeams[0]);
+      const initialGk2 = match.matchType === 'external' ? null : getLastGkForTeam(match, playingTeams[1]);
+      setLiveMatchId(match.id); setLiveState({ currentQuarter: currentQ, playingTeams: playingTeams, isQuarterActive: isQuarterActive, gk1: initialGk1, gk2: initialGk2 }); setAppState('liveMatch');
     }
   };
 
@@ -543,6 +638,9 @@ export default function App() {
     e.preventDefault(); if(isProcessing) return; setIsProcessing(true);
     try {
       const fd = new FormData(e.target); const newTeam1 = fd.get('team1'); const newTeam2 = fd.get('team2');
+      const rawGk1 = fd.get('gk1'); const rawGk2 = fd.get('gk2');
+      const newGk1 = (!rawGk1 || rawGk1 === 'none') ? null : rawGk1;
+      const newGk2 = (!rawGk2 || rawGk2 === 'none') ? null : rawGk2;
       if (newTeam1 === newTeam2) { setSystemAlert({ isOpen: true, message: '서로 다른 팀을 선택해주세요.' }); setIsProcessing(false); return; }
       const m = matches.find(match => match.id === quarterEditModal.match.id); const qs = quarterEditModal.quarterScore;
       const oldTeam1 = qs.team1; const oldTeam2 = qs.team2;
@@ -556,7 +654,7 @@ export default function App() {
           return log;
         });
       }
-      const updatedQuarterScores = (m.quarterScores || []).map(q => q.quarter === qs.quarter ? { ...q, team1: newTeam1, team2: newTeam2 } : q);
+      const updatedQuarterScores = (m.quarterScores || []).map(q => q.quarter === qs.quarter ? { ...q, team1: newTeam1, team2: newTeam2, gk1: newGk1, gk2: newGk2 } : q);
       await setDoc(doc(db, 'matches', m.id), { ...m, logs: updatedLogs, scores: updatedScores, quarterScores: updatedQuarterScores });
       setQuarterEditModal({ isOpen: false, match: null, quarterScore: null }); setSystemAlert({ isOpen: true, message: '쿼터 정보가 수정되었습니다.' });
     } finally { setIsProcessing(false); }
@@ -590,7 +688,7 @@ export default function App() {
         const [t1, t2] = liveState.playingTeams;
         const qScore1 = (liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === t1).length;
         const qScore2 = (liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === t2).length;
-        const newQuarterScore = { quarter: liveState.currentQuarter, team1: t1, team2: t2, score1: qScore1, score2: qScore2 };
+        const newQuarterScore = { quarter: liveState.currentQuarter, team1: t1, team2: t2, score1: qScore1, score2: qScore2, gk1: liveState.gk1 || null, gk2: liveState.gk2 || null };
         updatedMatch = { ...updatedMatch, quarterScores: [...(liveMatch.quarterScores || []), newQuarterScore] };
       }
       if (isEarlyEnd || liveState.currentQuarter >= liveMatch.totalQuarters) {
@@ -602,7 +700,9 @@ export default function App() {
          await setDoc(doc(db, 'matches', liveMatchId), updatedMatch);
          const nextQ = liveState.currentQuarter + 1; const stats = updatedMatch.isTournament ? calculateTournamentStandings(updatedMatch) : null;
          const nextTeams = updatedMatch.isTournament ? getTournamentMatchup(nextQ, updatedMatch, stats) : ['A', 'B'];
-         setLiveState({ currentQuarter: nextQ, playingTeams: nextTeams, isQuarterActive: false });
+         const nextGk1 = getLastGkForTeam(updatedMatch, nextTeams[0]);
+         const nextGk2 = updatedMatch.matchType === 'external' ? null : getLastGkForTeam(updatedMatch, nextTeams[1]);
+         setLiveState({ currentQuarter: nextQ, playingTeams: nextTeams, isQuarterActive: false, gk1: nextGk1, gk2: nextGk2 });
       }
     } finally { setIsProcessing(false); }
   };
@@ -774,6 +874,24 @@ export default function App() {
     );
   };
 
+  const renderQuarterGkBadge = (match, qs) => {
+    const gk1Name = getGkDisplayName(qs.gk1);
+    const gk2Name = match.matchType === 'external' ? null : getGkDisplayName(qs.gk2);
+    if (!gk1Name && !gk2Name) return null;
+    return (
+      <div className="flex justify-between items-center text-[11px] bg-slate-800/60 px-3 py-1.5 rounded-lg mb-3 border border-slate-700/60">
+        <div className="flex items-center gap-1 text-slate-300">
+          {gk1Name ? <><span>🧤</span><span className={`font-bold ${TEAM_TEXT_COLORS[qs.team1]}`}>{getTeamDisplayName(match, qs.team1)}</span><span>GK: <strong className="text-white">{gk1Name}</strong> <span className="text-slate-400">({qs.score2}실점)</span></span></> : <span className="text-slate-500">🧤 GK 미지정</span>}
+        </div>
+        {match.matchType !== 'external' && (
+          <div className="flex items-center gap-1 text-slate-300">
+            {gk2Name ? <><span>🧤</span><span className={`font-bold ${TEAM_TEXT_COLORS[qs.team2]}`}>{getTeamDisplayName(match, qs.team2)}</span><span>GK: <strong className="text-white">{gk2Name}</strong> <span className="text-slate-400">({qs.score1}실점)</span></span></> : <span className="text-slate-500">🧤 GK 미지정</span>}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderQuartersList = (match) => {
     if (match.isTournament) {
       let elements = [];
@@ -792,6 +910,7 @@ export default function App() {
                     <span className="font-bold text-white text-lg flex items-center"><span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(match, qs.team1)}</span> <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span> <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(match, qs.team2)}</span></span>
                     {checkCanEdit(match) && ( <button onClick={() => setQuarterEditModal({isOpen: true, match, quarterScore: qs})} className="absolute right-0 text-slate-500 p-1 bg-slate-800 rounded-md"><Edit size={14}/></button> )}
                   </div>
+                  {renderQuarterGkBadge(match, qs)}
                   {renderQuarterLogsBlock(match, qs, true)}
                   {checkCanEdit(match) && (
                     <div className="flex justify-center gap-2 mt-4 pt-4 border-t border-slate-800/50">
@@ -817,6 +936,7 @@ export default function App() {
                 <span className="font-bold text-white text-lg flex items-center"><span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(match, qs.team1)}</span> <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span> <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(match, qs.team2)}</span></span>
                 {checkCanEdit(match) && ( <button onClick={() => setQuarterEditModal({isOpen: true, match, quarterScore: qs})} className="absolute right-0 text-slate-500 p-1 bg-slate-800 rounded-md"><Edit size={14}/></button> )}
               </div>
+              {renderQuarterGkBadge(match, qs)}
               {renderQuarterLogsBlock(match, qs, true)}
               {checkCanEdit(match) && (
                 <div className="flex justify-center gap-2 mt-4 pt-4 border-t border-slate-800/50">
@@ -834,17 +954,48 @@ export default function App() {
   const renderQuarterEditModal = () => {
     if (!quarterEditModal.isOpen || !quarterEditModal.match || !quarterEditModal.quarterScore) return null;
     const m = quarterEditModal.match; const qs = quarterEditModal.quarterScore; const maxTeams = getMatchTeamCount(m);
+    const { teamPlayers: t1Players, otherPlayers: t1Others } = getTeamCandidatePlayers(m, qs.team1);
+    const { teamPlayers: t2Players, otherPlayers: t2Others } = getTeamCandidatePlayers(m, qs.team2);
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[150] animate-in fade-in">
         <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2"><Edit size={18}/> {qs.quarter}Q 출전 팀 수정</h2>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2"><Edit size={18}/> {qs.quarter}Q 쿼터/골키퍼 수정</h2>
             <button onClick={() => setQuarterEditModal({isOpen: false, match: null, quarterScore: null})} className="text-slate-400 hover:text-white"><X size={20}/></button>
           </div>
-          <form onSubmit={handleQuarterEditSave} className="space-y-5">
-            <div className="flex items-center gap-4">
-              <div className="flex-1"><label className="block text-xs font-bold text-slate-400 mb-2 text-center">홈 팀</label><select name="team1" defaultValue={qs.team1} className={`w-full bg-slate-900 border border-slate-700 p-3 rounded-xl outline-none font-bold text-center ${TEAM_TEXT_COLORS[qs.team1]}`}>{TEAM_LETTERS.slice(0, maxTeams).map(t => <option key={t} value={t} className={TEAM_TEXT_COLORS[t]}>{t}팀</option>)}</select></div>
-              <div className="flex-1"><label className="block text-xs font-bold text-slate-400 mb-2 text-center">원정 팀</label><select name="team2" defaultValue={qs.team2} className={`w-full bg-slate-900 border border-slate-700 p-3 rounded-xl outline-none font-bold text-center ${TEAM_TEXT_COLORS[qs.team2]}`}>{TEAM_LETTERS.slice(0, maxTeams).map(t => <option key={t} value={t} className={TEAM_TEXT_COLORS[t]}>{t}팀</option>)}</select></div>
+          <form onSubmit={handleQuarterEditSave} className="space-y-4">
+            {m.matchType === 'external' ? (
+              <>
+                <input type="hidden" name="team1" value={qs.team1} />
+                <input type="hidden" name="team2" value={qs.team2} />
+              </>
+            ) : (
+              <div className="flex items-center gap-4">
+                <div className="flex-1"><label className="block text-xs font-bold text-slate-400 mb-2 text-center">홈 팀</label><select name="team1" defaultValue={qs.team1} className={`w-full bg-slate-900 border border-slate-700 p-3 rounded-xl outline-none font-bold text-center ${TEAM_TEXT_COLORS[qs.team1]}`}>{TEAM_LETTERS.slice(0, maxTeams).map(t => <option key={t} value={t} className={TEAM_TEXT_COLORS[t]}>{t}팀</option>)}</select></div>
+                <div className="flex-1"><label className="block text-xs font-bold text-slate-400 mb-2 text-center">원정 팀</label><select name="team2" defaultValue={qs.team2} className={`w-full bg-slate-900 border border-slate-700 p-3 rounded-xl outline-none font-bold text-center ${TEAM_TEXT_COLORS[qs.team2]}`}>{TEAM_LETTERS.slice(0, maxTeams).map(t => <option key={t} value={t} className={TEAM_TEXT_COLORS[t]}>{t}팀</option>)}</select></div>
+              </div>
+            )}
+            <div className="space-y-3 pt-2 border-t border-slate-700/60">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">🧤 {getTeamDisplayName(m, qs.team1)} 골키퍼 (GK)</label>
+                <select name="gk1" defaultValue={qs.gk1 || 'none'} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none text-sm font-bold">
+                  <option value="none">미지정</option>
+                  <option value="mercenary">👤 용병</option>
+                  <optgroup label="소속/참석 선수">{t1Players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>
+                  {t1Others.length > 0 && <optgroup label="타팀 지원">{t1Others.map(p => <option key={p.id} value={p.id}>({(m.teamAssignments || {})[p.id] ? `${m.teamAssignments[p.id]}팀` : '미정'}) {p.name}</option>)}</optgroup>}
+                </select>
+              </div>
+              {m.matchType !== 'external' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">🧤 {getTeamDisplayName(m, qs.team2)} 골키퍼 (GK)</label>
+                  <select name="gk2" defaultValue={qs.gk2 || 'none'} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none text-sm font-bold">
+                    <option value="none">미지정</option>
+                    <option value="mercenary">👤 용병</option>
+                    <optgroup label="소속/참석 선수">{t2Players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>
+                    {t2Others.length > 0 && <optgroup label="타팀 지원">{t2Others.map(p => <option key={p.id} value={p.id}>({(m.teamAssignments || {})[p.id] ? `${m.teamAssignments[p.id]}팀` : '미정'}) {p.name}</option>)}</optgroup>}
+                  </select>
+                </div>
+              )}
             </div>
             <div className="flex gap-2 pt-2 border-t border-slate-700"><button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">수정 저장</button></div>
             <button type="button" onClick={handleQuarterDelete} className="w-full py-3 mt-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold text-sm flex items-center justify-center gap-1"><Trash2 size={16}/> 이 기록 삭제 및 미진행 처리하기</button>
@@ -1321,7 +1472,7 @@ const renderGoalFlowModal = () => {
           <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-700 pb-4"><h2 className="text-lg font-bold text-white flex items-center gap-2"><Calendar size={18}/> {dateMemoModal.dateStr} 일정</h2><button onClick={() => setDateMemoModal({ isOpen: false, dateStr: null, matches: [], memo: '' })} className="text-slate-400 hover:text-white"><X size={20}/></button></div>
           <div className="flex-1 overflow-y-auto pr-1 space-y-4 hide-scrollbar">
              {dateMemoModal.matches.length > 0 ? (
-                <div className="space-y-3"><h3 className="text-xs font-bold text-slate-500">예정/종료된 경기</h3>{dateMemoModal.matches.map(m => ( <div key={m.id} className="bg-slate-900 p-3 rounded-xl border border-slate-700"><div className="flex items-center gap-2 mb-1"><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${m.status === 'completed' ? 'bg-slate-700 text-slate-400' : 'bg-blue-500/20 text-blue-400'}`}>{m.status === 'completed' ? '종료' : '예정'}</span><span className="text-sm font-bold text-white">{m.location}</span></div><div className="text-[11px] text-slate-400">{formatTimeAmPm(m.time)} • {m.matchType === 'external' ? `vs ${m.opponentName}` : m.matchType === 'futsal' ? `${m.teamCount || 2}팀 풋살` : `${m.teamCount || 2}팀 자체전`}</div></div> ))}</div>
+                <div className="space-y-3"><h3 className="text-xs font-bold text-slate-500">예정/종료된 경기</h3>{dateMemoModal.matches.map(m => { const badge = getMatchResultBadge(m); return ( <div key={m.id} className="bg-slate-900 p-3 rounded-xl border border-slate-700"><div className="flex items-center gap-2 mb-1 flex-wrap"><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${m.status === 'completed' ? 'bg-slate-700 text-slate-400' : 'bg-blue-500/20 text-blue-400'}`}>{m.status === 'completed' ? '종료' : '예정'}</span>{badge && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${badge.className}`}>{badge.label} ({badge.detail})</span>}<span className="text-sm font-bold text-white">{m.location}</span></div><div className="text-[11px] text-slate-400">{formatTimeAmPm(m.time)} • {m.matchType === 'external' ? `vs ${m.opponentName}` : m.matchType === 'futsal' ? `${m.teamCount || 2}팀 풋살` : `${m.teamCount || 2}팀 자체전`}</div></div> ); })}</div>
              ) : ( <div className="text-sm text-slate-500 text-center py-4">이 날짜에 등록된 경기가 없습니다.</div> )}
              <div className="pt-2 border-t border-slate-700">
                 <h3 className="text-xs font-bold text-slate-500 mb-2">날짜 메모 (관리자 전용)</h3>
@@ -1453,6 +1604,8 @@ const renderGoalFlowModal = () => {
 
   if (appState === 'liveMatch' && liveMatch) {
     const activeTeams = liveState.playingTeams; const isExternal = liveMatch.matchType === 'external';
+    const { teamPlayers: t1GkCandidates, otherPlayers: t1GkOthers } = getTeamCandidatePlayers(liveMatch, activeTeams[0]);
+    const { teamPlayers: t2GkCandidates, otherPlayers: t2GkOthers } = getTeamCandidatePlayers(liveMatch, activeTeams[1]);
     return (
       <div className="bg-slate-900 text-slate-200 font-sans p-5 sm:p-6 max-w-md mx-auto relative flex flex-col h-[100dvh] overflow-hidden animate-in fade-in">
         {globalStyles}
@@ -1467,19 +1620,41 @@ const renderGoalFlowModal = () => {
 
         {!liveState.isQuarterActive ? (
           <>
-            <div className="flex-1 flex flex-col justify-center pb-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="flex-1 flex flex-col justify-center pb-4 overflow-y-auto hide-scrollbar animate-in fade-in slide-in-from-bottom-4 duration-500">
               {liveMatch.isTournament && <div className="text-center text-yellow-400 font-bold mb-2 text-sm">{getTournamentQuarterInfo(liveState.currentQuarter).title} 대진표 자동 배정됨</div>}
               <h2 className="text-3xl font-black text-center text-white mb-2">{liveState.currentQuarter}Q 매치업</h2>
-              <p className="text-center text-slate-400 mb-10">이번 쿼터에 맞붙을 팀을 확인하세요.</p>
+              <p className="text-center text-slate-400 mb-6">이번 쿼터에 맞붙을 팀과 골키퍼를 확인하세요.</p>
               {isExternal ? (
-                <div className="flex items-center justify-center gap-4 mb-12"><div className="w-32 border-2 text-white font-black text-xl text-center py-8 rounded-2xl shadow-xl bg-slate-800 border-slate-400">{activeTeam?.name || '우리 팀'}</div><span className="text-slate-600 font-black italic text-2xl">VS</span><div className={`w-32 border-2 text-white font-black text-xl text-center py-8 rounded-2xl shadow-xl ${TEAM_COLORS['B']}`}>{liveMatch.opponentName}</div></div>
+                <div className="flex items-center justify-center gap-4 mb-6"><div className="w-32 border-2 text-white font-black text-xl text-center py-6 rounded-2xl shadow-xl bg-slate-800 border-slate-400">{activeTeam?.name || '우리 팀'}</div><span className="text-slate-600 font-black italic text-2xl">VS</span><div className={`w-32 border-2 text-white font-black text-xl text-center py-6 rounded-2xl shadow-xl ${TEAM_COLORS['B']}`}>{liveMatch.opponentName}</div></div>
               ) : (
-                <div className="flex items-center justify-center gap-4 mb-12">
-                  <select value={liveState.playingTeams[0]} onChange={(e) => setLiveState({...liveState, playingTeams: [e.target.value, liveState.playingTeams[1]]})} className={`w-28 border-2 text-white font-black text-3xl text-center py-6 rounded-2xl appearance-none shadow-xl outline-none ${liveState.playingTeams[0] === 'A' ? 'bg-slate-800 border-slate-400' : TEAM_COLORS[liveState.playingTeams[0]]}`}>{TEAM_LETTERS.slice(0, getMatchTeamCount(liveMatch)).map(t => <option key={t} value={t} className="bg-slate-900">{t}팀</option>)}</select>
+                <div className="flex items-center justify-center gap-4 mb-6">
+                  <select value={liveState.playingTeams[0]} onChange={(e) => { const nt = e.target.value; setLiveState({...liveState, playingTeams: [nt, liveState.playingTeams[1]], gk1: getLastGkForTeam(liveMatch, nt)}); }} className={`w-28 border-2 text-white font-black text-3xl text-center py-5 rounded-2xl appearance-none shadow-xl outline-none ${liveState.playingTeams[0] === 'A' ? 'bg-slate-800 border-slate-400' : TEAM_COLORS[liveState.playingTeams[0]]}`}>{TEAM_LETTERS.slice(0, getMatchTeamCount(liveMatch)).map(t => <option key={t} value={t} className="bg-slate-900">{t}팀</option>)}</select>
                   <span className="text-slate-600 font-black italic text-2xl">VS</span>
-                  <select value={liveState.playingTeams[1]} onChange={(e) => setLiveState({...liveState, playingTeams: [liveState.playingTeams[0], e.target.value]})} className={`w-28 border-2 text-white font-black text-3xl text-center py-6 rounded-2xl appearance-none shadow-xl outline-none ${liveState.playingTeams[1] === 'A' ? 'bg-slate-800 border-slate-400' : TEAM_COLORS[liveState.playingTeams[1]]}`}>{TEAM_LETTERS.slice(0, getMatchTeamCount(liveMatch)).map(t => <option key={t} value={t} className="bg-slate-900">{t}팀</option>)}</select>
+                  <select value={liveState.playingTeams[1]} onChange={(e) => { const nt = e.target.value; setLiveState({...liveState, playingTeams: [liveState.playingTeams[0], nt], gk2: getLastGkForTeam(liveMatch, nt)}); }} className={`w-28 border-2 text-white font-black text-3xl text-center py-5 rounded-2xl appearance-none shadow-xl outline-none ${liveState.playingTeams[1] === 'A' ? 'bg-slate-800 border-slate-400' : TEAM_COLORS[liveState.playingTeams[1]]}`}>{TEAM_LETTERS.slice(0, getMatchTeamCount(liveMatch)).map(t => <option key={t} value={t} className="bg-slate-900">{t}팀</option>)}</select>
                 </div>
               )}
+              <div className={`grid ${isExternal ? 'grid-cols-1' : 'grid-cols-2'} gap-3 mb-6 bg-slate-800/60 p-3.5 rounded-2xl border border-slate-700/70`}>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-1.5">🧤 {getTeamDisplayName(liveMatch, activeTeams[0])} 골키퍼</label>
+                  <select value={liveState.gk1 || 'none'} onChange={(e) => setLiveState({...liveState, gk1: e.target.value === 'none' ? null : e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white text-xs font-bold outline-none">
+                    <option value="none">미지정 (선택안함)</option>
+                    <option value="mercenary">👤 용병</option>
+                    <optgroup label="소속/참석 선수">{t1GkCandidates.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>
+                    {t1GkOthers.length > 0 && <optgroup label="타팀 지원">{t1GkOthers.map(p => <option key={p.id} value={p.id}>({(liveMatch.teamAssignments || {})[p.id] ? `${liveMatch.teamAssignments[p.id]}팀` : '미정'}) {p.name}</option>)}</optgroup>}
+                  </select>
+                </div>
+                {!isExternal && (
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 mb-1.5">🧤 {getTeamDisplayName(liveMatch, activeTeams[1])} 골키퍼</label>
+                    <select value={liveState.gk2 || 'none'} onChange={(e) => setLiveState({...liveState, gk2: e.target.value === 'none' ? null : e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white text-xs font-bold outline-none">
+                      <option value="none">미지정 (선택안함)</option>
+                      <option value="mercenary">👤 용병</option>
+                      <optgroup label="소속/참석 선수">{t2GkCandidates.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>
+                      {t2GkOthers.length > 0 && <optgroup label="타팀 지원">{t2GkOthers.map(p => <option key={p.id} value={p.id}>({(liveMatch.teamAssignments || {})[p.id] ? `${liveMatch.teamAssignments[p.id]}팀` : '미정'}) {p.name}</option>)}</optgroup>}
+                    </select>
+                  </div>
+                )}
+              </div>
               <button onClick={() => { if (liveState.playingTeams[0] === liveState.playingTeams[1]) { setSystemAlert({isOpen:true, message:'서로 다른 팀을 선택해주세요.'}); return; } setLiveState({...liveState, isQuarterActive: true}); }} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 rounded-xl text-xl shadow-lg transition">쿼터 시작하기</button>
               <button onClick={() => endQuarter(true)} className="w-full bg-slate-800 text-slate-400 hover:text-white font-bold py-3 rounded-xl mt-3 text-sm transition border border-slate-700">경기 조기 종료</button>
             </div>
@@ -1492,11 +1667,39 @@ const renderGoalFlowModal = () => {
           </>
         ) : (
           <>
-            <div className="bg-slate-800 rounded-3xl p-6 flex justify-between items-center mb-6 border border-slate-700 shadow-xl relative overflow-hidden shrink-0">
+            <div className="bg-slate-800 rounded-3xl p-5 mb-5 border border-slate-700 shadow-xl relative overflow-hidden shrink-0">
               <div className={`absolute top-0 left-0 w-1/2 h-1.5 bg-current ${TEAM_TEXT_COLORS[activeTeams[0]]}`}></div><div className={`absolute top-0 right-0 w-1/2 h-1.5 bg-current ${TEAM_TEXT_COLORS[activeTeams[1]]}`}></div>
-              <div className="text-center w-[40%]"><div className={`font-black text-[13px] mb-1 truncate ${TEAM_TEXT_COLORS[activeTeams[0]]}`}>{getTeamDisplayName(liveMatch, activeTeams[0])}</div><div className="text-5xl font-black text-white">{(liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === activeTeams[0]).length}</div></div>
-              <div className="text-xl font-black text-slate-600 italic">VS</div>
-              <div className="text-center w-[40%]"><div className={`font-black text-[13px] mb-1 truncate ${TEAM_TEXT_COLORS[activeTeams[1]]}`}>{getTeamDisplayName(liveMatch, activeTeams[1])}</div><div className="text-5xl font-black text-white">{(liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === activeTeams[1]).length}</div></div>
+              <div className="flex justify-between items-center">
+                <div className="text-center w-[42%]">
+                  <div className={`font-black text-[13px] mb-1 truncate ${TEAM_TEXT_COLORS[activeTeams[0]]}`}>{getTeamDisplayName(liveMatch, activeTeams[0])}</div>
+                  <div className="text-5xl font-black text-white">{(liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === activeTeams[0]).length}</div>
+                  <div className="mt-2">
+                    <select value={liveState.gk1 || 'none'} onChange={(e) => setLiveState({...liveState, gk1: e.target.value === 'none' ? null : e.target.value})} className="w-full bg-slate-900/90 border border-slate-700 px-2 py-1 rounded-lg text-[11px] font-bold text-slate-300 outline-none text-center">
+                      <option value="none">🧤 GK 미지정</option>
+                      <option value="mercenary">🧤 GK: 용병</option>
+                      <optgroup label="소속/참석 선수">{t1GkCandidates.map(p => <option key={p.id} value={p.id}>🧤 GK: {p.name}</option>)}</optgroup>
+                      {t1GkOthers.length > 0 && <optgroup label="타팀 지원">{t1GkOthers.map(p => <option key={p.id} value={p.id}>🧤 GK: {p.name}</option>)}</optgroup>}
+                    </select>
+                  </div>
+                </div>
+                <div className="text-xl font-black text-slate-600 italic">VS</div>
+                <div className="text-center w-[42%]">
+                  <div className={`font-black text-[13px] mb-1 truncate ${TEAM_TEXT_COLORS[activeTeams[1]]}`}>{getTeamDisplayName(liveMatch, activeTeams[1])}</div>
+                  <div className="text-5xl font-black text-white">{(liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === activeTeams[1]).length}</div>
+                  {!isExternal ? (
+                    <div className="mt-2">
+                      <select value={liveState.gk2 || 'none'} onChange={(e) => setLiveState({...liveState, gk2: e.target.value === 'none' ? null : e.target.value})} className="w-full bg-slate-900/90 border border-slate-700 px-2 py-1 rounded-lg text-[11px] font-bold text-slate-300 outline-none text-center">
+                        <option value="none">🧤 GK 미지정</option>
+                        <option value="mercenary">🧤 GK: 용병</option>
+                        <optgroup label="소속/참석 선수">{t2GkCandidates.map(p => <option key={p.id} value={p.id}>🧤 GK: {p.name}</option>)}</optgroup>
+                        {t2GkOthers.length > 0 && <optgroup label="타팀 지원">{t2GkOthers.map(p => <option key={p.id} value={p.id}>🧤 GK: {p.name}</option>)}</optgroup>}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-[11px] text-slate-500 py-1 font-bold">상대팀</div>
+                  )}
+                </div>
+              </div>
             </div>
             <div className="flex gap-4 mb-6 shrink-0">
               <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: null, quarter: null, teamLetter: activeTeams[0], scorer: null, isPK: false, remark: '', isMissingAdd: false })} className={`flex-1 border-2 py-6 rounded-3xl flex flex-col items-center justify-center gap-2 transition shadow-lg ${activeTeams[0] === 'A' ? 'bg-slate-800 border-slate-400 text-white' : TEAM_COLORS[activeTeams[0]]}`}><Trophy size={28} className="fill-current"/><span className="font-black text-sm">{getTeamDisplayName(liveMatch, activeTeams[0])} 득점</span></button>
@@ -1507,6 +1710,7 @@ const renderGoalFlowModal = () => {
               {(liveMatch.quarterScores || []).map(qs => (
                 <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-800 mb-2 shrink-0">
                    <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3"><span className="absolute left-0 font-bold text-slate-500 text-sm">{qs.quarter}Q</span><span className="font-bold text-white text-[15px] flex items-center"><span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(liveMatch, qs.team1)}</span><span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span><span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(liveMatch, qs.team2)}</span></span><button onClick={() => setQuarterEditModal({isOpen: true, match: liveMatch, quarterScore: qs})} className="absolute right-0 text-slate-500 hover:text-white p-1 bg-slate-800 rounded-md transition"><Edit size={14}/></button></div>
+                   {renderQuarterGkBadge(liveMatch, qs)}
                    {renderQuarterLogsBlock(liveMatch, qs, true)}
                    <div className="flex justify-center gap-2 mt-4 pt-3 border-t border-slate-800/50">
                      <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: liveMatch.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition"><Plus size={14}/> {getTeamDisplayName(liveMatch, qs.team1)} 득점 추가</button>
@@ -1622,7 +1826,7 @@ const renderGoalFlowModal = () => {
               <h3 className="text-lg font-black text-white">{viewDate.getFullYear()}년 {viewDate.getMonth() + 1}월</h3>
               <button onClick={nextMonth} className="p-2 text-slate-400 hover:text-white"><ChevronRight size={20}/></button>
             </div>
-            <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-sm">
+            <div className="bg-slate-800 rounded-2xl p-2 sm:p-4 border border-slate-700 shadow-sm">
                 <div className="grid grid-cols-7 gap-1 text-center mb-2">{['일', '월', '화', '수', '목', '금', '토'].map((d, i) => <div key={d} className={`text-[10px] font-bold ${i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-slate-500'}`}>{d}</div>)}</div>
                 <div className="grid grid-cols-7 gap-1">
                   {(() => {
@@ -1632,12 +1836,26 @@ const renderGoalFlowModal = () => {
                     for (let day = 1; day <= daysInMonth; day++) {
                       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                       const dayMatches = matchesByDate[dateStr] || [];
+                      const dayOfWeek = new Date(year, month, day).getDay();
                       days.push(
-                        <div key={day} onClick={() => setDateMemoModal({ isOpen: true, dateStr, matches: dayMatches, memo: memos[dateStr] || '' })} className="p-1 sm:p-1.5 min-h-[75px] border border-slate-700/50 rounded-lg relative flex flex-col bg-slate-800/30 cursor-pointer hover:bg-slate-800 transition overflow-hidden">
-                          <span className="text-[10px] font-bold text-slate-400 text-center mb-0.5">{day}</span>
-                          <div className="flex flex-col gap-0.5 w-full flex-1 justify-start overflow-hidden">
-                            {dayMatches.map((m, idx) => ( <div key={idx} className={`w-full text-center text-[10px] sm:text-[11px] font-black truncate tracking-tighter ${m.status === 'completed' ? 'text-slate-500' : 'text-blue-400'}`}>{m.matchType === 'external' ? m.opponentName : m.matchType === 'futsal' ? '풋살' : '자체전'}</div> ))}
-                            {memos[dateStr] && <div className="w-full text-center text-[10px] sm:text-[11px] font-bold text-yellow-500 truncate tracking-tighter mt-0.5">{memos[dateStr]}</div>}
+                        <div key={day} onClick={() => setDateMemoModal({ isOpen: true, dateStr, matches: dayMatches, memo: memos[dateStr] || '' })} className="p-1 min-h-[82px] border border-slate-700/50 rounded-lg relative flex flex-col bg-slate-800/30 cursor-pointer hover:bg-slate-800 transition">
+                          <span className={`text-[10px] font-bold text-center mb-1 ${dayOfWeek === 0 ? 'text-red-400' : dayOfWeek === 6 ? 'text-blue-400' : 'text-slate-400'}`}>{day}</span>
+                          <div className="flex flex-col gap-1 w-full flex-1 justify-start">
+                            {dayMatches.map((m, idx) => {
+                              const badge = getMatchResultBadge(m);
+                              const label = m.matchType === 'external' ? (m.opponentName || '상대팀') : m.matchType === 'futsal' ? '풋살' : '자체전';
+                              return (
+                                <div key={idx} className={`w-full rounded px-0.5 py-0.5 border text-center flex flex-col items-center justify-center gap-0.5 ${m.status === 'completed' ? 'bg-slate-900/80 border-slate-700/80 text-slate-300' : 'bg-blue-500/10 border-blue-500/30 text-blue-300'}`}>
+                                  <span className="w-full text-[9px] sm:text-[10px] font-black leading-[1.15] break-all whitespace-normal">{label}</span>
+                                  {badge && (
+                                    <span className={`text-[8px] sm:text-[9px] font-black px-1 py-0.2 rounded border leading-tight ${badge.color}`}>
+                                      {badge.text}{badge.score ? ` ${badge.score}` : ''}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {memos[dateStr] && <div className="w-full text-center text-[9px] sm:text-[10px] font-bold text-yellow-500 leading-tight break-all whitespace-normal mt-0.5 bg-yellow-500/10 rounded px-0.5 py-0.5">{memos[dateStr]}</div>}
                           </div>
                         </div>
                       );
@@ -1652,13 +1870,19 @@ const renderGoalFlowModal = () => {
                 {monthlyMatches.length === 0 ? (
                     <div className="text-center py-6 text-slate-600 text-sm">일정이 없습니다.</div>
                 ) : (
-                    monthlyMatches.sort((a,b) => a.date.localeCompare(b.date)).map(m => (
+                    monthlyMatches.sort((a,b) => a.date.localeCompare(b.date)).map(m => {
+                        const badge = getMatchResultBadge(m);
+                        return (
                         <div key={m.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 relative group flex flex-col">
                            <div className="flex items-start gap-3">
                                <div className="flex flex-col items-center justify-center bg-slate-900 w-12 h-12 rounded-lg border border-slate-700 shrink-0"><span className="text-[10px] text-slate-500">{m.date.split('-')[1]}월</span><span className="text-lg font-black text-white">{m.date.split('-')[2]}</span></div>
                                <div className="flex-1 min-w-0 pt-0.5">
-                                   <div className="flex items-center gap-2 mb-1"><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${m.status === 'completed' ? 'bg-slate-700 text-slate-400' : 'bg-blue-500/20 text-blue-400'}`}>{m.status === 'completed' ? '종료' : '예정'}</span><span className="text-sm font-bold text-white truncate">{m.location}</span></div>
-                                   <div className="text-[11px] text-slate-400 truncate">{formatTimeAmPm(m.time)} • {m.matchType === 'external' ? `vs ${m.opponentName}` : m.matchType === 'futsal' ? `${m.teamCount || 2}팀 풋살` : `${m.teamCount || 2}팀 자체전`}</div>
+                                   <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${m.status === 'completed' ? 'bg-slate-700 text-slate-400' : 'bg-blue-500/20 text-blue-400'}`}>{m.status === 'completed' ? '종료' : '예정'}</span>
+                                     {badge && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border shrink-0 ${badge.color}`}>{badge.text}{badge.score ? ` (${badge.score})` : ''}</span>}
+                                     <span className="text-sm font-bold text-white break-all">{m.location}</span>
+                                   </div>
+                                   <div className="text-[11px] text-slate-400 break-all">{formatTimeAmPm(m.time)} • {m.matchType === 'external' ? `vs ${m.opponentName}` : m.matchType === 'futsal' ? `${m.teamCount || 2}팀 풋살` : `${m.teamCount || 2}팀 자체전`}</div>
                                </div>
                                {isAdmin && ( <label className="text-slate-400 hover:text-white p-2 cursor-pointer bg-slate-700 rounded-lg border border-slate-600 transition shrink-0" onClick={e => e.stopPropagation()}><Plus size={16}/><input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleUploadPhotos(e, m.id)} /></label> )}
                            </div>
@@ -1683,7 +1907,8 @@ const renderGoalFlowModal = () => {
                               </div>
                            )}
                         </div>
-                    ))
+                        );
+                    })
                 )}
             </div>
           </div>
@@ -1707,25 +1932,30 @@ const renderGoalFlowModal = () => {
               <h3 className="text-lg font-black text-white">{statsPeriod === 'month' ? `${viewDate.getFullYear()}년 ${viewDate.getMonth() + 1}월` : `${viewDate.getFullYear()}년`}</h3>
               <button onClick={statsPeriod === 'month' ? nextMonth : nextYear} className="p-2 text-slate-400 hover:text-white"><ChevronRight size={20}/></button>
             </div>
-            {filteredStats.filter(s => s.caps > 0).length === 0 ? (
+            {filteredStats.filter(s => s.caps > 0 || s.gkQuarters > 0).length === 0 ? (
               <div className="text-center py-10 text-slate-500 border border-slate-800 rounded-2xl text-sm">해당 기간에 종료된 경기 데이터가 없습니다.</div>
             ) : (
               <>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
-                    <span className="text-xs font-black text-slate-300 mb-2">{titlePrefix} 득점왕</span><span className="text-2xl mb-1">⚽</span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="bg-slate-800 rounded-2xl p-3.5 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
+                    <span className="text-[11px] font-black text-slate-300 mb-1.5">{titlePrefix} 득점왕</span><span className="text-2xl mb-1">⚽</span>
                     <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{wordBreak: 'keep-all'}}>{topScorers.length===0?'없음':topScorers.length===1?topScorers[0].name:`${topScorers[0].name} 외 ${topScorers.length-1}명`}</span><span className="text-xs font-bold text-blue-400">{maxGoals > 0 ? `${maxGoals}골` : ''}</span>
                   </div>
-                  <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
-                    <span className="text-xs font-black text-slate-300 mb-2">{titlePrefix} 도움왕</span><span className="text-2xl mb-1">👟</span>
+                  <div className="bg-slate-800 rounded-2xl p-3.5 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
+                    <span className="text-[11px] font-black text-slate-300 mb-1.5">{titlePrefix} 도움왕</span><span className="text-2xl mb-1">👟</span>
                     <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{wordBreak: 'keep-all'}}>{topAssists.length===0?'없음':topAssists.length===1?topAssists[0].name:`${topAssists[0].name} 외 ${topAssists.length-1}명`}</span><span className="text-xs font-bold text-blue-400">{maxAssists > 0 ? `${maxAssists}도움` : ''}</span>
                   </div>
-                  <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
-                    <span className="text-xs font-black text-slate-300 mb-2">{titlePrefix} 참석왕</span><span className="text-2xl mb-1">🔥</span>
+                  <div className="bg-slate-800 rounded-2xl p-3.5 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
+                    <span className="text-[11px] font-black text-slate-300 mb-1.5">{titlePrefix} 거미손</span><span className="text-2xl mb-1">🧤</span>
+                    <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{wordBreak: 'keep-all'}}>{topGks.length===0?'없음':topGks.length===1?topGks[0].name:`${topGks[0].name} 외 ${topGks.length-1}명`}</span><span className="text-xs font-bold text-emerald-400">{topGks.length > 0 ? `실점율 ${topGks[0].gkConcededRate.toFixed(2)}` : ''}</span>
+                  </div>
+                  <div className="bg-slate-800 rounded-2xl p-3.5 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
+                    <span className="text-[11px] font-black text-slate-300 mb-1.5">{titlePrefix} 참석왕</span><span className="text-2xl mb-1">🔥</span>
                     <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{wordBreak: 'keep-all'}}>{topCaps.length===0?'없음':topCaps.length===1?topCaps[0].name:`${topCaps[0].name} 외 ${topCaps.length-1}명`}</span><span className="text-xs font-bold text-blue-400">{maxCaps > 0 ? `${maxCaps}회` : ''}</span>
                   </div>
                 </div>
                 <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-sm">
+                  <div className="text-xs font-black text-slate-400 mb-3 flex items-center gap-1.5">⚽ 필드 플레이어 기록</div>
                   <table className="w-full text-sm text-center">
                     <thead>
                       <tr className="text-slate-500 font-bold border-b border-slate-700">
@@ -1745,6 +1975,45 @@ const renderGoalFlowModal = () => {
                     </tbody>
                   </table>
                 </div>
+
+                <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-sm">
+                  <div className="flex justify-between items-center mb-3">
+                    <div className="text-xs font-black text-emerald-400 flex items-center gap-1.5">🧤 골키퍼 방어율 기록</div>
+                    <span className="text-[10px] text-slate-500 font-bold">실점율 = 실점 ÷ 출전 쿼터 (낮을수록 우수)</span>
+                  </div>
+                  {gkStatsList.length === 0 ? (
+                    <div className="text-center py-6 text-slate-500 text-xs border border-slate-700/50 rounded-xl bg-slate-900/40">
+                      해당 기간에 골키퍼(GK)로 지정된 쿼터 기록이 없습니다.<br/>
+                      <span className="text-[11px] text-slate-600">경기 진행 중 또는 경기 상세 &gt; 쿼터 수정에서 GK를 지정해보세요!</span>
+                    </div>
+                  ) : (
+                    <table className="w-full text-sm text-center">
+                      <thead>
+                        <tr className="text-slate-500 font-bold border-b border-slate-700 text-xs">
+                          <th className="pb-3 text-left pl-2">선수명</th>
+                          <th className="pb-3">출전(Q)</th>
+                          <th className="pb-3">실점</th>
+                          <th className="pb-3">클린시트</th>
+                          <th className="pb-3">실점율(당)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gkStatsList.map((st, idx) => (
+                          <tr key={st.id} className="border-b border-slate-700/50 last:border-0">
+                            <td className="py-3 text-left pl-2 font-bold text-white flex items-center gap-1.5">
+                              {idx === 0 && <span className="text-xs">🥇</span>}
+                              {st.name}
+                            </td>
+                            <td className="py-3 text-slate-300 font-bold">{st.gkQuarters}Q</td>
+                            <td className="py-3 text-red-400 font-bold">{st.gkConceded}</td>
+                            <td className="py-3 text-emerald-400 font-bold">{st.gkCleanSheets}회 <span className="text-[10px] text-slate-500 font-normal">({Math.round((st.gkCleanSheets / st.gkQuarters) * 100)}%)</span></td>
+                            <td className="py-3 text-yellow-400 font-black">{st.gkConcededRate.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -1752,7 +2021,7 @@ const renderGoalFlowModal = () => {
 
         {}
         {activeTab === 'tactics' && (
-          <div className="animate-in fade-in flex-1 flex flex-col min-h-0 relative pb-2 -mx-2 px-2">
+          <div className="animate-in fade-in flex-1 flex flex-col min-h-0 overflow-y-auto hide-scrollbar relative pb-4 -mx-2 px-2">
             <div className="flex justify-between items-center shrink-0 mb-3">
               <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-lg border border-slate-700">
                  <button onClick={() => { setPitchType('full'); saveHistory(getInitialTacticsTokens('full'), []); setAnimationFrames([]); setIsPlaying(false); setIsAutoRecording(false); if (playbackRef.current) cancelAnimationFrame(playbackRef.current); }} className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold transition ${pitchType === 'full' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>풀 코트</button>
@@ -1775,10 +2044,10 @@ const renderGoalFlowModal = () => {
                <button onClick={() => setCurrentTool('erase')} className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition ${currentTool === 'erase' ? 'bg-red-500 text-white shadow' : 'text-slate-400 hover:bg-slate-800'}`}><XCircle size={15}/><span className="text-[11px] font-bold">지우기</span></button>
             </div>
 
-            <div className="flex-1 w-full flex justify-center items-center min-h-0 relative pb-6 mt-1">
+            <div className="w-full flex justify-center items-center relative py-2 mt-1 shrink-0">
               <div 
                 ref={boardRef}
-                style={{ maxHeight: '100%', maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: 'none' }}
+                style={{ maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: (currentTool === 'move' || currentTool === 'erase' || isPlaying) ? 'pan-y' : 'none' }}
                 onPointerDown={handleBoardPointerDown} onPointerMove={handleBoardPointerMove} onPointerUp={handleBoardPointerUp} onPointerLeave={handleBoardPointerUp}
                 className={`relative bg-emerald-700 border-2 ${isAutoRecording ? 'border-red-500 shadow-[inset_0_0_20px_rgba(239,68,68,0.7)]' : isPlaying ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'border-white/80 shadow-inner'} overflow-hidden tactic-board select-none w-full mx-auto transition-colors duration-300`}
               >
@@ -1826,7 +2095,7 @@ const renderGoalFlowModal = () => {
                       dragStartTokensRef.current = [...(tacticTokens||[])];
                       setDraggingToken(t.id);
                     }}
-                    style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)' }}
+                    style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%, -50%)', touchAction: 'none' }}
                     className={`absolute rounded-full flex flex-col items-center justify-center font-black transition-transform duration-75 text-[10px] sm:text-[11px] will-change-transform 
                       ${isPlaying ? 'pointer-events-none' : (draggingToken === t.id ? 'transition-none scale-125 z-50 opacity-90 cursor-grabbing' : 'transition-transform duration-100 scale-100 z-30 cursor-grab')}
                       ${currentTool !== 'move' && !isPlaying ? 'pointer-events-none z-20' : ''}
@@ -1842,7 +2111,7 @@ const renderGoalFlowModal = () => {
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 shrink-0 border-t border-slate-800 pt-2 mt-auto">
+            <div className="flex flex-col gap-2 shrink-0 border-t border-slate-800 pt-2 mt-2">
                <div className="flex items-center gap-2 bg-slate-900 rounded-2xl p-1 border border-slate-700">
                  <div className="bg-slate-800 px-2 py-2 rounded-xl text-xs font-black text-slate-300 border border-slate-700 shadow-inner flex items-center gap-1 shrink-0 w-[55px] justify-center">{(animationFrames||[]).length}컷</div>
                  <button onClick={() => {
@@ -1923,13 +2192,18 @@ const renderGoalFlowModal = () => {
                 {calculatedPlayersList.map(p => (
                   <div key={p.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex justify-between items-center group shadow-sm">
                     <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-600 flex items-center justify-center font-black text-slate-400">{p.birthYear}</div>
+                      <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-600 flex items-center justify-center font-black text-slate-400 shrink-0">{p.birthYear}</div>
                       <div>
                         <div className="font-bold text-white text-lg">{p.name}</div>
-                        <div className="flex items-center gap-2 mt-1.5">
+                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                           <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">누적 참석 <strong className="text-blue-400">{p.trueCaps || 0}</strong></span>
                           <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">⚽ <strong className="text-white">{p.trueGoals || 0}</strong></span>
                           <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">👟 <strong className="text-white">{p.trueAssists || 0}</strong></span>
+                          {(p.trueGkQuarters || 0) > 0 && (
+                            <span className="text-[11px] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30 text-emerald-300">
+                              🧤 <strong>{p.trueGkQuarters}Q</strong> / <strong>{p.trueGkConceded}실점</strong> ({(p.trueGkConceded / p.trueGkQuarters).toFixed(2)})
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
