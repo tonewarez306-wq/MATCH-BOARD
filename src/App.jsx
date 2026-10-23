@@ -259,6 +259,7 @@ export default function App() {
   };
   const getMatchResultBadge = (m) => {
     if (!m || m.status !== 'completed') return null;
+    const makeBadge = (label, detail, className) => ({ label, detail, className, text: label, score: detail, color: className });
     const qScores = m.quarterScores || [];
     if (m.matchType === 'external') {
       const standings = calculateStandings(m);
@@ -267,14 +268,14 @@ export default function App() {
       if (qScores.length > 0 && sA && sB) {
         const diff = sA.pts !== sB.pts ? sA.pts - sB.pts : (sA.gd !== sB.gd ? sA.gd - sB.gd : sA.gf - sB.gf);
         const recordText = `${sA.w}승${sA.d ? ` ${sA.d}무` : ''}${sA.l ? ` ${sA.l}패` : ''}`;
-        if (diff > 0) return { label: '승', detail: recordText, className: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' };
-        if (diff < 0) return { label: '패', detail: recordText, className: 'bg-red-500/20 text-red-400 border-red-500/40' };
-        return { label: '무', detail: recordText, className: 'bg-slate-600/30 text-slate-300 border-slate-500/40' };
+        if (diff > 0) return makeBadge('승', recordText, 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40');
+        if (diff < 0) return makeBadge('패', recordText, 'bg-red-500/20 text-red-400 border-red-500/40');
+        return makeBadge('무', recordText, 'bg-slate-600/30 text-slate-300 border-slate-500/40');
       }
       const scoreA = m.scores?.A || 0; const scoreB = m.scores?.B || 0;
-      if (scoreA > scoreB) return { label: '승', detail: `${scoreA}:${scoreB}`, className: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' };
-      if (scoreA < scoreB) return { label: '패', detail: `${scoreA}:${scoreB}`, className: 'bg-red-500/20 text-red-400 border-red-500/40' };
-      return { label: '무', detail: `${scoreA}:${scoreB}`, className: 'bg-slate-600/30 text-slate-300 border-slate-500/40' };
+      if (scoreA > scoreB) return makeBadge('승', `${scoreA}:${scoreB}`, 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40');
+      if (scoreA < scoreB) return makeBadge('패', `${scoreA}:${scoreB}`, 'bg-red-500/20 text-red-400 border-red-500/40');
+      return makeBadge('무', `${scoreA}:${scoreB}`, 'bg-slate-600/30 text-slate-300 border-slate-500/40');
     }
     if (qScores.length > 0) {
       const standings = calculateStandings(m);
@@ -284,9 +285,9 @@ export default function App() {
         const secondPts = m.isTournament ? second.setPts : second.pts;
         if (topPts === 0 && secondPts === 0) return null;
         if (topPts === secondPts && top.gd === second.gd && top.gf === second.gf) {
-          return { label: '무', detail: '동률', className: 'bg-slate-600/30 text-slate-300 border-slate-500/40' };
+          return makeBadge('무', '동률', 'bg-slate-600/30 text-slate-300 border-slate-500/40');
         }
-        return { label: `${top.team}승`, detail: `${top.team}팀 1위`, className: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' };
+        return makeBadge(`${top.team}승`, `${top.team}팀 1위`, 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40');
       }
     }
     return null;
@@ -420,7 +421,7 @@ export default function App() {
     e.preventDefault(); const pwd = e.target.password.value;
     if (authModal.type === 'loginAdminAuth') { if (pwd === adminPassword) { setIsLoginAdminMode(true); setAuthModal({ isOpen: false }); } else setSystemAlert({ isOpen: true, message: '시스템 관리자 비밀번호가 틀렸습니다.' }); }
     else if (authModal.type === 'adminCreate') { if (pwd === adminPassword) { setAuthModal({ isOpen: false }); setIsCreateTeamOpen(true); } else setSystemAlert({ isOpen: true, message: '시스템 관리자 비밀번호가 틀렸습니다.' }); }
-    else if (authModal.type === 'adminMode') { if (pwd === (activeTeam?.adminPassword || 'admin')) { setIsAdmin(true); setAuthModal({ isOpen: false }); } else setSystemAlert({ isOpen: true, message: '팀 관리자 비밀번호가 틀렸습니다.' }); }
+    else if (authModal.type === 'adminMode') { if (pwd === (activeTeam?.adminPassword || activeTeam?.password || 'admin') || pwd === activeTeam?.password) { setIsAdmin(true); setAuthModal({ isOpen: false }); } else setSystemAlert({ isOpen: true, message: '관리자 비밀번호가 틀렸습니다.' }); }
     else if (authModal.type === 'teamLoginView') { if (pwd === authModal.targetTeam.password) { setActiveTeamId(authModal.targetTeam.id); setIsAdmin(false); setAppState('main'); setAuthModal({ isOpen: false }); } else setSystemAlert({ isOpen: true, message: '일반 팀원 비밀번호가 틀렸습니다.' }); }
     else if (authModal.type === 'teamLoginAdmin') { if (pwd === authModal.targetTeam.adminPassword) { setActiveTeamId(authModal.targetTeam.id); setIsAdmin(true); setAppState('main'); setAuthModal({ isOpen: false }); } else setSystemAlert({ isOpen: true, message: '팀 관리자 비밀번호가 틀렸습니다.' }); }
   };
@@ -1330,11 +1331,17 @@ const renderGoalFlowModal = () => {
   };
 
   const renderAuthModal = () => {
-    if (!authModal.isOpen) return null; const isTeamLoginView = authModal.type === 'teamLoginView'; const isTeamLoginAdmin = authModal.type === 'teamLoginAdmin';
+    if (!authModal.isOpen) return null;
+    const isTeamLoginView = authModal.type === 'teamLoginView';
+    const isTeamLoginAdmin = authModal.type === 'teamLoginAdmin';
+    const isAdminMode = authModal.type === 'adminMode';
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
         <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
-          <h2 className="text-xl font-bold text-white mb-2 text-center">{isTeamLoginView ? '일반 팀원 입장' : (isTeamLoginAdmin ? '팀 관리자 입장' : '권한 확인')}</h2>
+          <h2 className="text-xl font-bold text-white mb-2 text-center">
+            {isAdminMode ? '관리자 모드 진입' : isTeamLoginView ? '일반 팀원 입장' : (isTeamLoginAdmin ? '팀 관리자 입장' : '권한 확인')}
+          </h2>
+          {isAdminMode && <p className="text-sm text-slate-400 text-center mb-6">{activeTeam?.name}의 관리자 비밀번호를 입력하세요.</p>}
           {(isTeamLoginView || isTeamLoginAdmin) && <p className="text-sm text-slate-400 text-center mb-6">{authModal.targetTeam?.name}의 {isTeamLoginAdmin ? '관리자' : '일반'} 비밀번호를 입력하세요.</p>}
           <form onSubmit={handleAuthSubmit} className="space-y-4"><input type="password" name="password" required placeholder="비밀번호" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none text-center tracking-widest font-mono text-lg" autoFocus /><div className="flex gap-2 pt-2"><button type="button" onClick={() => setAuthModal({isOpen: false, type: '', targetTeam: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold">취소</button><button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">확인</button></div></form>
         </div>
@@ -1580,9 +1587,9 @@ const renderGoalFlowModal = () => {
             <div className="space-y-4 animate-in fade-in">
               {teams.map(team => (
                 <div key={team.id} className="relative group">
-                  <button onClick={() => !isLoginAdminMode && setRoleSelectModal({ isOpen: true, team })} className={`w-full bg-slate-800 hover:bg-slate-700 p-4 rounded-2xl border border-slate-700 flex items-center gap-4 transition text-left ${isLoginAdminMode ? 'cursor-default' : 'cursor-pointer'}`}>
+                  <button onClick={() => { if (!isLoginAdminMode) { setActiveTeamId(team.id); setIsAdmin(false); setAppState('main'); } }} className={`w-full bg-slate-800 hover:bg-slate-700 p-4 rounded-2xl border border-slate-700 flex items-center gap-4 transition text-left ${isLoginAdminMode ? 'cursor-default' : 'cursor-pointer'}`}>
                     <div className="w-12 h-12 bg-slate-900 rounded-full flex items-center justify-center text-2xl border border-slate-600 overflow-hidden shrink-0 bg-white/5">{team.logo?.startsWith('data:image') ? <img src={team.logo} alt={team.name} className="w-full h-full object-cover" /> : team.logo}</div>
-                    <div className="flex-1"><div className="font-bold text-white text-lg">{team.name}</div><div className="text-xs text-slate-400">{isLoginAdminMode ? `비밀번호: ${team.password}` : '터치하여 권한 선택'}</div></div>
+                    <div className="flex-1"><div className="font-bold text-white text-lg">{team.name}</div><div className="text-xs text-slate-400">{isLoginAdminMode ? `관리자 비밀번호: ${team.adminPassword || team.password}` : '터치하여 바로 입장'}</div></div>
                     {!isLoginAdminMode && <ChevronRight className="text-slate-500" />}
                   </button>
                   {isLoginAdminMode && ( <div className="absolute top-1/2 -translate-y-1/2 right-4 flex gap-2"><button onClick={() => { setEditTeamLogo(team.logo); setEditTeamModal({ isOpen: true, team }); }} className="p-2 bg-slate-700 text-slate-300 rounded-lg hover:text-white transition shadow-sm"><Edit size={16}/></button><button onClick={() => requestDeleteTeam(team.id)} className="p-2 bg-slate-700 text-slate-300 rounded-lg hover:text-red-400 transition shadow-sm"><Trash2 size={16}/></button></div> )}
@@ -1744,7 +1751,7 @@ const renderGoalFlowModal = () => {
           </div>
         </div>
         <div className="flex gap-2">
-           {!isAdmin && <button onClick={() => setAuthModal({isOpen: true, type: 'adminMode'})} className="text-[10px] font-bold bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-700">관리자 전환</button>}
+           {!isAdmin && <button onClick={() => setAuthModal({isOpen: true, type: 'adminMode'})} className="text-[10px] font-bold bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-700">관리자 모드</button>}
            {isAdmin && <button onClick={() => setIsAdmin(false)} className="text-[10px] font-bold bg-blue-500/20 text-blue-400 px-3 py-1.5 rounded-lg border border-blue-500/30 hover:bg-blue-500/30">조회모드 전환</button>}
            <button onClick={logout} className="text-[10px] font-bold bg-red-500/10 text-red-400 px-3 py-1.5 rounded-lg border border-red-500/20 hover:bg-red-500/20">로그아웃</button>
         </div>
