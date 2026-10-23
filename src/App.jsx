@@ -1947,7 +1947,7 @@ const renderGoalFlowModal = () => {
                   </div>
                   <div className="bg-slate-800 rounded-2xl p-3.5 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
                     <span className="text-[11px] font-black text-slate-300 mb-1.5">{titlePrefix} 거미손</span><span className="text-2xl mb-1">🧤</span>
-                    <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{wordBreak: 'keep-all'}}>{topGks.length===0?'없음':topGks.length===1?topGks[0].name:`${topGks[0].name} 외 ${topGks.length-1}명`}</span><span className="text-xs font-bold text-emerald-400">{topGks.length > 0 ? `실점율 ${topGks[0].gkConcededRate.toFixed(2)}` : ''}</span>
+                    <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{wordBreak: 'keep-all'}}>{topGks.length===0?'없음':topGks.length===1?topGks[0].name:`${topGks[0].name} 외 ${topGks.length-1}명`}</span><span className="text-xs font-bold text-emerald-400">{topGks.length > 0 && topGks[0].gaRate !== null ? `실점율 ${Number(topGks[0].gaRate).toFixed(2)}` : ''}</span>
                   </div>
                   <div className="bg-slate-800 rounded-2xl p-3.5 border border-slate-700 flex flex-col items-center text-center shadow-sm overflow-hidden">
                     <span className="text-[11px] font-black text-slate-300 mb-1.5">{titlePrefix} 참석왕</span><span className="text-2xl mb-1">🔥</span>
@@ -2005,9 +2005,9 @@ const renderGoalFlowModal = () => {
                               {st.name}
                             </td>
                             <td className="py-3 text-slate-300 font-bold">{st.gkQuarters}Q</td>
-                            <td className="py-3 text-red-400 font-bold">{st.gkConceded}</td>
-                            <td className="py-3 text-emerald-400 font-bold">{st.gkCleanSheets}회 <span className="text-[10px] text-slate-500 font-normal">({Math.round((st.gkCleanSheets / st.gkQuarters) * 100)}%)</span></td>
-                            <td className="py-3 text-yellow-400 font-black">{st.gkConcededRate.toFixed(2)}</td>
+                            <td className="py-3 text-red-400 font-bold">{st.goalsConceded}</td>
+                            <td className="py-3 text-emerald-400 font-bold">{st.cleanSheets}회 <span className="text-[10px] text-slate-500 font-normal">({st.cleanSheetRate || 0}%)</span></td>
+                            <td className="py-3 text-yellow-400 font-black">{Number(st.gaRate || 0).toFixed(2)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -2201,7 +2201,7 @@ const renderGoalFlowModal = () => {
                           <span className="text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-400">👟 <strong className="text-white">{p.trueAssists || 0}</strong></span>
                           {(p.trueGkQuarters || 0) > 0 && (
                             <span className="text-[11px] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30 text-emerald-300">
-                              🧤 <strong>{p.trueGkQuarters}Q</strong> / <strong>{p.trueGkConceded}실점</strong> ({(p.trueGkConceded / p.trueGkQuarters).toFixed(2)})
+                              🧤 <strong>{p.trueGkQuarters}Q</strong> / <strong>{p.trueGoalsConceded || 0}실점</strong> ({((p.trueGoalsConceded || 0) / p.trueGkQuarters).toFixed(2)})
                             </span>
                           )}
                         </div>
