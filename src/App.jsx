@@ -463,24 +463,38 @@ export default function App() {
   };
 
   const handleGoalSubmit = async (selectedId, teamLetter) => {
-    if (goalFlow.step === 1) { setGoalFlow({ ...goalFlow, step: 2, teamLetter, scorer: selectedId }); setShowOtherTeams(false); } 
-    else {
+    const targetMatchId = goalFlow.matchId || liveMatchId;
+    const targetMatch = matches.find(m => m.id === targetMatchId);
+    const currentTeamLetter = teamLetter || goalFlow.teamLetter;
+    const isExternalOpponent = targetMatch?.matchType === 'external' && currentTeamLetter === 'B';
+    const isOpponentDirectGoal = selectedId === 'opponent' || (isExternalOpponent && selectedId === 'mercenary');
+
+    if (goalFlow.step === 1 && !isOpponentDirectGoal) {
+      setGoalFlow({ ...goalFlow, step: 2, teamLetter: currentTeamLetter, scorer: selectedId });
+      setShowOtherTeams(false);
+    } else {
       if(isProcessing) return; setIsProcessing(true);
       const { matchId: gfMatchId, quarter: gfQuarter, teamLetter: gfTeamLetter, scorer: gfScorer, isPK: gfIsPK, remark: gfRemark, isMissingAdd: gfIsMissingAdd } = goalFlow;
+      const effectiveTeamLetter = gfTeamLetter || currentTeamLetter;
+      const effectiveScorer = isOpponentDirectGoal ? 'opponent' : gfScorer;
+      const assistId = isOpponentDirectGoal ? null : selectedId;
       setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false }); setShowOtherTeams(false);
       try {
-        const targetMatchId = gfMatchId || liveMatchId; const targetMatch = matches.find(m => m.id === targetMatchId); const quarter = gfQuarter || liveState.currentQuarter; const assistId = selectedId;
-        let finalScorerId = gfScorer === 'mercenary' ? null : gfScorer; let finalAssistId = assistId === 'mercenary' ? null : assistId;
+        const quarter = gfQuarter || liveState.currentQuarter;
+        let finalScorerId = (effectiveScorer === 'mercenary' || effectiveScorer === 'opponent') ? null : effectiveScorer;
+        let finalAssistId = (assistId === 'mercenary' || assistId === 'opponent') ? null : assistId;
         const scorer = players.find(p => p.id === finalScorerId); let finalScorerName = scorer?.name || null;
-        if (scorer && targetMatch.teamAssignments && targetMatch.teamAssignments[scorer.id] && targetMatch.teamAssignments[scorer.id] !== gfTeamLetter) finalScorerName = `(${targetMatch.teamAssignments[scorer.id]}팀) ${scorer.name}`;
-        if (gfScorer === 'mercenary') finalScorerName = '용병'; if (!gfScorer) finalScorerName = '상대팀'; 
+        if (scorer && targetMatch.teamAssignments && targetMatch.teamAssignments[scorer.id] && targetMatch.teamAssignments[scorer.id] !== effectiveTeamLetter) finalScorerName = `(${targetMatch.teamAssignments[scorer.id]}팀) ${scorer.name}`;
+        if (effectiveScorer === 'mercenary') finalScorerName = '용병';
+        if (effectiveScorer === 'opponent') finalScorerName = getTeamDisplayName(targetMatch, effectiveTeamLetter);
+        if (!effectiveScorer) finalScorerName = '상대팀'; 
         const assist = players.find(p => p.id === finalAssistId); let finalAssistName = assist?.name || null;
-        if (assist && targetMatch.teamAssignments && targetMatch.teamAssignments[assist.id] && targetMatch.teamAssignments[assist.id] !== gfTeamLetter) finalAssistName = `(${targetMatch.teamAssignments[assist.id]}팀) ${assist.name}`;
+        if (assist && targetMatch.teamAssignments && targetMatch.teamAssignments[assist.id] && targetMatch.teamAssignments[assist.id] !== effectiveTeamLetter) finalAssistName = `(${targetMatch.teamAssignments[assist.id]}팀) ${assist.name}`;
         if (assistId === 'mercenary') finalAssistName = '용병';
-        const newLog = { id: Date.now(), quarter, teamLetter: gfTeamLetter, scorerId: finalScorerId, scorerName: finalScorerName, assistId: finalAssistId, assistName: finalAssistName, time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }), isPK: gfIsPK, remark: gfRemark };
-        const newLogs = [...(targetMatch.logs || []), newLog]; const newScores = { ...(targetMatch.scores || {}), [gfTeamLetter]: ((targetMatch.scores || {})[gfTeamLetter] || 0) + 1 };
+        const newLog = { id: Date.now(), quarter, teamLetter: effectiveTeamLetter, scorerId: finalScorerId, scorerName: finalScorerName, assistId: finalAssistId, assistName: finalAssistName, time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute:'2-digit' }), isPK: gfIsPK, remark: gfRemark };
+        const newLogs = [...(targetMatch.logs || []), newLog]; const newScores = { ...(targetMatch.scores || {}), [effectiveTeamLetter]: ((targetMatch.scores || {})[effectiveTeamLetter] || 0) + 1 };
         let newQuarterScores = [...(targetMatch.quarterScores || [])];
-        if (gfIsMissingAdd) { const qsIndex = newQuarterScores.findIndex(qs => qs.quarter === quarter); if (qsIndex > -1) { const qs = newQuarterScores[qsIndex]; const isTeam1 = qs.team1 === gfTeamLetter; newQuarterScores[qsIndex] = { ...qs, score1: isTeam1 ? qs.score1 + 1 : qs.score1, score2: !isTeam1 ? qs.score2 + 1 : qs.score2 }; } }
+        if (gfIsMissingAdd) { const qsIndex = newQuarterScores.findIndex(qs => qs.quarter === quarter); if (qsIndex > -1) { const qs = newQuarterScores[qsIndex]; const isTeam1 = qs.team1 === effectiveTeamLetter; newQuarterScores[qsIndex] = { ...qs, score1: isTeam1 ? qs.score1 + 1 : qs.score1, score2: !isTeam1 ? qs.score2 + 1 : qs.score2 }; } }
         const updatedMatch = { ...targetMatch, scores: newScores, logs: newLogs, quarterScores: newQuarterScores };
         const updatePromises = [setDoc(doc(db, 'matches', targetMatchId), updatedMatch)];
         if (finalScorerId) { if (scorer) updatePromises.push(setDoc(doc(db, 'players', scorer.id), { ...scorer, goals: (scorer.goals || 0) + 1 })); }
@@ -493,26 +507,32 @@ export default function App() {
   const handleLogEditSave = async (e) => {
     e.preventDefault(); if(isProcessing) return; setIsProcessing(true);
     try {
-      const fd = new FormData(e.target); const newScorerId = fd.get('scorerId') === 'none' ? null : fd.get('scorerId'); const newAssistId = fd.get('assistId') === 'none' ? null : fd.get('assistId');
+      const fd = new FormData(e.target);
+      const rawScorerId = fd.get('scorerId');
+      const rawAssistId = fd.get('assistId');
+      const newScorerId = (!rawScorerId || rawScorerId === 'none') ? null : rawScorerId;
+      const newAssistId = (!rawAssistId || rawAssistId === 'none' || newScorerId === 'opponent') ? null : rawAssistId;
       const newIsPK = fd.get('isPK') === 'true'; const newRemark = fd.get('remark') || '';
       const m = matches.find(match => match.id === logEditModal.match.id); const l = logEditModal.log;
       const oldScorerId = l.scorerId; const oldAssistId = l.assistId; const updatePromises = [];
       if (oldScorerId !== newScorerId) {
-          if (oldScorerId && oldScorerId !== 'mercenary') { const p = players.find(p => p.id === oldScorerId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, goals: Math.max(0, (p.goals || 0) - 1) })); }
-          if (newScorerId && newScorerId !== 'mercenary') { const p = players.find(p => p.id === newScorerId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, goals: (p.goals || 0) + 1 })); }
+          if (oldScorerId && oldScorerId !== 'mercenary' && oldScorerId !== 'opponent') { const p = players.find(p => p.id === oldScorerId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, goals: Math.max(0, (p.goals || 0) - 1) })); }
+          if (newScorerId && newScorerId !== 'mercenary' && newScorerId !== 'opponent') { const p = players.find(p => p.id === newScorerId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, goals: (p.goals || 0) + 1 })); }
       }
       if (oldAssistId !== newAssistId) {
-          if (oldAssistId && oldAssistId !== 'mercenary') { const p = players.find(p => p.id === oldAssistId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, assists: Math.max(0, (p.assists || 0) - 1) })); }
-          if (newAssistId && newAssistId !== 'mercenary') { const p = players.find(p => p.id === newAssistId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, assists: (p.assists || 0) + 1 })); }
+          if (oldAssistId && oldAssistId !== 'mercenary' && oldAssistId !== 'opponent') { const p = players.find(p => p.id === oldAssistId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, assists: Math.max(0, (p.assists || 0) - 1) })); }
+          if (newAssistId && newAssistId !== 'mercenary' && newAssistId !== 'opponent') { const p = players.find(p => p.id === newAssistId); if (p) updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, assists: (p.assists || 0) + 1 })); }
       }
       const scorer = players.find(p => p.id === newScorerId); let finalScorerName = l.scorerName;
       if (newScorerId === 'mercenary') finalScorerName = '용병';
+      else if (newScorerId === 'opponent') finalScorerName = getTeamDisplayName(m, l.teamLetter);
+      else if (newScorerId === null) finalScorerName = '상대팀';
       else if (scorer) { finalScorerName = scorer.name; if (m.teamAssignments && m.teamAssignments[scorer.id] && m.teamAssignments[scorer.id] !== l.teamLetter) finalScorerName = `(${m.teamAssignments[scorer.id]}팀) ${scorer.name}`; }
       const assist = players.find(p => p.id === newAssistId); let finalAssistName = l.assistName;
       if (newAssistId === 'mercenary') finalAssistName = '용병';
       else if (assist) { finalAssistName = assist.name; if (m.teamAssignments && m.teamAssignments[assist.id] && m.teamAssignments[assist.id] !== l.teamLetter) finalAssistName = `(${m.teamAssignments[assist.id]}팀) ${assist.name}`; } 
       else if (newAssistId === null) { finalAssistName = null; }
-      const updatedLogs = (m.logs || []).map(log => log.id === l.id ? { ...log, scorerId: newScorerId === 'mercenary' ? null : newScorerId, scorerName: finalScorerName, assistId: newAssistId === 'mercenary' ? null : newAssistId, assistName: finalAssistName, isPK: newIsPK, remark: newRemark } : log);
+      const updatedLogs = (m.logs || []).map(log => log.id === l.id ? { ...log, scorerId: (newScorerId === 'mercenary' || newScorerId === 'opponent') ? null : newScorerId, scorerName: finalScorerName, assistId: (newAssistId === 'mercenary' || newAssistId === 'opponent') ? null : newAssistId, assistName: finalAssistName, isPK: newIsPK, remark: newRemark } : log);
       updatePromises.push(setDoc(doc(db, 'matches', m.id), { ...m, logs: updatedLogs }));
       await Promise.all(updatePromises);
       setLogEditModal({ isOpen: false, match: null, log: null }); setSystemAlert({ isOpen: true, message: '득점 기록이 수정되었습니다.' });
@@ -951,14 +971,24 @@ export default function App() {
 const renderGoalFlowModal = () => {
   if (!goalFlow.isOpen) return null;
   const currentGoalMatch = goalFlow.matchId ? matches.find(m => m.id === goalFlow.matchId) : liveMatch;
-  const selectedTeamPlayers = players.filter(p => p.teamId === activeTeamId && (currentGoalMatch?.attendees || []).includes(p.id) && ((currentGoalMatch?.teamAssignments || {})[p.id]) === goalFlow.teamLetter);
-  const otherPlayers = players.filter(p => p.teamId === activeTeamId && (currentGoalMatch?.attendees || []).includes(p.id) && ((currentGoalMatch?.teamAssignments || {})[p.id]) !== goalFlow.teamLetter);
-
-  // 상대팀(교류전이면서 우리 앱에 등록된 선수가 없는 팀)인지 판별
-  const isExternalOpponent = currentGoalMatch?.matchType === 'external' && selectedTeamPlayers.length === 0;
+  const isExternalOpponent = currentGoalMatch?.matchType === 'external' && goalFlow.teamLetter === 'B';
+  const teamRoster = players.filter(p => p.teamId === activeTeamId);
+  const hasAttendees = (currentGoalMatch?.attendees || []).length > 0;
+  const basePlayers = hasAttendees ? teamRoster.filter(p => (currentGoalMatch.attendees || []).includes(p.id)) : teamRoster;
+  const assignedTeamPlayers = basePlayers.filter(p => ((currentGoalMatch?.teamAssignments || {})[p.id]) === goalFlow.teamLetter);
+  const selectedTeamPlayers = isExternalOpponent
+    ? []
+    : currentGoalMatch?.matchType === 'external'
+      ? basePlayers
+      : (assignedTeamPlayers.length > 0 ? assignedTeamPlayers : basePlayers);
+  const otherPlayers = isExternalOpponent || currentGoalMatch?.matchType === 'external'
+    ? []
+    : (assignedTeamPlayers.length > 0
+        ? basePlayers.filter(p => ((currentGoalMatch?.teamAssignments || {})[p.id]) !== goalFlow.teamLetter)
+        : teamRoster.filter(p => !basePlayers.some(bp => bp.id === p.id)));
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[60]">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[150]">
       <div className="bg-slate-800 rounded-2xl w-full max-w-md p-6 border border-slate-700 shadow-2xl">
         {/* 헤더 */}
         <div className="flex justify-between items-center mb-6">
@@ -1015,7 +1045,7 @@ const renderGoalFlowModal = () => {
                     onClick={() => handleGoalSubmit(p.id, goalFlow.teamLetter)} 
                     className="bg-slate-900 hover:bg-slate-700 text-slate-300 font-bold py-2 rounded-xl border border-slate-700 transition text-xs truncate px-1"
                   >
-                    {p.name} <span className="text-[9px] text-slate-500">({(currentGoalMatch?.teamAssignments || {})[p.id]}팀)</span>
+                    {p.name} <span className="text-[9px] text-slate-500">({(currentGoalMatch?.teamAssignments || {})[p.id] ? `${currentGoalMatch.teamAssignments[p.id]}팀` : '미정'})</span>
                   </button> 
                 ))}
               </div>
@@ -1026,11 +1056,11 @@ const renderGoalFlowModal = () => {
         {/* 액션 버튼들 */}
         <div className="space-y-2 mt-4 pt-4 border-t border-slate-700">
           <button 
-            onClick={() => handleGoalSubmit('mercenary', goalFlow.teamLetter)} 
+            onClick={() => handleGoalSubmit(isExternalOpponent ? 'opponent' : 'mercenary', goalFlow.teamLetter)} 
             className="w-full bg-slate-900 border border-slate-600 hover:bg-slate-700 text-slate-300 font-bold py-3 rounded-xl flex items-center justify-center gap-2 text-sm transition"
           >
             {isExternalOpponent 
-              ? `⚽ ${getTeamDisplayName(currentGoalMatch, goalFlow.teamLetter)} ${goalFlow.step === 1 ? '득점' : '도움'}` 
+              ? `⚽ ${getTeamDisplayName(currentGoalMatch, goalFlow.teamLetter)} 득점` 
               : `👤 용병 (팀 외 인원) ${goalFlow.step === 1 ? '득점' : '도움'}`}
           </button>
           
@@ -1058,8 +1088,24 @@ const renderGoalFlowModal = () => {
   const renderLogEditModal = () => {
     if (!logEditModal.isOpen || !logEditModal.match || !logEditModal.log) return null;
     const m = logEditModal.match; const l = logEditModal.log;
-    const teamPlayers = players.filter(p => p.teamId === activeTeamId && (m.attendees || []).includes(p.id) && ((m.teamAssignments || {})[p.id]) === l.teamLetter);
-    const otherPlayers = players.filter(p => p.teamId === activeTeamId && (m.attendees || []).includes(p.id) && ((m.teamAssignments || {})[p.id]) !== l.teamLetter);
+    const isExternalOpponent = m.matchType === 'external' && l.teamLetter === 'B';
+    const teamRoster = players.filter(p => p.teamId === activeTeamId);
+    const hasAttendees = (m.attendees || []).length > 0;
+    const basePlayers = hasAttendees ? teamRoster.filter(p => (m.attendees || []).includes(p.id)) : teamRoster;
+    const assignedTeamPlayers = basePlayers.filter(p => ((m.teamAssignments || {})[p.id]) === l.teamLetter);
+    const teamPlayers = isExternalOpponent
+      ? []
+      : m.matchType === 'external'
+        ? basePlayers
+        : (assignedTeamPlayers.length > 0 ? assignedTeamPlayers : basePlayers);
+    const otherPlayers = isExternalOpponent || m.matchType === 'external'
+      ? []
+      : (assignedTeamPlayers.length > 0
+          ? basePlayers.filter(p => ((m.teamAssignments || {})[p.id]) !== l.teamLetter)
+          : teamRoster.filter(p => !basePlayers.some(bp => bp.id === p.id)));
+    const defaultScorerValue = isExternalOpponent
+      ? (l.scorerName === '상대팀' ? 'none' : 'opponent')
+      : (l.scorerName === '용병' ? 'mercenary' : (l.scorerId || 'none'));
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[150] animate-in fade-in">
         <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
@@ -1067,16 +1113,45 @@ const renderGoalFlowModal = () => {
           <form onSubmit={handleLogEditSave} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-1">득점자</label>
-              <select name="scorerId" defaultValue={l.scorerName === '용병' ? 'mercenary' : (l.scorerId || 'none')} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
-                <option value="none">자책골 / 기타</option><optgroup label="우리 팀"><option value="mercenary">👤 용병 (팀 외 인원)</option>{teamPlayers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>{m.matchType !== 'external' && <optgroup label="타팀 지원">{otherPlayers.map(p => <option key={p.id} value={p.id}>({(m.teamAssignments || {})[p.id]}팀) {p.name}</option>)}</optgroup>}
+              <select name="scorerId" defaultValue={defaultScorerValue} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
+                {isExternalOpponent ? (
+                  <>
+                    <option value="opponent">⚽ {getTeamDisplayName(m, l.teamLetter)} 득점</option>
+                    <option value="none">자책골 / 기타</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="none">자책골 / 기타</option>
+                    <optgroup label="우리 팀">
+                      <option value="mercenary">👤 용병 (팀 외 인원)</option>
+                      {teamPlayers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </optgroup>
+                    {m.matchType !== 'external' && otherPlayers.length > 0 && (
+                      <optgroup label="타팀 지원">
+                        {otherPlayers.map(p => <option key={p.id} value={p.id}>({(m.teamAssignments || {})[p.id] ? `${m.teamAssignments[p.id]}팀` : '미정'}) {p.name}</option>)}
+                      </optgroup>
+                    )}
+                  </>
+                )}
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">도움 (어시스트)</label>
-              <select name="assistId" defaultValue={l.assistName === '용병' ? 'mercenary' : (l.assistId || 'none')} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
-                <option value="none">없음</option><optgroup label="우리 팀"><option value="mercenary">👤 용병 (팀 외 인원)</option>{teamPlayers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>{m.matchType !== 'external' && <optgroup label="타팀 지원">{otherPlayers.map(p => <option key={p.id} value={p.id}>({(m.teamAssignments || {})[p.id]}팀) {p.name}</option>)}</optgroup>}
-              </select>
-            </div>
+            {!isExternalOpponent && (
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">도움 (어시스트)</label>
+                <select name="assistId" defaultValue={l.assistName === '용병' ? 'mercenary' : (l.assistId || 'none')} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none">
+                  <option value="none">없음</option>
+                  <optgroup label="우리 팀">
+                    <option value="mercenary">👤 용병 (팀 외 인원)</option>
+                    {teamPlayers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </optgroup>
+                  {m.matchType !== 'external' && otherPlayers.length > 0 && (
+                    <optgroup label="타팀 지원">
+                      {otherPlayers.map(p => <option key={p.id} value={p.id}>({(m.teamAssignments || {})[p.id] ? `${m.teamAssignments[p.id]}팀` : '미정'}) {p.name}</option>)}
+                    </optgroup>
+                  )}
+                </select>
+              </div>
+            )}
             <div className="flex items-center gap-3 bg-slate-900 p-3 rounded-xl border border-slate-700"><input type="checkbox" name="isPK" defaultChecked={l.isPK} className="w-5 h-5 accent-red-500" /><span className="text-sm font-bold text-white">PK 득점 여부</span></div>
             <div><input type="text" name="remark" defaultValue={l.remark || ''} placeholder="특이사항 (선택)" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none" /></div>
             <div className="flex gap-2 pt-2 border-t border-slate-700"><button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">수정 완료</button></div>
