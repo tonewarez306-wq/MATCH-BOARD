@@ -196,6 +196,12 @@ export default function App() {
   const [authModal, setAuthModal] = useState({ isOpen: false, type: '', targetTeam: null }); 
   const [roleSelectModal, setRoleSelectModal] = useState({ isOpen: false, team: null });
   const [tacticsTutorialModal, setTacticsTutorialModal] = useState(false);
+  const [installGuideModal, setInstallGuideModal] = useState(false);
+  const [installGuideTab, setInstallGuideTab] = useState(() => {
+    if (typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent)) return 'ios';
+    return 'android';
+  });
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
   const [dateMemoModal, setDateMemoModal] = useState({ isOpen: false, dateStr: null, matches: [], memo: '' });
   
   const [isCreateTeamOpen, setIsCreateTeamOpen] = useState(false);
@@ -378,6 +384,15 @@ export default function App() {
   const topGks = minGaRate !== null ? gkStatsList.filter(s => Math.abs(s.gaRate - minGaRate) < 1e-6) : [];
 
   const globalStyles = ( <style>{` html, body { overscroll-behavior: none !important; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; } *::-webkit-scrollbar { display: none !important; width: 0 !important; } * { -ms-overflow-style: none !important; scrollbar-width: none !important; -webkit-tap-highlight-color: transparent; } input, textarea { font-size: 16px; } input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; } input[type="number"] { -moz-appearance: textfield; } .will-change-transform { will-change: transform, left, top; } `}</style> );
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
 
   useEffect(() => {
     let unsubTeams = () => {}; let unsubPlayers = () => {}; let unsubMatches = () => {}; let unsubMemos = () => {};
@@ -1859,11 +1874,195 @@ const renderGoalFlowModal = () => {
     );
   };
 
+  const renderInstallGuideModal = () => {
+    if (!installGuideModal) return null;
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+    const isKakao = /KAKAOTALK/i.test(ua);
+    const isAndroid = /Android/i.test(ua);
+
+    const handleOpenExternalBrowser = () => {
+      const currentUrl = window.location.href;
+      if (isKakao && isAndroid) {
+        window.location.href = `kakaotalk://web/openExternal?url=${encodeURIComponent(currentUrl)}`;
+      } else {
+        window.open(currentUrl, '_blank');
+      }
+    };
+
+    const handleCopyUrl = async () => {
+      try {
+        await navigator.clipboard.writeText(window.location.href);
+        setSystemAlert({ isOpen: true, message: '주소가 복사되었습니다!\nSafari 또는 크롬 주소창에 붙여넣어 접속해주세요.' });
+      } catch {
+        setSystemAlert({ isOpen: true, message: `아래 주소를 복사해 브라우저에서 열어주세요:\n${window.location.href}` });
+      }
+    };
+
+    const handleDirectInstall = async () => {
+      if (!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      const { outcome } = await deferredInstallPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredInstallPrompt(null);
+        setInstallGuideModal(false);
+      }
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-[200] animate-in fade-in zoom-in-95">
+        <div className="bg-slate-800 p-5 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[88vh] flex flex-col relative">
+          <div className="flex justify-between items-center mb-4 shrink-0">
+            <h2 className="text-lg font-black text-white flex items-center gap-2">
+              <span className="w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 text-sm">📲</span>
+              앱 아이콘 설치 가이드
+            </h2>
+            <button onClick={() => setInstallGuideModal(false)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto pr-0.5 space-y-4 hide-scrollbar">
+            {/* 카카오톡 인앱브라우저 안내 배너 */}
+            <div className={`rounded-2xl p-3.5 border ${isKakao ? 'bg-amber-500/15 border-amber-500/40' : 'bg-slate-900/90 border-slate-700/80'}`}>
+              <div className="flex items-start gap-2.5">
+                <span className="text-base shrink-0 mt-0.5">💬</span>
+                <div className="text-xs leading-relaxed text-slate-300">
+                  {isKakao ? (
+                    <span className="font-bold text-amber-300 block mb-1">현재 카카오톡 인앱브라우저로 접속 중입니다!</span>
+                  ) : (
+                    <span className="font-bold text-amber-400 block mb-1">카카오톡 채팅방 링크로 열었을 때 필독!</span>
+                  )}
+                  카카오톡 안에서 열린 화면에서는 홈 화면 아이콘 추가가 제한됩니다. 먼저 <strong className="text-white">외부 기본 브라우저(크롬 / 삼성인터넷 / Safari)</strong>로 전환한 뒤 설치해주세요.
+                </div>
+              </div>
+
+              <div className="mt-3 flex gap-2">
+                {isAndroid && (
+                  <button
+                    type="button"
+                    onClick={handleOpenExternalBrowser}
+                    className="flex-1 py-2.5 px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition flex items-center justify-center gap-1 shadow"
+                  >
+                    <ArrowUpRight size={14} className="shrink-0"/> 외부 브라우저로 바로 열기
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleCopyUrl}
+                  className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1"
+                >
+                  🔗 주소 복사하기
+                </button>
+              </div>
+            </div>
+
+            {/* 크롬/삼성인터넷 등에서 PWA 즉시 설치가 가능한 경우 */}
+            {deferredInstallPrompt && (
+              <button
+                type="button"
+                onClick={handleDirectInstall}
+                className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white font-black text-xs rounded-2xl shadow-lg flex items-center justify-center gap-2 transition"
+              >
+                <span>⚡</span> 지금 바로 바탕화면에 앱 설치하기
+              </button>
+            )}
+
+            {/* 기기 OS 선택 탭 */}
+            <div className="grid grid-cols-2 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1">
+              <button
+                type="button"
+                onClick={() => setInstallGuideTab('android')}
+                className={`py-2 rounded-lg text-xs font-bold transition ${installGuideTab === 'android' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+              >
+                🤖 안드로이드 (갤럭시)
+              </button>
+              <button
+                type="button"
+                onClick={() => setInstallGuideTab('ios')}
+                className={`py-2 rounded-lg text-xs font-bold transition ${installGuideTab === 'ios' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+              >
+                🍎 아이폰 (iOS)
+              </button>
+            </div>
+
+            {/* 단계별 안내 */}
+            {installGuideTab === 'android' ? (
+              <div className="space-y-2.5">
+                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">1</div>
+                  <div className="text-xs leading-relaxed text-slate-300">
+                    <div className="font-bold text-white mb-0.5">카카오톡에서 외부 브라우저로 열기</div>
+                    카톡 화면 우측 하단(또는 우측 상단)의 <strong className="text-amber-400">⋮ (점 3개)</strong> 버튼 터치 → <strong className="text-white">[다른 브라우저로 열기]</strong>를 선택하세요.
+                    <div className="text-[11px] text-slate-400 mt-1">* 위 노란색 <strong className="text-amber-300">[외부 브라우저로 바로 열기]</strong> 버튼을 누르면 바로 이동됩니다.</div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">2</div>
+                  <div className="text-xs leading-relaxed text-slate-300">
+                    <div className="font-bold text-white mb-0.5">브라우저 메뉴 버튼 터치</div>
+                    • <strong className="text-emerald-400">크롬(Chrome)</strong>: 우측 상단 <strong className="text-white">⋮ (점 3개)</strong> 터치<br/>
+                    • <strong className="text-blue-400">삼성 인터넷</strong>: 우측 하단 <strong className="text-white">≡ (줄 3개)</strong> 터치 (또는 주소창 옆 <strong className="text-white">＋</strong> 아이콘)
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">3</div>
+                  <div className="text-xs leading-relaxed text-slate-300">
+                    <div className="font-bold text-white mb-0.5">앱 설치 / 홈 화면에 추가</div>
+                    • <strong className="text-emerald-400">크롬</strong>: 메뉴에서 <strong className="text-white">[앱 설치]</strong> 또는 <strong className="text-white">[홈 화면에 추가]</strong> 선택<br/>
+                    • <strong className="text-blue-400">삼성 인터넷</strong>: <strong className="text-white">[현재 페이지 추가] → [홈 화면]</strong> 선택 후 추가하면 바탕화면에 앱 아이콘이 생성됩니다!
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">1</div>
+                  <div className="text-xs leading-relaxed text-slate-300">
+                    <div className="font-bold text-white mb-0.5">카카오톡에서 Safari로 열기</div>
+                    카톡 화면 우측 하단의 <strong className="text-amber-400">[📤 공유 아이콘]</strong>(네모에서 화살표가 위로 나오는 모양) 터치 → <strong className="text-white">[Safari로 열기]</strong>를 선택하세요.
+                    <div className="text-[11px] text-slate-400 mt-1">* 또는 위 <strong className="text-slate-200">[주소 복사하기]</strong>를 눌러 <strong className="text-white">Safari 앱</strong> 주소창에 붙여넣어 이동하세요.</div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">2</div>
+                  <div className="text-xs leading-relaxed text-slate-300">
+                    <div className="font-bold text-white mb-0.5">Safari 하단 [공유] 버튼 터치</div>
+                    Safari 브라우저로 페이지가 열렸다면, 화면 하단 중앙에 있는 <strong className="text-blue-400">[📤 공유 버튼]</strong>(네모 위 화살표)을 눌러주세요.
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">3</div>
+                  <div className="text-xs leading-relaxed text-slate-300">
+                    <div className="font-bold text-white mb-0.5">[홈 화면에 추가] 선택</div>
+                    공유 메뉴를 살짝 위로 올려 <strong className="text-white">[홈 화면에 추가 ➕]</strong>를 누른 뒤, 우측 상단 <strong className="text-emerald-400">[추가]</strong>를 누르면 아이폰 바탕화면에 앱 아이콘이 생성됩니다!
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setInstallGuideModal(false)}
+            className="w-full mt-4 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl text-sm transition shrink-0"
+          >
+            확인했어요
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   if (appState === 'login') {
     return (
       <div className="min-h-screen bg-slate-900 text-slate-200 font-sans p-6 flex flex-col justify-center max-w-md mx-auto relative">
         {globalStyles}
-        <div className="absolute top-6 right-6">
+        <div className="absolute top-6 left-6 right-6 flex justify-between items-center">
+          <button onClick={() => setInstallGuideModal(true)} className="text-xs text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 rounded-lg hover:bg-emerald-500/20 transition flex items-center gap-1.5 font-bold shadow-sm">
+            <span>📲</span> 앱 설치 가이드
+          </button>
           {!isLoginAdminMode ? ( <button onClick={() => setAuthModal({ isOpen: true, type: 'loginAdminAuth' })} className="text-xs text-slate-400 border border-slate-700 bg-slate-800 px-3 py-1.5 rounded-lg hover:text-white transition flex items-center gap-1"><Shield size={14}/> 관리자 설정</button> ) : ( <button onClick={() => setIsLoginAdminMode(false)} className="text-xs text-red-400 border border-red-500/30 bg-red-500/10 px-3 py-1.5 rounded-lg hover:bg-red-500/20 transition flex items-center gap-1"><LogOut size={14}/> 관리자 종료</button> )}
         </div>
         <div className="text-center mb-10 mt-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -1872,7 +2071,7 @@ const renderGoalFlowModal = () => {
           <p className="text-slate-400 text-sm font-medium tracking-wide">승리를 기록하는 가장 스마트한 방법</p>
           {isLoginAdminMode && <div className="mt-5 bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs py-2 px-4 rounded-xl font-bold inline-block animate-pulse">시스템 관리자 모드 활성화됨</div>}
         </div>
-        <div className="space-y-4 mb-8">
+        <div className="space-y-4 mb-6">
           <h2 className="text-sm font-bold text-slate-500 px-2">{isLoginAdminMode ? '등록된 팀 관리' : '내 팀 선택하기'}</h2>
           {!isLoaded ? ( <div className="flex justify-center py-12"><div className="w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div></div> ) : teams.length === 0 && !isLoginAdminMode ? ( <div className="text-center py-10 bg-slate-800/50 rounded-2xl border border-slate-700 text-sm text-slate-500 animate-in fade-in">등록된 팀이 없습니다.<br/>우측 상단의 <strong className="text-slate-400">관리자 설정</strong>에서<br/>새로운 팀을 생성해 주세요.</div> ) : (
             <div className="space-y-4 animate-in fade-in">
@@ -1889,13 +2088,36 @@ const renderGoalFlowModal = () => {
             </div>
           )}
         </div>
+        {!isLoginAdminMode && (
+          <button
+            onClick={() => setInstallGuideModal(true)}
+            className="w-full bg-slate-800/70 hover:bg-slate-800 border border-slate-700/80 rounded-2xl p-3.5 flex items-center justify-between gap-3 transition text-left mb-4 group"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-lg shrink-0">
+                📲
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-emerald-400 flex items-center gap-1">
+                  바탕화면에 앱 아이콘 설치하기
+                </div>
+                <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                  카톡 링크 접속 시 홈 화면에 추가하는 방법 안내
+                </div>
+              </div>
+            </div>
+            <span className="text-[11px] font-bold text-slate-300 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-700 group-hover:border-emerald-500/40 group-hover:text-emerald-300 transition shrink-0">
+              가이드 보기
+            </span>
+          </button>
+        )}
         {isLoginAdminMode && (
           <div className="space-y-3">
             <button onClick={() => { setNewTeamLogo(null); setIsCreateTeamOpen(true); }} className="w-full py-4 border-2 border-dashed border-slate-700 rounded-2xl text-blue-400 font-bold flex items-center justify-center gap-2 hover:border-blue-500 bg-blue-500/5 transition"><Plus size={20} /> 새 팀 생성하기</button>
             <button onClick={() => setAdminPwdChangeModal(true)} className="w-full py-4 border-2 border-dashed border-slate-700 rounded-2xl text-slate-400 font-bold flex items-center justify-center gap-2 hover:text-white hover:border-slate-500 bg-slate-800/50 transition"><Shield size={20} /> 관리자 마스터 비밀번호 변경</button>
           </div>
         )}
-        {renderCreateTeamModal()}{renderEditTeamModal()}{renderAdminPwdChangeModal()}{renderRoleSelectModal()}{renderAuthModal()}{renderSystemModals()}
+        {renderInstallGuideModal()}{renderCreateTeamModal()}{renderEditTeamModal()}{renderAdminPwdChangeModal()}{renderRoleSelectModal()}{renderAuthModal()}{renderSystemModals()}
       </div>
     );
   }
