@@ -564,16 +564,17 @@ export default function App() {
     const currentTeamLetter = teamLetter || goalFlow.teamLetter;
     const isExternalOpponent = targetMatch?.matchType === 'external' && currentTeamLetter === 'B';
     const isOpponentDirectGoal = selectedId === 'opponent' || (isExternalOpponent && selectedId === 'mercenary');
+    const isOwnGoal = goalFlow.step === 1 && selectedId === null;
 
-    if (goalFlow.step === 1 && !isOpponentDirectGoal) {
+    if (goalFlow.step === 1 && !isOpponentDirectGoal && !isOwnGoal) {
       setGoalFlow({ ...goalFlow, step: 2, teamLetter: currentTeamLetter, scorer: selectedId });
       setShowOtherTeams(false);
     } else {
       if(isProcessing) return; setIsProcessing(true);
       const { matchId: gfMatchId, quarter: gfQuarter, teamLetter: gfTeamLetter, scorer: gfScorer, isPK: gfIsPK, remark: gfRemark, isMissingAdd: gfIsMissingAdd } = goalFlow;
       const effectiveTeamLetter = gfTeamLetter || currentTeamLetter;
-      const effectiveScorer = isOpponentDirectGoal ? 'opponent' : gfScorer;
-      const assistId = isOpponentDirectGoal ? null : selectedId;
+      const effectiveScorer = isOpponentDirectGoal ? 'opponent' : (isOwnGoal ? null : gfScorer);
+      const assistId = (isOpponentDirectGoal || isOwnGoal) ? null : selectedId;
       setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, scorer: null, isPK: false, remark: '', isMissingAdd: false }); setShowOtherTeams(false);
       try {
         const quarter = gfQuarter || liveState.currentQuarter;
@@ -1139,35 +1140,68 @@ const renderGoalFlowModal = () => {
         ? basePlayers.filter(p => ((currentGoalMatch?.teamAssignments || {})[p.id]) !== goalFlow.teamLetter)
         : teamRoster.filter(p => !basePlayers.some(bp => bp.id === p.id)));
 
+  const isStep1 = goalFlow.step === 1;
+  const selectedScorerName = goalFlow.scorer === 'mercenary'
+    ? '용병'
+    : (players.find(p => p.id === goalFlow.scorer)?.name || '');
+
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[150]">
-      <div className="bg-slate-800 rounded-2xl w-full max-w-md p-6 border border-slate-700 shadow-2xl">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[150] animate-in fade-in">
+      <div className={`bg-slate-800 rounded-2xl w-full max-w-sm p-5 border shadow-2xl transition-colors ${isStep1 ? 'border-slate-700' : 'border-emerald-500/50'}`}>
         {/* 헤더 */}
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-black text-white flex items-center gap-2">
-            <Trophy size={18} className="text-yellow-400"/> 
-            {goalFlow.step === 1 ? '득점자 선택' : '어시스트 선택'}
-          </h2>
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex items-center gap-2">
+            <span className={`px-2 py-0.5 rounded-md text-xs font-black ${isStep1 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
+              STEP {goalFlow.step}/2
+            </span>
+            <h2 className="text-base font-black text-white">
+              {isStep1 ? '⚽ 득점자 선택' : '👟 도움(어시스트) 선택'}
+            </h2>
+          </div>
           <button 
             onClick={() => {
               setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false }); 
               setShowOtherTeams(false);
             }} 
-            className="text-slate-400 hover:text-white"
+            className="text-slate-400 hover:text-white p-1"
           >
-            <X size={20}/>
+            <X size={18}/>
           </button>
         </div>
 
+        {/* 2단계 진입 시: 선택된 득점자 확인 배너 + 단독 득점 빠른 완료 버튼 */}
+        {!isStep1 && (
+          <div className="mb-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-2 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs font-bold text-emerald-400 shrink-0">⚽ 득점:</span>
+              <span className="text-xs font-black text-white truncate">{selectedScorerName}</span>
+              <button
+                type="button"
+                onClick={() => setGoalFlow(prev => ({ ...prev, step: 1, scorer: null }))}
+                className="text-[11px] font-bold text-slate-400 hover:text-white underline shrink-0 ml-1"
+              >
+                변경
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleGoalSubmit(null, goalFlow.teamLetter)}
+              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-lg text-xs shrink-0 shadow transition"
+            >
+              도움 없음 (완료)
+            </button>
+          </div>
+        )}
+
         {/* 누락 득점 추가 시 팀 선택 탭 */}
-        {goalFlow.step === 1 && (goalFlow.availableTeams || []).length > 1 && (
-          <div className="flex gap-2 mb-4 bg-slate-900 p-1 rounded-xl border border-slate-700">
+        {isStep1 && (goalFlow.availableTeams || []).length > 1 && (
+          <div className="flex gap-1.5 mb-3 bg-slate-900 p-1 rounded-xl border border-slate-700">
             {goalFlow.availableTeams.map(tLetter => (
               <button
                 key={tLetter}
                 type="button"
                 onClick={() => { setGoalFlow(prev => ({ ...prev, teamLetter: tLetter })); setShowOtherTeams(false); }}
-                className={`flex-1 py-2 rounded-lg text-xs font-black transition ${goalFlow.teamLetter === tLetter ? TEAM_COLORS[tLetter] : 'text-slate-400 hover:text-white'}`}
+                className={`flex-1 h-8 rounded-lg text-xs font-black transition ${goalFlow.teamLetter === tLetter ? TEAM_COLORS[tLetter] : 'text-slate-400 hover:text-white'}`}
               >
                 {getTeamDisplayName(currentGoalMatch, tLetter)} 득점
               </button>
@@ -1176,60 +1210,81 @@ const renderGoalFlowModal = () => {
         )}
 
         {/* 명단 영역 */}
-        <div className="mb-3">
-          <div className="flex justify-between items-center mb-3">
-            <div className="text-sm font-bold text-slate-400">
-              {getTeamDisplayName(currentGoalMatch, goalFlow.teamLetter)} 명단
+        {!isExternalOpponent && (
+          <div className="mb-3">
+            <div className="flex justify-between items-center mb-2">
+              <div className="text-xs font-bold text-slate-400">
+                {getTeamDisplayName(currentGoalMatch, goalFlow.teamLetter)} 명단 ({selectedTeamPlayers.length}명)
+              </div>
+              {currentGoalMatch?.matchType !== 'external' && otherPlayers.length > 0 && ( 
+                <button 
+                  type="button"
+                  onClick={() => setShowOtherTeams(!showOtherTeams)} 
+                  className={`text-xs px-2 py-1 rounded-lg border font-bold transition ${showOtherTeams ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-slate-700 text-slate-300 border-slate-600'}`}
+                >
+                  타팀 지원 {showOtherTeams ? '닫기' : '보기'}
+                </button> 
+              )}
             </div>
-            {currentGoalMatch?.matchType !== 'external' && ( 
-              <button 
-                onClick={() => setShowOtherTeams(!showOtherTeams)} 
-                className={`text-[11px] px-2 py-1 rounded border font-bold transition ${showOtherTeams ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-slate-700 text-slate-400 border-slate-600'}`}
-              >
-                🔄 타팀 지원 {showOtherTeams ? '닫기' : '보기'}
-              </button> 
-            )}
-          </div>
-          
-          <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto hide-scrollbar">
-            {selectedTeamPlayers.map(p => ( 
-              <button 
-                key={p.id} 
-                onClick={() => handleGoalSubmit(p.id, goalFlow.teamLetter)} 
-                className="bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl border border-slate-600 transition text-sm"
-              >
-                {p.name}
-              </button> 
-            ))}
-          </div>
-          
-          {showOtherTeams && ( 
-            <div className="mt-4 pt-3 border-t border-slate-700">
-              <div className="text-xs font-bold text-slate-500 mb-2">타팀 인원 (지원)</div>
-              <div className="grid grid-cols-3 gap-2 max-h-32 overflow-y-auto hide-scrollbar">
-                {otherPlayers.map(p => ( 
+            
+            <div className="grid grid-cols-4 gap-1.5 max-h-44 overflow-y-auto hide-scrollbar">
+              {selectedTeamPlayers.map(p => {
+                const isAlreadyScorer = !isStep1 && goalFlow.scorer === p.id;
+                return (
                   <button 
                     key={p.id} 
+                    disabled={isAlreadyScorer}
                     onClick={() => handleGoalSubmit(p.id, goalFlow.teamLetter)} 
-                    className="bg-slate-900 hover:bg-slate-700 text-slate-300 font-bold py-2 rounded-xl border border-slate-700 transition text-xs truncate px-1"
+                    className={`h-9 px-1 rounded-lg border font-bold text-xs truncate transition ${
+                      isAlreadyScorer
+                        ? 'bg-blue-500/20 border-blue-500/40 text-blue-300 cursor-not-allowed'
+                        : isStep1
+                          ? 'bg-slate-700 hover:bg-blue-600 hover:border-blue-400 text-white border-slate-600'
+                          : 'bg-slate-700 hover:bg-emerald-600 hover:border-emerald-400 text-white border-slate-600'
+                    }`}
                   >
-                    {p.name} <span className="text-[9px] text-slate-500">({(currentGoalMatch?.teamAssignments || {})[p.id] ? `${currentGoalMatch.teamAssignments[p.id]}팀` : '미정'})</span>
-                  </button> 
-                ))}
-              </div>
-            </div> 
-          )}
-        </div>
+                    {isAlreadyScorer ? `⚽ ${p.name}` : p.name}
+                  </button>
+                );
+              })}
+            </div>
+            
+            {showOtherTeams && otherPlayers.length > 0 && ( 
+              <div className="mt-2.5 pt-2.5 border-t border-slate-700">
+                <div className="text-xs font-bold text-slate-400 mb-1.5">타팀 지원 인원</div>
+                <div className="grid grid-cols-4 gap-1.5 max-h-28 overflow-y-auto hide-scrollbar">
+                  {otherPlayers.map(p => {
+                    const isAlreadyScorer = !isStep1 && goalFlow.scorer === p.id;
+                    return (
+                      <button 
+                        key={p.id} 
+                        disabled={isAlreadyScorer}
+                        onClick={() => handleGoalSubmit(p.id, goalFlow.teamLetter)} 
+                        className={`h-9 px-1 rounded-lg border font-bold text-xs truncate transition ${
+                          isAlreadyScorer
+                            ? 'bg-blue-500/20 border-blue-500/40 text-blue-300 cursor-not-allowed'
+                            : 'bg-slate-900 hover:bg-slate-700 text-slate-300 border-slate-700'
+                        }`}
+                      >
+                        {isAlreadyScorer ? `⚽ ${p.name}` : p.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div> 
+            )}
+          </div>
+        )}
 
         {/* PK 여부 체크 및 기타 특이사항 입력 영역 */}
-        <div className="space-y-2 mt-3 pt-3 border-t border-slate-700">
-          {goalFlow.step === 1 && (
-            <label className="flex items-center gap-2.5 bg-slate-900 p-2.5 rounded-xl border border-slate-700 cursor-pointer hover:border-slate-600 transition">
+        <div className="space-y-1.5 pt-2.5 border-t border-slate-700">
+          {isStep1 && (
+            <label className="flex items-center gap-2 bg-slate-900 px-3 h-9 rounded-lg border border-slate-700 cursor-pointer hover:border-slate-600 transition">
               <input
                 type="checkbox"
                 checked={!!goalFlow.isPK}
                 onChange={(e) => setGoalFlow(prev => ({ ...prev, isPK: e.target.checked }))}
-                className="w-4 h-4 accent-red-500 rounded"
+                className="w-4 h-4 accent-red-500 rounded shrink-0"
               />
               <span className="text-xs font-bold text-white">PK (페널티킥) 득점 여부</span>
             </label>
@@ -1239,32 +1294,32 @@ const renderGoalFlowModal = () => {
             value={goalFlow.remark || ''}
             onChange={(e) => setGoalFlow(prev => ({ ...prev, remark: e.target.value }))}
             placeholder="기타 입력 / 특이사항 (선택, 예: 프리킥, 중거리슛)"
-            className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white text-xs outline-none focus:border-blue-500"
+            className="w-full bg-slate-900 border border-slate-700 px-3 h-9 rounded-lg text-white text-xs outline-none focus:border-blue-500"
           />
         </div>
         
-        {/* 액션 버튼들 */}
-        <div className="space-y-2 mt-3 pt-3 border-t border-slate-700">
+        {/* 하단 액션 버튼들 */}
+        <div className="grid grid-cols-2 gap-1.5 mt-2.5 pt-2.5 border-t border-slate-700">
           <button 
             onClick={() => handleGoalSubmit(isExternalOpponent ? 'opponent' : 'mercenary', goalFlow.teamLetter)} 
-            className="w-full bg-slate-900 border border-slate-600 hover:bg-slate-700 text-slate-300 font-bold py-3 rounded-xl flex items-center justify-center gap-2 text-sm transition"
+            className="h-9 px-2 bg-slate-900 border border-slate-600 hover:bg-slate-700 text-slate-200 font-bold rounded-lg flex items-center justify-center gap-1 text-xs transition truncate"
           >
             {isExternalOpponent 
               ? `⚽ ${getTeamDisplayName(currentGoalMatch, goalFlow.teamLetter)} 득점` 
-              : `👤 용병 (팀 외 인원) ${goalFlow.step === 1 ? '득점' : '도움'}`}
+              : `👤 용병 ${isStep1 ? '득점' : '도움'}`}
           </button>
           
-          {goalFlow.step === 1 ? ( 
+          {isStep1 ? ( 
             <button 
               onClick={() => handleGoalSubmit(null, goalFlow.teamLetter)} 
-              className="w-full bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-400 font-bold py-3 rounded-xl text-sm transition"
+              className="h-9 px-2 bg-slate-900 border border-slate-700 hover:bg-slate-700 text-slate-300 font-bold rounded-lg text-xs transition truncate"
             >
               상대팀 자책골
             </button> 
           ) : ( 
             <button 
               onClick={() => handleGoalSubmit(null, goalFlow.teamLetter)} 
-              className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl shadow-lg text-sm transition"
+              className="h-9 px-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-lg shadow text-xs transition truncate"
             >
               도움 없음 (단독 득점)
             </button> 
