@@ -608,7 +608,7 @@ export default function App() {
       const rawAssistId = fd.get('assistId');
       const newScorerId = (!rawScorerId || rawScorerId === 'none') ? null : rawScorerId;
       const newAssistId = (!rawAssistId || rawAssistId === 'none' || newScorerId === 'opponent') ? null : rawAssistId;
-      const newIsPK = fd.get('isPK') === 'true'; const newRemark = fd.get('remark') || '';
+      const newIsPK = fd.get('isPK') === 'true' || fd.get('isPK') === 'on'; const newRemark = fd.get('remark') || '';
       const m = matches.find(match => match.id === logEditModal.match.id); const l = logEditModal.log;
       const oldScorerId = l.scorerId; const oldAssistId = l.assistId; const updatePromises = [];
       if (oldScorerId !== newScorerId) {
@@ -1143,7 +1143,7 @@ const renderGoalFlowModal = () => {
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[150]">
       <div className="bg-slate-800 rounded-2xl w-full max-w-md p-6 border border-slate-700 shadow-2xl">
         {/* 헤더 */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-black text-white flex items-center gap-2">
             <Trophy size={18} className="text-yellow-400"/> 
             {goalFlow.step === 1 ? '득점자 선택' : '어시스트 선택'}
@@ -1159,8 +1159,24 @@ const renderGoalFlowModal = () => {
           </button>
         </div>
 
+        {/* 누락 득점 추가 시 팀 선택 탭 */}
+        {goalFlow.step === 1 && (goalFlow.availableTeams || []).length > 1 && (
+          <div className="flex gap-2 mb-4 bg-slate-900 p-1 rounded-xl border border-slate-700">
+            {goalFlow.availableTeams.map(tLetter => (
+              <button
+                key={tLetter}
+                type="button"
+                onClick={() => { setGoalFlow(prev => ({ ...prev, teamLetter: tLetter })); setShowOtherTeams(false); }}
+                className={`flex-1 py-2 rounded-lg text-xs font-black transition ${goalFlow.teamLetter === tLetter ? TEAM_COLORS[tLetter] : 'text-slate-400 hover:text-white'}`}
+              >
+                {getTeamDisplayName(currentGoalMatch, tLetter)} 득점
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* 명단 영역 */}
-        <div className="mb-4">
+        <div className="mb-3">
           <div className="flex justify-between items-center mb-3">
             <div className="text-sm font-bold text-slate-400">
               {getTeamDisplayName(currentGoalMatch, goalFlow.teamLetter)} 명단
@@ -1204,9 +1220,31 @@ const renderGoalFlowModal = () => {
             </div> 
           )}
         </div>
+
+        {/* PK 여부 체크 및 기타 특이사항 입력 영역 */}
+        <div className="space-y-2 mt-3 pt-3 border-t border-slate-700">
+          {goalFlow.step === 1 && (
+            <label className="flex items-center gap-2.5 bg-slate-900 p-2.5 rounded-xl border border-slate-700 cursor-pointer hover:border-slate-600 transition">
+              <input
+                type="checkbox"
+                checked={!!goalFlow.isPK}
+                onChange={(e) => setGoalFlow(prev => ({ ...prev, isPK: e.target.checked }))}
+                className="w-4 h-4 accent-red-500 rounded"
+              />
+              <span className="text-xs font-bold text-white">PK (페널티킥) 득점 여부</span>
+            </label>
+          )}
+          <input
+            type="text"
+            value={goalFlow.remark || ''}
+            onChange={(e) => setGoalFlow(prev => ({ ...prev, remark: e.target.value }))}
+            placeholder="기타 입력 / 특이사항 (선택, 예: 프리킥, 중거리슛)"
+            className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white text-xs outline-none focus:border-blue-500"
+          />
+        </div>
         
         {/* 액션 버튼들 */}
-        <div className="space-y-2 mt-4 pt-4 border-t border-slate-700">
+        <div className="space-y-2 mt-3 pt-3 border-t border-slate-700">
           <button 
             onClick={() => handleGoalSubmit(isExternalOpponent ? 'opponent' : 'mercenary', goalFlow.teamLetter)} 
             className="w-full bg-slate-900 border border-slate-600 hover:bg-slate-700 text-slate-300 font-bold py-3 rounded-xl flex items-center justify-center gap-2 text-sm transition"
