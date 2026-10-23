@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { Calendar, Users, BarChart2, Plus, MapPin, Trophy, Shield, ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings, Target, Undo, Redo, MousePointer, ArrowUpRight, TrendingUp, Square, XCircle, Video, PlayCircle, RotateCcw } from 'lucide-react';
 
 const firebaseConfig = { apiKey: "AIzaSyCO99Km34_p0paqFM8wbWD0odUU8UJ9ph4", authDomain: "matchboard-d010e.firebaseapp.com", projectId: "matchboard-d010e", storageBucket: "matchboard-d010e.appspot.com", messagingSenderId: "693534026774", appId: "1:693534026774:web:a61dd8607c492e5e7c1937", measurementId: "G-VVB38BS06J" };
@@ -158,19 +158,32 @@ const getInitialTacticsTokens = (pitchType) => {
   return tokens;
 };
 
+const SESSION_STORAGE_KEY = 'matchboard_session_v1';
+const loadSavedSession = () => {
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+};
+
 export default function App() {
+  const savedSession = useMemo(() => loadSavedSession(), []);
   const [user, setUser] = useState(null);
-  const [appState, setAppState] = useState('login'); 
-  const [activeTab, setActiveTab] = useState('matches'); 
+  const [appState, setAppState] = useState(() => (savedSession?.activeTeamId ? (savedSession.appState || 'main') : 'login')); 
+  const [activeTab, setActiveTab] = useState(() => savedSession?.activeTab || 'matches'); 
   const [statsPeriod, setStatsPeriod] = useState('month'); 
   const [statsType, setStatsType] = useState('total'); 
-  const [isAdmin, setIsAdmin] = useState(false); 
+  const [isAdmin, setIsAdmin] = useState(() => !!savedSession?.isAdmin); 
   const [adminPassword, setAdminPassword] = useState('admin');
   const [isLoaded, setIsLoaded] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [teams, setTeams] = useState([]);
-  const [activeTeamId, setActiveTeamId] = useState(null);
+  const [activeTeamId, setActiveTeamId] = useState(() => savedSession?.activeTeamId || null);
   const [players, setPlayers] = useState([]);
   const [matches, setMatches] = useState([]);
   const [memos, setMemos] = useState({});
@@ -205,8 +218,8 @@ export default function App() {
   const [shareModal, setShareModal] = useState({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
   const [galleryModal, setGalleryModal] = useState({ isOpen: false, photos: [], currentIndex: 0, matchId: null });
 
-  const [liveMatchId, setLiveMatchId] = useState(null);
-  const [liveState, setLiveState] = useState({ currentQuarter: 1, playingTeams: ['A', 'B'], isQuarterActive: false, gk1: null, gk2: null });
+  const [liveMatchId, setLiveMatchId] = useState(() => savedSession?.liveMatchId || null);
+  const [liveState, setLiveState] = useState(() => savedSession?.liveState || { currentQuarter: 1, playingTeams: ['A', 'B'], isQuarterActive: false, gk1: null, gk2: null });
   const [goalFlow, setGoalFlow] = useState({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false });
   const [logEditModal, setLogEditModal] = useState({ isOpen: false, match: null, log: null });
   const [showOtherTeams, setShowOtherTeams] = useState(false);
@@ -384,6 +397,165 @@ export default function App() {
 
   useEffect(() => { return () => { if (playbackRef.current) cancelAnimationFrame(playbackRef.current); }; }, []);
 
+  // 세션 및 현재 화면 상태 localStorage 자동 저장 (뒤로가기 종료 후 재진입 시에도 화면 유지)
+  useEffect(() => {
+    try {
+      if (!activeTeamId || appState === 'login') {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+      } else {
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+          activeTeamId,
+          appState,
+          activeTab,
+          isAdmin,
+          liveMatchId,
+          liveState
+        }));
+      }
+    } catch (e) {}
+  }, [activeTeamId, appState, activeTab, isAdmin, liveMatchId, liveState]);
+
+  const computeDerivedLiveState = (match) => {
+    if (!match) return { currentQuarter: 1, playingTeams: ['A', 'B'], isQuarterActive: false, gk1: null, gk2: null };
+    const qScores = match.quarterScores || [];
+    const mLogs = match.logs || [];
+    const currentQ = qScores.length + 1;
+    const currentLogs = mLogs.filter(l => l.quarter === currentQ);
+    if (match.liveStatus && match.liveStatus.currentQuarter === currentQ) {
+      return {
+        currentQuarter: currentQ,
+        playingTeams: match.liveStatus.playingTeams || ['A', 'B'],
+        isQuarterActive: currentLogs.length > 0 ? true : !!match.liveStatus.isQuarterActive,
+        gk1: match.liveStatus.gk1 ?? getLastGkForTeam(match, (match.liveStatus.playingTeams || ['A', 'B'])[0]),
+        gk2: match.matchType === 'external' ? null : (match.liveStatus.gk2 ?? getLastGkForTeam(match, (match.liveStatus.playingTeams || ['A', 'B'])[1]))
+      };
+    }
+    const stats = match.isTournament ? calculateTournamentStandings(match) : null;
+    let playingTeams = match.isTournament ? getTournamentMatchup(currentQ, match, stats) : ['A', 'B'];
+    let isQuarterActive = false;
+    if (match.matchType === 'external') {
+      if (currentLogs.length > 0) isQuarterActive = true;
+    } else {
+      if (currentLogs.length > 0) {
+        const teamsInLogs = [...new Set(currentLogs.map(l => l.teamLetter))];
+        if (teamsInLogs.length === 2) playingTeams = teamsInLogs;
+        else if (teamsInLogs.length === 1) playingTeams = [teamsInLogs[0], TEAM_LETTERS.find(t => t !== teamsInLogs[0])];
+        isQuarterActive = true;
+      }
+    }
+    const initialGk1 = getLastGkForTeam(match, playingTeams[0]);
+    const initialGk2 = match.matchType === 'external' ? null : getLastGkForTeam(match, playingTeams[1]);
+    return { currentQuarter: currentQ, playingTeams, isQuarterActive, gk1: initialGk1, gk2: initialGk2 };
+  };
+
+  // 다중 접속 시 실시간으로 liveMatch의 쿼터/진행상태/골키퍼 동기화
+  useEffect(() => {
+    if (appState !== 'liveMatch' || !liveMatchId) return;
+    if (!liveMatch) return;
+    if (liveMatch.status === 'completed') {
+      setAppState('main');
+      setLiveMatchId(null);
+      return;
+    }
+    const derived = computeDerivedLiveState(liveMatch);
+    setLiveState(prev => {
+      if (
+        prev.currentQuarter === derived.currentQuarter &&
+        prev.isQuarterActive === derived.isQuarterActive &&
+        prev.playingTeams[0] === derived.playingTeams[0] &&
+        prev.playingTeams[1] === derived.playingTeams[1] &&
+        prev.gk1 === derived.gk1 &&
+        prev.gk2 === derived.gk2
+      ) {
+        return prev;
+      }
+      return derived;
+    });
+  }, [appState, liveMatchId, liveMatch]);
+
+  const updateLiveStateAndSync = (patch) => {
+    setLiveState(prev => {
+      const next = { ...prev, ...patch };
+      if (liveMatch && liveMatchId) {
+        setDoc(doc(db, 'matches', liveMatchId), {
+          ...liveMatch,
+          liveStatus: {
+            currentQuarter: next.currentQuarter,
+            playingTeams: next.playingTeams,
+            isQuarterActive: next.isQuarterActive,
+            gk1: next.gk1 || null,
+            gk2: next.gk2 || null,
+            updatedAt: Date.now()
+          }
+        }).catch(console.error);
+      }
+      return next;
+    });
+  };
+
+  const handleManualRefresh = async () => {
+    if (isRefreshing || !activeTeamId) return;
+    setIsRefreshing(true);
+    try {
+      const [pSnap, mSnap] = await Promise.all([
+        getDocs(query(collection(db, 'players'), where('teamId', '==', activeTeamId))),
+        getDocs(query(collection(db, 'matches'), where('teamId', '==', activeTeamId)))
+      ]);
+      const freshPlayers = pSnap.docs.map(d => d.data());
+      const freshMatches = mSnap.docs.map(d => d.data());
+      setPlayers(freshPlayers);
+      setMatches(freshMatches);
+      if (liveMatchId) {
+        const freshLive = freshMatches.find(m => m.id === liveMatchId);
+        if (freshLive) {
+          if (freshLive.status === 'completed') {
+            setAppState('main');
+            setLiveMatchId(null);
+          } else {
+            setLiveState(computeDerivedLiveState(freshLive));
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Refresh error:', e);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 400);
+    }
+  };
+
+  // 디바이스 뒤로가기(Back) 버튼 제어
+  const backStateRef = useRef({});
+  backStateRef.current = {
+    appState, activeTab, goalFlow, logEditModal, quarterEditModal, detailModal,
+    assignmentModal, matchModal, rosterModal, dateMemoModal, galleryModal,
+    shareModal, tacticsTutorialModal, teamSettingsModal, authModal
+  };
+
+  useEffect(() => {
+    if (appState === 'login') return;
+    window.history.pushState({ matchboardGuard: true }, '');
+    const handlePopState = () => {
+      const st = backStateRef.current;
+      if (st.galleryModal.isOpen) { setGalleryModal({ isOpen: false, photos: [], currentIndex: 0, matchId: null }); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.shareModal.isOpen) { setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false }); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.goalFlow.isOpen) { setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false }); setShowOtherTeams(false); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.logEditModal.isOpen) { setLogEditModal({ isOpen: false, match: null, log: null }); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.quarterEditModal.isOpen) { setQuarterEditModal({ isOpen: false, match: null, quarterScore: null }); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.assignmentModal.isOpen) { setAssignmentModal({ isOpen: false, match: null }); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.detailModal.isOpen) { setDetailModal({ isOpen: false, match: null }); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.matchModal.isOpen) { setMatchModal({ isOpen: false, match: null }); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.rosterModal.isOpen) { setRosterModal({ isOpen: false, player: null }); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.dateMemoModal.isOpen) { setDateMemoModal({ isOpen: false, dateStr: null, matches: [], memo: '' }); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.tacticsTutorialModal) { setTacticsTutorialModal(false); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.teamSettingsModal) { setTeamSettingsModal(false); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.authModal.isOpen) { setAuthModal({ isOpen: false, type: '', targetTeam: null }); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.appState === 'liveMatch') { setAppState('main'); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.activeTab !== 'matches') { setActiveTab('matches'); window.history.pushState({ matchboardGuard: true }, ''); return; }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [appState === 'login']);
+
   const prevMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
   const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
   const prevYear = () => setViewDate(new Date(viewDate.getFullYear() - 1, viewDate.getMonth(), 1));
@@ -406,14 +578,10 @@ export default function App() {
          const attendees = match.attendees || []; const assignments = match.teamAssignments || {}; const unassigned = attendees.filter(id => !assignments[id]);
          if (attendees.length > 0 && unassigned.length > 0) { setSystemConfirm({ isOpen: true, message: `아직 팀 편성이 안 된 참석자가 ${unassigned.length}명 있습니다.\n먼저 팀을 나누시겠습니까?`, onConfirm: () => setAssignmentModal({ isOpen: true, match }) }); return; }
       }
-      const qScores = match.quarterScores || []; const mLogs = match.logs || []; const currentQ = qScores.length + 1; const currentLogs = mLogs.filter(l => l.quarter === currentQ);
-      const stats = match.isTournament ? calculateTournamentStandings(match) : null;
-      let playingTeams = match.isTournament ? getTournamentMatchup(currentQ, match, stats) : ['A', 'B']; let isQuarterActive = false;
-      if (match.matchType === 'external') { if (currentLogs.length > 0) isQuarterActive = true; } 
-      else { if (currentLogs.length > 0) { const teamsInLogs = [...new Set(currentLogs.map(l => l.teamLetter))]; if (teamsInLogs.length === 2) playingTeams = teamsInLogs; else if (teamsInLogs.length === 1) playingTeams = [teamsInLogs[0], TEAM_LETTERS.find(t => t !== teamsInLogs[0])]; isQuarterActive = true; } }
-      const initialGk1 = getLastGkForTeam(match, playingTeams[0]);
-      const initialGk2 = match.matchType === 'external' ? null : getLastGkForTeam(match, playingTeams[1]);
-      setLiveMatchId(match.id); setLiveState({ currentQuarter: currentQ, playingTeams: playingTeams, isQuarterActive: isQuarterActive, gk1: initialGk1, gk2: initialGk2 }); setAppState('liveMatch');
+      const nextLiveState = computeDerivedLiveState(match);
+      setLiveMatchId(match.id);
+      setLiveState(nextLiveState);
+      setAppState('liveMatch');
     }
   };
 
@@ -426,7 +594,10 @@ export default function App() {
     else if (authModal.type === 'teamLoginAdmin') { if (pwd === authModal.targetTeam.adminPassword) { setActiveTeamId(authModal.targetTeam.id); setIsAdmin(true); setAppState('main'); setAuthModal({ isOpen: false }); } else setSystemAlert({ isOpen: true, message: '팀 관리자 비밀번호가 틀렸습니다.' }); }
   };
 
-  const logout = () => { setActiveTeamId(null); setIsAdmin(false); setAppState('login'); setAuthModal({ isOpen: false, type: '', targetTeam: null }); };
+  const logout = () => {
+    try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) {}
+    setActiveTeamId(null); setIsAdmin(false); setLiveMatchId(null); setAppState('login'); setAuthModal({ isOpen: false, type: '', targetTeam: null });
+  };
 
   const saveMatch = async (e) => {
     e.preventDefault(); if(isProcessing) return; setIsProcessing(true);
@@ -696,14 +867,15 @@ export default function App() {
       if (isEarlyEnd || liveState.currentQuarter >= liveMatch.totalQuarters) {
          const updatePromises = [];
          for (const p of players) { if ((updatedMatch.attendees || []).includes(p.id)) { updatePromises.push(setDoc(doc(db, 'players', p.id), { ...p, caps: (p.caps || 0) + 1 })); } }
-         updatePromises.push(setDoc(doc(db, 'matches', liveMatchId), { ...updatedMatch, status: 'completed' }));
+         updatePromises.push(setDoc(doc(db, 'matches', liveMatchId), { ...updatedMatch, status: 'completed', liveStatus: null }));
          await Promise.all(updatePromises); setAppState('main'); setLiveMatchId(null);
       } else {
-         await setDoc(doc(db, 'matches', liveMatchId), updatedMatch);
          const nextQ = liveState.currentQuarter + 1; const stats = updatedMatch.isTournament ? calculateTournamentStandings(updatedMatch) : null;
          const nextTeams = updatedMatch.isTournament ? getTournamentMatchup(nextQ, updatedMatch, stats) : ['A', 'B'];
          const nextGk1 = getLastGkForTeam(updatedMatch, nextTeams[0]);
          const nextGk2 = updatedMatch.matchType === 'external' ? null : getLastGkForTeam(updatedMatch, nextTeams[1]);
+         const nextLiveStatus = { currentQuarter: nextQ, playingTeams: nextTeams, isQuarterActive: false, gk1: nextGk1, gk2: nextGk2, updatedAt: Date.now() };
+         await setDoc(doc(db, 'matches', liveMatchId), { ...updatedMatch, liveStatus: nextLiveStatus });
          setLiveState({ currentQuarter: nextQ, playingTeams: nextTeams, isQuarterActive: false, gk1: nextGk1, gk2: nextGk2 });
       }
     } finally { setIsProcessing(false); }
@@ -1735,12 +1907,13 @@ const renderGoalFlowModal = () => {
     return (
       <div className="bg-slate-900 text-slate-200 font-sans p-5 sm:p-6 max-w-md mx-auto relative flex flex-col h-[100dvh] overflow-hidden animate-in fade-in">
         {globalStyles}
-        <header className="flex justify-between items-center mb-6 pt-2 shrink-0">
-          <button onClick={() => setAppState('main')} className="flex items-center gap-1 text-slate-400 hover:text-white font-bold text-sm"><ChevronLeft size={20}/> 메인</button>
-          <h2 className="text-lg font-black text-white">{!liveState.isQuarterActive ? "새 쿼터 준비" : `${liveState.currentQuarter}Q 라이브`}</h2>
-          <div className="flex items-center gap-2">
-            {!isExternal && <button onClick={() => setAssignmentModal({isOpen: true, match: liveMatch})} className="text-xs bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg font-bold border border-slate-600 flex items-center gap-1 hover:bg-slate-700 transition"><Users size={14}/> 편성</button>}
-            <button onClick={() => triggerShare(liveMatch)} className="text-xs bg-yellow-500/20 text-yellow-500 px-3 py-1.5 rounded-lg font-bold border border-yellow-500/30 flex items-center gap-1 hover:bg-yellow-500/30 transition"><Share2 size={14}/> 공유</button>
+        <header className="flex justify-between items-center mb-6 pt-2 shrink-0 gap-2">
+          <button onClick={() => setAppState('main')} className="flex items-center gap-1 text-slate-400 hover:text-white font-bold text-sm shrink-0"><ChevronLeft size={20}/> 메인</button>
+          <h2 className="text-base sm:text-lg font-black text-white truncate">{!liveState.isQuarterActive ? "새 쿼터 준비" : `${liveState.currentQuarter}Q 라이브`}</h2>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button onClick={handleManualRefresh} disabled={isRefreshing} className="text-xs bg-slate-800 text-emerald-400 px-2.5 py-1.5 rounded-lg font-bold border border-emerald-500/30 flex items-center gap-1 hover:bg-slate-700 transition whitespace-nowrap"><RotateCcw size={13} className={isRefreshing ? 'animate-spin' : ''}/> 새로고침</button>
+            {!isExternal && <button onClick={() => setAssignmentModal({isOpen: true, match: liveMatch})} className="text-xs bg-slate-800 text-slate-300 px-2.5 py-1.5 rounded-lg font-bold border border-slate-600 flex items-center gap-1 hover:bg-slate-700 transition whitespace-nowrap"><Users size={13}/> 편성</button>}
+            <button onClick={() => triggerShare(liveMatch)} className="text-xs bg-yellow-500/20 text-yellow-500 px-2.5 py-1.5 rounded-lg font-bold border border-yellow-500/30 flex items-center gap-1 hover:bg-yellow-500/30 transition whitespace-nowrap"><Share2 size={13}/> 공유</button>
           </div>
         </header>
 
@@ -1754,15 +1927,15 @@ const renderGoalFlowModal = () => {
                 <div className="flex items-center justify-center gap-4 mb-6"><div className="w-32 border-2 text-white font-black text-xl text-center py-6 rounded-2xl shadow-xl bg-slate-800 border-slate-400">{activeTeam?.name || '우리 팀'}</div><span className="text-slate-600 font-black italic text-2xl">VS</span><div className={`w-32 border-2 text-white font-black text-xl text-center py-6 rounded-2xl shadow-xl ${TEAM_COLORS['B']}`}>{liveMatch.opponentName}</div></div>
               ) : (
                 <div className="flex items-center justify-center gap-4 mb-6">
-                  <select value={liveState.playingTeams[0]} onChange={(e) => { const nt = e.target.value; setLiveState({...liveState, playingTeams: [nt, liveState.playingTeams[1]], gk1: getLastGkForTeam(liveMatch, nt)}); }} className={`w-28 border-2 text-white font-black text-3xl text-center py-5 rounded-2xl appearance-none shadow-xl outline-none ${liveState.playingTeams[0] === 'A' ? 'bg-slate-800 border-slate-400' : TEAM_COLORS[liveState.playingTeams[0]]}`}>{TEAM_LETTERS.slice(0, getMatchTeamCount(liveMatch)).map(t => <option key={t} value={t} className="bg-slate-900">{t}팀</option>)}</select>
+                  <select value={liveState.playingTeams[0]} onChange={(e) => { const nt = e.target.value; updateLiveStateAndSync({ playingTeams: [nt, liveState.playingTeams[1]], gk1: getLastGkForTeam(liveMatch, nt) }); }} className={`w-28 border-2 text-white font-black text-3xl text-center py-5 rounded-2xl appearance-none shadow-xl outline-none ${liveState.playingTeams[0] === 'A' ? 'bg-slate-800 border-slate-400' : TEAM_COLORS[liveState.playingTeams[0]]}`}>{TEAM_LETTERS.slice(0, getMatchTeamCount(liveMatch)).map(t => <option key={t} value={t} className="bg-slate-900">{t}팀</option>)}</select>
                   <span className="text-slate-600 font-black italic text-2xl">VS</span>
-                  <select value={liveState.playingTeams[1]} onChange={(e) => { const nt = e.target.value; setLiveState({...liveState, playingTeams: [liveState.playingTeams[0], nt], gk2: getLastGkForTeam(liveMatch, nt)}); }} className={`w-28 border-2 text-white font-black text-3xl text-center py-5 rounded-2xl appearance-none shadow-xl outline-none ${liveState.playingTeams[1] === 'A' ? 'bg-slate-800 border-slate-400' : TEAM_COLORS[liveState.playingTeams[1]]}`}>{TEAM_LETTERS.slice(0, getMatchTeamCount(liveMatch)).map(t => <option key={t} value={t} className="bg-slate-900">{t}팀</option>)}</select>
+                  <select value={liveState.playingTeams[1]} onChange={(e) => { const nt = e.target.value; updateLiveStateAndSync({ playingTeams: [liveState.playingTeams[0], nt], gk2: getLastGkForTeam(liveMatch, nt) }); }} className={`w-28 border-2 text-white font-black text-3xl text-center py-5 rounded-2xl appearance-none shadow-xl outline-none ${liveState.playingTeams[1] === 'A' ? 'bg-slate-800 border-slate-400' : TEAM_COLORS[liveState.playingTeams[1]]}`}>{TEAM_LETTERS.slice(0, getMatchTeamCount(liveMatch)).map(t => <option key={t} value={t} className="bg-slate-900">{t}팀</option>)}</select>
                 </div>
               )}
               <div className={`grid ${isExternal ? 'grid-cols-1' : 'grid-cols-2'} gap-3 mb-6 bg-slate-800/60 p-3.5 rounded-2xl border border-slate-700/70`}>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-400 mb-1.5">🧤 {getTeamDisplayName(liveMatch, activeTeams[0])} 골키퍼</label>
-                  <select value={liveState.gk1 || 'none'} onChange={(e) => setLiveState({...liveState, gk1: e.target.value === 'none' ? null : e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white text-xs font-bold outline-none">
+                  <select value={liveState.gk1 || 'none'} onChange={(e) => updateLiveStateAndSync({ gk1: e.target.value === 'none' ? null : e.target.value })} className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white text-xs font-bold outline-none">
                     <option value="none">미지정 (선택안함)</option>
                     <option value="mercenary">👤 용병</option>
                     <optgroup label="소속/참석 선수">{t1GkCandidates.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>
@@ -1772,7 +1945,7 @@ const renderGoalFlowModal = () => {
                 {!isExternal && (
                   <div>
                     <label className="block text-[11px] font-bold text-slate-400 mb-1.5">🧤 {getTeamDisplayName(liveMatch, activeTeams[1])} 골키퍼</label>
-                    <select value={liveState.gk2 || 'none'} onChange={(e) => setLiveState({...liveState, gk2: e.target.value === 'none' ? null : e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white text-xs font-bold outline-none">
+                    <select value={liveState.gk2 || 'none'} onChange={(e) => updateLiveStateAndSync({ gk2: e.target.value === 'none' ? null : e.target.value })} className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white text-xs font-bold outline-none">
                       <option value="none">미지정 (선택안함)</option>
                       <option value="mercenary">👤 용병</option>
                       <optgroup label="소속/참석 선수">{t2GkCandidates.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>
@@ -1781,7 +1954,7 @@ const renderGoalFlowModal = () => {
                   </div>
                 )}
               </div>
-              <button onClick={() => { if (liveState.playingTeams[0] === liveState.playingTeams[1]) { setSystemAlert({isOpen:true, message:'서로 다른 팀을 선택해주세요.'}); return; } setLiveState({...liveState, isQuarterActive: true}); }} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 rounded-xl text-xl shadow-lg transition">쿼터 시작하기</button>
+              <button onClick={() => { if (liveState.playingTeams[0] === liveState.playingTeams[1]) { setSystemAlert({isOpen:true, message:'서로 다른 팀을 선택해주세요.'}); return; } updateLiveStateAndSync({ isQuarterActive: true }); }} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 rounded-xl text-xl shadow-lg transition">쿼터 시작하기</button>
               <button onClick={() => endQuarter(true)} className="w-full bg-slate-800 text-slate-400 hover:text-white font-bold py-3 rounded-xl mt-3 text-sm transition border border-slate-700">경기 조기 종료</button>
             </div>
             <div className="bg-slate-800/50 p-4 rounded-t-3xl border-t border-slate-700/50 -mx-5 -mb-5 sm:-mx-6 sm:-mb-6 mt-auto">
@@ -1800,7 +1973,7 @@ const renderGoalFlowModal = () => {
                   <div className={`font-black text-[13px] mb-1 truncate ${TEAM_TEXT_COLORS[activeTeams[0]]}`}>{getTeamDisplayName(liveMatch, activeTeams[0])}</div>
                   <div className="text-5xl font-black text-white">{(liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === activeTeams[0]).length}</div>
                   <div className="mt-2">
-                    <select value={liveState.gk1 || 'none'} onChange={(e) => setLiveState({...liveState, gk1: e.target.value === 'none' ? null : e.target.value})} className="w-full bg-slate-900/90 border border-slate-700 px-2 py-1 rounded-lg text-[11px] font-bold text-slate-300 outline-none text-center">
+                    <select value={liveState.gk1 || 'none'} onChange={(e) => updateLiveStateAndSync({ gk1: e.target.value === 'none' ? null : e.target.value })} className="w-full bg-slate-900/90 border border-slate-700 px-2 py-1 rounded-lg text-[11px] font-bold text-slate-300 outline-none text-center">
                       <option value="none">🧤 GK 미지정</option>
                       <option value="mercenary">🧤 GK: 용병</option>
                       <optgroup label="소속/참석 선수">{t1GkCandidates.map(p => <option key={p.id} value={p.id}>🧤 GK: {p.name}</option>)}</optgroup>
@@ -1814,7 +1987,7 @@ const renderGoalFlowModal = () => {
                   <div className="text-5xl font-black text-white">{(liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === activeTeams[1]).length}</div>
                   {!isExternal ? (
                     <div className="mt-2">
-                      <select value={liveState.gk2 || 'none'} onChange={(e) => setLiveState({...liveState, gk2: e.target.value === 'none' ? null : e.target.value})} className="w-full bg-slate-900/90 border border-slate-700 px-2 py-1 rounded-lg text-[11px] font-bold text-slate-300 outline-none text-center">
+                      <select value={liveState.gk2 || 'none'} onChange={(e) => updateLiveStateAndSync({ gk2: e.target.value === 'none' ? null : e.target.value })} className="w-full bg-slate-900/90 border border-slate-700 px-2 py-1 rounded-lg text-[11px] font-bold text-slate-300 outline-none text-center">
                         <option value="none">🧤 GK 미지정</option>
                         <option value="mercenary">🧤 GK: 용병</option>
                         <optgroup label="소속/참석 선수">{t2GkCandidates.map(p => <option key={p.id} value={p.id}>🧤 GK: {p.name}</option>)}</optgroup>
