@@ -245,6 +245,28 @@ export default function App() {
   
   const playbackRef = useRef(null); const boardRef = useRef(null); const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 }); const dragStartTokensRef = useRef(null); const activeDrawingData = useRef(null); const svgArrowRef = useRef(null); const svgPassRef = useRef(null); const svgZoneRef = useRef(null);
 
+  // GPS 분석 및 트래커 상태
+  const [gpsSession, setGpsSession] = useState(null);
+  const [gpsViewMode, setGpsViewMode] = useState('heatmap'); // 'heatmap' | 'sprint' | 'replay'
+  const [gpsFlipVertical, setGpsFlipVertical] = useState(false);
+  const [gpsRotate90, setGpsRotate90] = useState(false);
+  const [gpsSelectedPlayerId, setGpsSelectedPlayerId] = useState('');
+  const [gpsQuarterLabel, setGpsQuarterLabel] = useState('1Q');
+  const [gpsReplayPlaying, setGpsReplayPlaying] = useState(false);
+  const [gpsReplayProgress, setGpsReplayProgress] = useState(0); // 0..100
+  const [gpsReplaySpeed, setGpsReplaySpeed] = useState(2); // 1 | 2 | 4
+  const [gpsGuideModal, setGpsGuideModal] = useState(false);
+  const [gpsGuideTab, setGpsGuideTab] = useState(() => (typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent)) ? 'ios' : 'android');
+  const [isLiveGpsTracking, setIsLiveGpsTracking] = useState(false);
+  const [liveGpsStats, setLiveGpsStats] = useState({ elapsedSec: 0, distanceKm: 0, currentSpeedKmh: 0, maxSpeedKmh: 0, pointCount: 0 });
+  const gpsCanvasRef = useRef(null);
+  const gpsCardCaptureRef = useRef(null);
+  const gpsReplayRafRef = useRef(null);
+  const liveGpsWatchIdRef = useRef(null);
+  const liveGpsTimerRef = useRef(null);
+  const liveGpsPointsRef = useRef([]);
+  const wakeLockRef = useRef(null);
+
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
@@ -1035,6 +1057,753 @@ export default function App() {
       };
       setTimeout(draw, 100);
     } catch(e) { setSystemAlert({ isOpen: true, message: '비디오 추출을 지원하지 않는 브라우저입니다.\n캡처 버튼을 이용해주세요.' }); setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false }); }
+  };
+
+  // ================= GPS 분석 및 스마트워치 히트맵 엔진 =================
+  const savedGpsRecords = useMemo(() => {
+    const raw = memos?.['__gps_records__'];
+    if (!raw) return [];
+    try {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [memos]);
+
+  const calcHaversineMeters = (lat1, lon1, lat2, lon2) => {
+    const R = 6371000;
+    const toRad = d => (d * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  const formatDurationKo = (sec) => {
+    const total = Math.max(0, Math.round(sec || 0));
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${m}분 ${String(s).padStart(2, '0')}초`;
+  };
+
+  const analyzeGpsPoints = (rawPoints, title = '워치 GPS 기록') => {
+    if (!rawPoints || rawPoints.length < 5) {
+      setSystemAlert({ isOpen: true, message: '유효한 GPS 위치 포인트가 부족합니다.\n야외에서 측정된 운동 파일인지 확인해주세요.' });
+      return null;
+    }
+
+    // 1. 시간순 정렬 및 기본 필터링
+    const pts = rawPoints
+      .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lon))
+      .map((p, idx) => ({
+        lat: p.lat,
+        lon: p.lon,
+        timeMs: p.timeMs || (Date.now() + idx * 1000),
+        hr: p.hr && p.hr > 30 && p.hr < 240 ? p.hr : null
+      }))
+      .sort((a, b) => a.timeMs - b.timeMs);
+
+    if (pts.length < 5) return null;
+
+    // 2. 구간 거리 및 순간 속도 계산 + 노이즈 제거
+    let totalDistM = 0;
+    const enriched = [{ ...pts[0], distM: 0, dtSec: 0, rawSpeedKmh: 0, elapsedSec: 0 }];
+    const startTimeMs = pts[0].timeMs;
+
+    for (let i = 1; i < pts.length; i++) {
+      const prev = enriched[enriched.length - 1];
+      const cur = pts[i];
+      let dtSec = (cur.timeMs - prev.timeMs) / 1000;
+      if (dtSec <= 0) dtSec = 1;
+      const distM = calcHaversineMeters(prev.lat, prev.lon, cur.lat, cur.lon);
+      const speedKmh = (distM / dtSec) * 3.6;
+
+      // GPS 튐(순간이동 > 40km/h) 제거
+      if (speedKmh > 40 && dtSec < 10) continue;
+
+      // 제자리 미세 흔들림 보정
+      const effectiveDist = (distM < 0.6 && speedKmh < 1.3) ? 0 : distM;
+      totalDistM += effectiveDist;
+
+      enriched.push({
+        ...cur,
+        distM: effectiveDist,
+        dtSec,
+        rawSpeedKmh: effectiveDist > 0 ? speedKmh : 0,
+        elapsedSec: Math.max(0, (cur.timeMs - startTimeMs) / 1000)
+      });
+    }
+
+    // 3. 3포인트 이동평균 속도 스무딩 (손목 스윙 노이즈 완화)
+    let maxSpeedKmh = 0;
+    let zoneWalkSec = 0, zoneJogSec = 0, zoneRunSec = 0, zoneSprintSec = 0;
+    let sprintCount = 0;
+    let sprintDistanceM = 0;
+    let inSprint = false;
+    let sprintDurationAcc = 0;
+
+    enriched.forEach((p, idx) => {
+      const s0 = enriched[Math.max(0, idx - 1)].rawSpeedKmh;
+      const s1 = p.rawSpeedKmh;
+      const s2 = enriched[Math.min(enriched.length - 1, idx + 1)].rawSpeedKmh;
+      const smoothSpeed = Math.min(36, (s0 + s1 * 2 + s2) / 4);
+      p.speed = Number(smoothSpeed.toFixed(1));
+      if (p.speed > maxSpeedKmh) maxSpeedKmh = p.speed;
+
+      const dt = Math.min(p.dtSec || 1, 10);
+      if (p.speed < 7) zoneWalkSec += dt;
+      else if (p.speed < 14) zoneJogSec += dt;
+      else if (p.speed < 20) zoneRunSec += dt;
+      else {
+        zoneSprintSec += dt;
+        sprintDistanceM += p.distM || 0;
+      }
+
+      if (p.speed >= 19.5) {
+        sprintDurationAcc += dt;
+        if (!inSprint && sprintDurationAcc >= 1.5) {
+          inSprint = true;
+          sprintCount++;
+        }
+      } else {
+        inSprint = false;
+        sprintDurationAcc = 0;
+      }
+    });
+
+    // 4. 위도/경도를 로컬 미터 좌표(mx, my)로 변환 후 주성분(PCA) 회전으로 경기장 축 자동 정렬
+    const meanLat = enriched.reduce((s, p) => s + p.lat, 0) / enriched.length;
+    const meanLon = enriched.reduce((s, p) => s + p.lon, 0) / enriched.length;
+    const cosLat = Math.cos((meanLat * Math.PI) / 180);
+
+    const meterPts = enriched.map(p => ({
+      mx: (p.lon - meanLon) * 111320 * cosLat,
+      my: (p.lat - meanLat) * 110540
+    }));
+
+    let covXX = 0, covYY = 0, covXY = 0;
+    meterPts.forEach(m => {
+      covXX += m.mx * m.mx;
+      covYY += m.my * m.my;
+      covXY += m.mx * m.my;
+    });
+    // 가장 긴 활동 축이 세로(Y축)가 되도록 회전각 계산
+    const theta = 0.5 * Math.atan2(2 * covXY, covXX - covYY);
+    const rotAngle = Math.PI / 2 - theta;
+    const cosR = Math.cos(rotAngle);
+    const sinR = Math.sin(rotAngle);
+
+    const rotated = meterPts.map(m => ({
+      rx: m.mx * cosR - m.my * sinR,
+      ry: m.mx * sinR + m.my * cosR
+    }));
+
+    // 상하좌우 2% 극단치 제외한 바운딩 박스로 2D 피치(6~94%) 매핑
+    const sortedX = [...rotated.map(r => r.rx)].sort((a, b) => a - b);
+    const sortedY = [...rotated.map(r => r.ry)].sort((a, b) => a - b);
+    const pLow = Math.floor(rotated.length * 0.02);
+    const pHigh = Math.max(pLow + 1, Math.ceil(rotated.length * 0.98) - 1);
+    const minX = sortedX[pLow], maxX = sortedX[pHigh];
+    const minY = sortedY[pLow], maxY = sortedY[pHigh];
+    const spanX = Math.max(15, maxX - minX);
+    const spanY = Math.max(25, maxY - minY);
+
+    const normalizedAll = enriched.map((p, i) => {
+      const nx = Math.max(5, Math.min(95, 6 + ((rotated[i].rx - minX) / spanX) * 88));
+      const ny = Math.max(5, Math.min(95, 6 + (1 - (rotated[i].ry - minY) / spanY) * 88));
+      return {
+        x: Number(nx.toFixed(1)),
+        y: Number(ny.toFixed(1)),
+        speed: p.speed,
+        t: Math.round(p.elapsedSec),
+        hr: p.hr
+      };
+    });
+
+    // 리플레이/저장용 최대 220포인트 균등 샘플링 (스프린트 피크 보존)
+    const maxSample = 220;
+    let sampledPoints = normalizedAll;
+    if (normalizedAll.length > maxSample) {
+      const step = (normalizedAll.length - 1) / (maxSample - 1);
+      sampledPoints = [];
+      for (let i = 0; i < maxSample; i++) {
+        const idx = Math.round(i * step);
+        sampledPoints.push(normalizedAll[idx]);
+      }
+    }
+
+    const durationSec = Math.max(1, (enriched[enriched.length - 1].timeMs - enriched[0].timeMs) / 1000);
+    const totalDistanceKm = Number((totalDistM / 1000).toFixed(2));
+    const avgSpeedKmh = Number(((totalDistM / durationSec) * 3.6).toFixed(1));
+    const hrs = enriched.map(p => p.hr).filter(Boolean);
+    const avgHr = hrs.length > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null;
+    const maxHr = hrs.length > 0 ? Math.max(...hrs) : null;
+    const totalZoneSec = Math.max(1, zoneWalkSec + zoneJogSec + zoneRunSec + zoneSprintSec);
+    const zones = {
+      walk: Math.round((zoneWalkSec / totalZoneSec) * 100),
+      jog: Math.round((zoneJogSec / totalZoneSec) * 100),
+      run: Math.round((zoneRunSec / totalZoneSec) * 100),
+      sprint: Math.max(0, 100 - Math.round((zoneWalkSec / totalZoneSec) * 100) - Math.round((zoneJogSec / totalZoneSec) * 100) - Math.round((zoneRunSec / totalZoneSec) * 100))
+    };
+    const calories = Math.round(totalDistanceKm * 68 + (sprintCount * 4));
+    const activityScore = Math.min(99, Math.max(55, Math.round(60 + totalDistanceKm * 6 + sprintCount * 1.5 + (maxSpeedKmh > 22 ? 6 : 0))));
+    const recordedDate = new Date(pts[0].timeMs).toISOString().split('T')[0];
+
+    return {
+      id: 'gps_' + Date.now(),
+      title,
+      date: recordedDate,
+      totalDistanceKm,
+      durationSec: Math.round(durationSec),
+      maxSpeedKmh: Number(maxSpeedKmh.toFixed(1)),
+      avgSpeedKmh,
+      sprintCount,
+      sprintDistanceM: Math.round(sprintDistanceM),
+      avgHr,
+      maxHr,
+      calories,
+      zones,
+      activityScore,
+      points: sampledPoints
+    };
+  };
+
+  const handleGpsFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, 'text/xml');
+      const rawPoints = [];
+
+      // 1. GPX 포맷 (<trkpt>, <rtept>)
+      const trkpts = Array.from(xml.querySelectorAll('trkpt, rtept'));
+      if (trkpts.length > 0) {
+        trkpts.forEach((pt, idx) => {
+          const lat = parseFloat(pt.getAttribute('lat'));
+          const lon = parseFloat(pt.getAttribute('lon'));
+          const timeNode = pt.querySelector('time');
+          const timeMs = timeNode ? new Date(timeNode.textContent).getTime() : (Date.now() + idx * 1000);
+          const hrNode = pt.getElementsByTagName('gpxtpx:hr')[0] || pt.getElementsByTagName('ns3:hr')[0] || pt.querySelector('hr');
+          const hr = hrNode ? parseInt(hrNode.textContent, 10) : null;
+          if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            rawPoints.push({ lat, lon, timeMs, hr });
+          }
+        });
+      }
+
+      // 2. TCX 포맷 (<Trackpoint>)
+      if (rawPoints.length === 0) {
+        const tcxPts = Array.from(xml.querySelectorAll('Trackpoint'));
+        tcxPts.forEach((pt, idx) => {
+          const latNode = pt.querySelector('Position > LatitudeDegrees') || pt.getElementsByTagName('LatitudeDegrees')[0];
+          const lonNode = pt.querySelector('Position > LongitudeDegrees') || pt.getElementsByTagName('LongitudeDegrees')[0];
+          const timeNode = pt.querySelector('Time') || pt.getElementsByTagName('Time')[0];
+          const hrNode = pt.querySelector('HeartRateBpm > Value') || pt.getElementsByTagName('Value')[0];
+          if (latNode && lonNode) {
+            const lat = parseFloat(latNode.textContent);
+            const lon = parseFloat(lonNode.textContent);
+            const timeMs = timeNode ? new Date(timeNode.textContent).getTime() : (Date.now() + idx * 1000);
+            const hr = hrNode ? parseInt(hrNode.textContent, 10) : null;
+            if (Number.isFinite(lat) && Number.isFinite(lon)) {
+              rawPoints.push({ lat, lon, timeMs, hr });
+            }
+          }
+        });
+      }
+
+      if (rawPoints.length < 5) {
+        setSystemAlert({ isOpen: true, message: '파일에서 GPS 경로 데이터를 찾을 수 없습니다.\nGPX 또는 TCX 파일인지 확인해주세요.' });
+        e.target.value = '';
+        return;
+      }
+
+      const cleanName = file.name.replace(/\.(gpx|tcx|xml)$/i, '');
+      const analyzed = analyzeGpsPoints(rawPoints, cleanName);
+      if (analyzed) {
+        setGpsSession(analyzed);
+        setGpsFlipVertical(false);
+        setGpsRotate90(false);
+        setGpsReplayPlaying(false);
+        setGpsReplayProgress(0);
+      }
+    } catch (err) {
+      console.error(err);
+      setSystemAlert({ isOpen: true, message: 'GPS 파일을 읽는 중 오류가 발생했습니다.' });
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const loadSampleGpsSession = () => {
+    // 실제 축구 1쿼터(25분) 미드필더/윙어 움직임을 모사한 정교한 샘플 시뮬레이션
+    const baseLat = 37.5665;
+    const baseLon = 126.9780;
+    const rawPoints = [];
+    const startMs = Date.now() - 25 * 60 * 1000;
+    let curX = 0; // -28m ~ +28m
+    let curY = -10; // -46m ~ +46m
+    let vx = 0, vy = 0;
+
+    // 주요 활동 거점 (중앙 미드필더 + 우측 윙 오버래핑 패턴)
+    const hotspots = [
+      { x: 8, y: -5 }, { x: 18, y: 18 }, { x: 22, y: 34 },
+      { x: -6, y: 8 }, { x: 12, y: -22 }, { x: 0, y: 28 },
+      { x: -16, y: -12 }, { x: 15, y: 10 }
+    ];
+
+    for (let sec = 0; sec <= 1500; sec += 2) {
+      const target = hotspots[Math.floor((sec / 90) % hotspots.length)];
+      const isSprintBurst = (sec % 170 >= 20 && sec % 170 <= 30) || (sec % 230 >= 50 && sec % 230 <= 58);
+      const pull = isSprintBurst ? 0.22 : 0.07;
+      vx = vx * 0.65 + (target.x - curX) * pull + (Math.sin(sec * 0.17) * 1.9);
+      vy = vy * 0.65 + (target.y - curY) * pull + (Math.cos(sec * 0.13) * 2.4);
+
+      const stepDist = Math.hypot(vx, vy);
+      const maxStep = isSprintBurst ? 13.8 : 6.2; // 2초당 이동거리 (최대 약 25~27km/h)
+      if (stepDist > maxStep) {
+        vx = (vx / stepDist) * maxStep;
+        vy = (vy / stepDist) * maxStep;
+      }
+
+      curX = Math.max(-29, Math.min(29, curX + vx * 0.45));
+      curY = Math.max(-46, Math.min(46, curY + vy * 0.45));
+
+      const lat = baseLat + curY / 110540;
+      const lon = baseLon + curX / (111320 * Math.cos((baseLat * Math.PI) / 180));
+      const hr = Math.round(138 + (isSprintBurst ? 36 : 14) + Math.sin(sec * 0.03) * 8);
+      rawPoints.push({ lat, lon, timeMs: startMs + sec * 1000, hr });
+    }
+
+    const analyzed = analyzeGpsPoints(rawPoints, '샘플 워치 기록 (25분 쿼터)');
+    if (analyzed) {
+      setGpsSession(analyzed);
+      setGpsFlipVertical(false);
+      setGpsRotate90(false);
+      setGpsReplayPlaying(false);
+      setGpsReplayProgress(0);
+    }
+  };
+
+  const startLiveSmartphoneGps = async () => {
+    if (!navigator.geolocation) {
+      setSystemAlert({ isOpen: true, message: '이 브라우저에서는 GPS 위치 측정을 지원하지 않습니다.' });
+      return;
+    }
+    liveGpsPointsRef.current = [];
+    setLiveGpsStats({ elapsedSec: 0, distanceKm: 0, currentSpeedKmh: 0, maxSpeedKmh: 0, pointCount: 0 });
+    setIsLiveGpsTracking(true);
+
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLockRef.current = await navigator.wakeLock.request('screen');
+      }
+    } catch {}
+
+    const startMs = Date.now();
+    liveGpsTimerRef.current = setInterval(() => {
+      setLiveGpsStats(prev => ({ ...prev, elapsedSec: Math.floor((Date.now() - startMs) / 1000) }));
+    }, 1000);
+
+    liveGpsWatchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { latitude: lat, longitude: lon, speed } = pos.coords;
+        const nowMs = Date.now();
+        const pts = liveGpsPointsRef.current;
+        let addDistKm = 0;
+        let calcSpeedKmh = Number.isFinite(speed) && speed >= 0 ? speed * 3.6 : 0;
+
+        if (pts.length > 0) {
+          const last = pts[pts.length - 1];
+          const dMeters = calcHaversineMeters(last.lat, last.lon, lat, lon);
+          const dtSec = Math.max(1, (nowMs - last.timeMs) / 1000);
+          if (!calcSpeedKmh) calcSpeedKmh = (dMeters / dtSec) * 3.6;
+          if (dMeters >= 0.8 && calcSpeedKmh < 40) {
+            addDistKm = dMeters / 1000;
+          }
+        }
+
+        pts.push({ lat, lon, timeMs: nowMs, hr: null });
+        setLiveGpsStats(prev => ({
+          ...prev,
+          distanceKm: Number((prev.distanceKm + addDistKm).toFixed(2)),
+          currentSpeedKmh: Number(Math.min(36, calcSpeedKmh).toFixed(1)),
+          maxSpeedKmh: Number(Math.max(prev.maxSpeedKmh, Math.min(36, calcSpeedKmh)).toFixed(1)),
+          pointCount: pts.length
+        }));
+      },
+      (err) => {
+        console.warn('GPS watch error:', err);
+      },
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+    );
+  };
+
+  const stopLiveSmartphoneGps = () => {
+    if (liveGpsWatchIdRef.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(liveGpsWatchIdRef.current);
+      liveGpsWatchIdRef.current = null;
+    }
+    if (liveGpsTimerRef.current) {
+      clearInterval(liveGpsTimerRef.current);
+      liveGpsTimerRef.current = null;
+    }
+    if (wakeLockRef.current) {
+      wakeLockRef.current.release().catch(() => {});
+      wakeLockRef.current = null;
+    }
+    setIsLiveGpsTracking(false);
+
+    const pts = liveGpsPointsRef.current;
+    if (pts.length < 5) {
+      setSystemAlert({ isOpen: true, message: `수집된 GPS 포인트가 너무 적습니다 (${pts.length}개).\n야외에서 최소 20초 이상 이동 후 종료해주세요.` });
+      return;
+    }
+    const analyzed = analyzeGpsPoints(pts, '스마트폰 실시간 GPS 측정');
+    if (analyzed) {
+      setGpsSession(analyzed);
+      setGpsFlipVertical(false);
+      setGpsRotate90(false);
+      setGpsReplayPlaying(false);
+      setGpsReplayProgress(0);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (liveGpsWatchIdRef.current !== null && navigator.geolocation) navigator.geolocation.clearWatch(liveGpsWatchIdRef.current);
+      if (liveGpsTimerRef.current) clearInterval(liveGpsTimerRef.current);
+      if (gpsReplayRafRef.current) cancelAnimationFrame(gpsReplayRafRef.current);
+    };
+  }, []);
+
+  const getTransformedPitchPoint = (pt) => {
+    let x = pt.x;
+    let y = pt.y;
+    if (gpsRotate90) {
+      const tmp = x;
+      x = 100 - y;
+      y = tmp;
+    }
+    if (gpsFlipVertical) {
+      x = 100 - x;
+      y = 100 - y;
+    }
+    return { x, y, speed: pt.speed, t: pt.t, hr: pt.hr };
+  };
+
+  // 2D 축구장 히트맵 / 스프린트 / 리플레이 캔버스 렌더링
+  useEffect(() => {
+    if (activeTab !== 'gps' || !gpsSession || !gpsCanvasRef.current) return;
+    const canvas = gpsCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+
+    // 1. 경기장 잔디 배경 (줄무늬 효과)
+    ctx.clearRect(0, 0, W, H);
+    const stripeCount = 10;
+    const stripeH = H / stripeCount;
+    for (let i = 0; i < stripeCount; i++) {
+      ctx.fillStyle = i % 2 === 0 ? '#065F46' : '#047857';
+      ctx.fillRect(0, i * stripeH, W, stripeH);
+    }
+
+    // 2. 축구장 라인 그리기
+    const pad = 18;
+    const pw = W - pad * 2;
+    const ph = H - pad * 2;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(pad, pad, pw, ph);
+
+    // 하프라인 & 센터서클
+    ctx.beginPath();
+    ctx.moveTo(pad, H / 2);
+    ctx.lineTo(W - pad, H / 2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(W / 2, H / 2, pw * 0.16, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath();
+    ctx.arc(W / 2, H / 2, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 상/하단 페널티 박스 및 골 에어리어
+    const penW = pw * 0.58;
+    const penH = ph * 0.155;
+    const goalW = pw * 0.28;
+    const goalH = ph * 0.055;
+    ctx.strokeRect((W - penW) / 2, pad, penW, penH);
+    ctx.strokeRect((W - goalW) / 2, pad, goalW, goalH);
+    ctx.strokeRect((W - penW) / 2, H - pad - penH, penW, penH);
+    ctx.strokeRect((W - goalW) / 2, H - pad - goalH, goalW, goalH);
+
+    // 공격 방향 워터마크 화살표
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('▲ 공격 방향', W - pad - 8, pad + 18);
+    ctx.restore();
+
+    const allPts = (gpsSession.points || []).map(getTransformedPitchPoint);
+    if (allPts.length === 0) return;
+
+    const visibleCount = gpsViewMode === 'replay'
+      ? Math.max(1, Math.floor((gpsReplayProgress / 100) * allPts.length))
+      : allPts.length;
+    const pts = allPts.slice(0, visibleCount);
+
+    // 3. 모드별 오버레이 렌더링
+    if (gpsViewMode === 'heatmap' || gpsViewMode === 'replay') {
+      const heatCanvas = document.createElement('canvas');
+      heatCanvas.width = W;
+      heatCanvas.height = H;
+      const hCtx = heatCanvas.getContext('2d');
+
+      const radius = gpsViewMode === 'replay' ? 24 : 30;
+      const baseAlpha = Math.max(0.08, Math.min(0.26, 22 / Math.sqrt(allPts.length)));
+
+      pts.forEach(p => {
+        const px = (p.x / 100) * W;
+        const py = (p.y / 100) * H;
+        const grad = hCtx.createRadialGradient(px, py, 2, px, py, radius);
+        const weight = p.speed >= 18 ? baseAlpha * 1.35 : baseAlpha;
+        grad.addColorStop(0, `rgba(0, 0, 0, ${ Math.min(0.5, weight) })`);
+        grad.addColorStop(0.55, `rgba(0, 0, 0, ${ Math.min(0.25, weight * 0.5) })`);
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        hCtx.fillStyle = grad;
+        hCtx.beginPath();
+        hCtx.arc(px, py, radius, 0, Math.PI * 2);
+        hCtx.fill();
+      });
+
+      const imgData = hCtx.getImageData(0, 0, W, H);
+      const data = imgData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const a = data[i + 3];
+        if (a < 12) {
+          data[i + 3] = 0;
+          continue;
+        }
+        const v = Math.min(1, a / 215);
+        let r = 0, g = 0, b = 0, outA = 0;
+        if (v < 0.25) {
+          const t = v / 0.25;
+          r = 0; g = Math.round(180 * t); b = 255;
+          outA = Math.round(90 + 70 * t);
+        } else if (v < 0.55) {
+          const t = (v - 0.25) / 0.3;
+          r = Math.round(120 * t); g = 255; b = Math.round(255 * (1 - t));
+          outA = Math.round(160 + 40 * t);
+        } else if (v < 0.8) {
+          const t = (v - 0.55) / 0.25;
+          r = 255; g = Math.round(255 - 120 * t); b = 0;
+          outA = Math.round(200 + 30 * t);
+        } else {
+          const t = (v - 0.8) / 0.2;
+          r = 255; g = Math.round(135 * (1 - t)); b = Math.round(40 * t);
+          outA = 238;
+        }
+        data[i] = r;
+        data[i + 1] = g;
+        data[i + 2] = b;
+        data[i + 3] = outA;
+      }
+      hCtx.putImageData(imgData, 0, 0);
+      ctx.drawImage(heatCanvas, 0, 0);
+    }
+
+    if (gpsViewMode === 'sprint') {
+      // 전체 이동 동선 (은은한 실선)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      pts.forEach((p, idx) => {
+        const px = (p.x / 100) * W;
+        const py = (p.y / 100) * H;
+        if (idx === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+
+      // 고속 러닝(14~20km/h) 및 스프린트(20km/h+) 구간 강조
+      for (let i = 1; i < pts.length; i++) {
+        const p1 = pts[i - 1];
+        const p2 = pts[i];
+        if (p2.speed < 14) continue;
+        const isSprint = p2.speed >= 19.5;
+        const x1 = (p1.x / 100) * W, y1 = (p1.y / 100) * H;
+        const x2 = (p2.x / 100) * W, y2 = (p2.y / 100) * H;
+
+        ctx.strokeStyle = isSprint ? '#FACC15' : '#38BDF8';
+        ctx.lineWidth = isSprint ? 3.5 : 2.2;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        if (isSprint && (i % 2 === 0 || i === pts.length - 1)) {
+          const angle = Math.atan2(y2 - y1, x2 - x1);
+          const head = 7;
+          ctx.fillStyle = '#FACC15';
+          ctx.beginPath();
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - head * Math.cos(angle - Math.PI / 6), y2 - head * Math.sin(angle - Math.PI / 6));
+          ctx.lineTo(x2 - head * Math.cos(angle + Math.PI / 6), y2 - head * Math.sin(angle + Math.PI / 6));
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+
+    if (gpsViewMode === 'replay' && pts.length > 0) {
+      // 최근 12포인트 꼬리 궤적
+      const tail = pts.slice(Math.max(0, pts.length - 14));
+      for (let i = 1; i < tail.length; i++) {
+        const alpha = i / tail.length;
+        ctx.strokeStyle = `rgba(56, 189, 248, ${alpha})`;
+        ctx.lineWidth = 1.5 + alpha * 2.5;
+        ctx.beginPath();
+        ctx.moveTo((tail[i - 1].x / 100) * W, (tail[i - 1].y / 100) * H);
+        ctx.lineTo((tail[i].x / 100) * W, (tail[i].y / 100) * H);
+        ctx.stroke();
+      }
+
+      // 현재 위치 선수 마커
+      const cur = pts[pts.length - 1];
+      const cx = (cur.x / 100) * W;
+      const cy = (cur.y / 100) * H;
+
+      ctx.fillStyle = cur.speed >= 19.5 ? 'rgba(250, 204, 21, 0.35)' : 'rgba(59, 130, 246, 0.35)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 16, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = cur.speed >= 19.5 ? '#EAB308' : '#2563EB';
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // 현재 속도 뱃지
+      const label = `${cur.speed.toFixed(1)} km/h`;
+      ctx.font = 'bold 11px sans-serif';
+      const tw = ctx.measureText(label).width + 12;
+      const bx = Math.max(24, Math.min(W - 24 - tw, cx - tw / 2));
+      const by = cy > 40 ? cy - 28 : cy + 14;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+      ctx.fillRect(bx, by, tw, 18);
+      ctx.strokeStyle = cur.speed >= 19.5 ? '#FACC15' : '#38BDF8';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx, by, tw, 18);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, bx + tw / 2, by + 9);
+    }
+  }, [activeTab, gpsSession, gpsViewMode, gpsFlipVertical, gpsRotate90, gpsReplayProgress]);
+
+  // 2D 동선 리플레이 애니메이션 루프
+  useEffect(() => {
+    if (!gpsReplayPlaying || !gpsSession) return;
+    let lastTs = null;
+    const step = (ts) => {
+      if (!lastTs) lastTs = ts;
+      const dt = (ts - lastTs) / 1000;
+      lastTs = ts;
+      setGpsReplayProgress(prev => {
+        const next = prev + dt * 6 * gpsReplaySpeed;
+        if (next >= 100) {
+          setGpsReplayPlaying(false);
+          return 100;
+        }
+        return next;
+      });
+      gpsReplayRafRef.current = requestAnimationFrame(step);
+    };
+    gpsReplayRafRef.current = requestAnimationFrame(step);
+    return () => {
+      if (gpsReplayRafRef.current) cancelAnimationFrame(gpsReplayRafRef.current);
+    };
+  }, [gpsReplayPlaying, gpsReplaySpeed, gpsSession]);
+
+  const saveGpsSessionToTeam = async () => {
+    if (!gpsSession || !activeTeamId || isProcessing) return;
+    const playerObj = currentTeamPlayers.find(p => p.id === gpsSelectedPlayerId);
+    const playerName = playerObj ? playerObj.name : '미지정 선수';
+    const recordToSave = {
+      ...gpsSession,
+      id: 'gps_' + Date.now(),
+      playerId: gpsSelectedPlayerId || null,
+      playerName,
+      quarterLabel: gpsQuarterLabel,
+      savedAt: new Date().toISOString()
+    };
+    setIsProcessing(true);
+    try {
+      const updated = [recordToSave, ...savedGpsRecords].slice(0, 25);
+      await setDoc(doc(db, 'memos', `${activeTeamId}___gps_records__`), {
+        teamId: activeTeamId,
+        date: '__gps_records__',
+        content: JSON.stringify(updated)
+      });
+      setSystemAlert({ isOpen: true, message: `${playerName} 선수의 GPS 히트맵 기록이 팀 기록에 저장되었습니다!` });
+    } catch (err) {
+      console.error(err);
+      setSystemAlert({ isOpen: true, message: 'GPS 기록 저장 중 오류가 발생했습니다.' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const requestDeleteGpsRecord = (recordId) => {
+    setSystemConfirm({
+      isOpen: true,
+      message: '이 GPS 분석 기록을 삭제하시겠습니까?',
+      onConfirm: async () => {
+        if (!activeTeamId || isProcessing) return;
+        setIsProcessing(true);
+        try {
+          const updated = savedGpsRecords.filter(r => r.id !== recordId);
+          await setDoc(doc(db, 'memos', `${activeTeamId}___gps_records__`), {
+            teamId: activeTeamId,
+            date: '__gps_records__',
+            content: JSON.stringify(updated)
+          });
+        } finally {
+          setIsProcessing(false);
+        }
+      }
+    });
+  };
+
+  const triggerGpsShare = () => {
+    if (!gpsCardCaptureRef.current) return;
+    setShareModal({ isOpen: true, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
+    setTimeout(async () => {
+      try {
+        const html2canvas = await loadHtml2Canvas();
+        const canvas = await html2canvas(gpsCardCaptureRef.current, { scale: 2, useCORS: true, backgroundColor: '#0F172A' });
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const file = new File([blob], 'matchboard_gps_heatmap.png', { type: 'image/png' });
+          const imgUrl = URL.createObjectURL(blob);
+          setShareModal(prev => ({ ...prev, step: 2, file, imgUrl, isVideo: false }));
+        }, 'image/png');
+      } catch (err) {
+        setSystemAlert({ isOpen: true, message: '이미지 생성 중 오류가 발생했습니다.' });
+        setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
+      }
+    }, 300);
   };
 
   const StandingsTable = ({ match, isLarge }) => {
@@ -2762,6 +3531,401 @@ const renderGoalFlowModal = () => {
           </div>
         )}
 
+        {activeTab === 'gps' && (
+          <div className="space-y-4 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar pb-6">
+            {/* 상단 타이틀 및 가이드 버튼 */}
+            <div className="flex justify-between items-center gap-2">
+              <div>
+                <h2 className="text-xl font-black text-white flex items-center gap-2">
+                  <Activity size={20} className="text-emerald-400 shrink-0"/> GPS 활동량
+                </h2>
+                <p className="text-[11px] text-slate-400 mt-0.5">애플워치 · 갤럭시워치 히트맵 & 스프린트 분석</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGpsGuideModal(true)}
+                className="text-xs bg-slate-800 hover:bg-slate-700 text-emerald-400 px-3 py-2 rounded-xl font-bold border border-emerald-500/30 flex items-center gap-1.5 transition shrink-0 shadow-sm"
+              >
+                <span>⌚</span> 워치 연동법
+              </button>
+            </div>
+
+            {/* 측정 / 파일 불러오기 액션 컨트롤 카드 */}
+            <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-3.5 space-y-2.5 shadow-sm">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="cursor-pointer bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-black text-xs py-3 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow-md transition text-center">
+                  <span>📂</span> 워치 파일(GPX/TCX) 열기
+                  <input type="file" accept=".gpx,.tcx,.xml" onChange={handleGpsFileUpload} className="hidden" />
+                </label>
+
+                {!isLiveGpsTracking ? (
+                  <button
+                    type="button"
+                    onClick={startLiveSmartphoneGps}
+                    className="bg-slate-900 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 font-bold text-xs py-3 px-3 rounded-xl flex items-center justify-center gap-1.5 transition"
+                  >
+                    <span>📡</span> 폰 실시간 GPS 측정
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={stopLiveSmartphoneGps}
+                    className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 font-black text-xs py-3 px-3 rounded-xl flex items-center justify-center gap-1.5 animate-pulse transition"
+                  >
+                    <span>⏹</span> 측정 종료 및 분석
+                  </button>
+                )}
+              </div>
+
+              {/* 실시간 스마트폰 GPS 측정 중 상태창 */}
+              {isLiveGpsTracking && (
+                <div className="bg-slate-900 border border-red-500/40 rounded-xl p-3 space-y-2 animate-in fade-in">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-black text-red-400 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+                      실시간 GPS 경로 수집 중... (화면을 켜두세요)
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-bold">{liveGpsStats.pointCount} pt</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center pt-1">
+                    <div className="bg-slate-800/80 rounded-lg p-2">
+                      <div className="text-[10px] text-slate-400">경과 시간</div>
+                      <div className="text-sm font-black text-white">{formatDurationKo(liveGpsStats.elapsedSec)}</div>
+                    </div>
+                    <div className="bg-slate-800/80 rounded-lg p-2">
+                      <div className="text-[10px] text-slate-400">이동 거리</div>
+                      <div className="text-sm font-black text-emerald-400">{liveGpsStats.distanceKm} km</div>
+                    </div>
+                    <div className="bg-slate-800/80 rounded-lg p-2">
+                      <div className="text-[10px] text-slate-400">현재/최고 속도</div>
+                      <div className="text-sm font-black text-amber-400">{liveGpsStats.currentSpeedKmh} <span className="text-[10px] text-slate-400">/ {liveGpsStats.maxSpeedKmh}</span></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-0.5 px-0.5">
+                <span className="text-[11px] text-slate-400">워치 파일이 없어도 기능을 바로 테스트해볼 수 있어요!</span>
+                <button
+                  type="button"
+                  onClick={loadSampleGpsSession}
+                  className="text-[11px] font-bold text-blue-400 hover:text-blue-300 bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-lg transition shrink-0"
+                >
+                  🧪 샘플 기록 체험
+                </button>
+              </div>
+            </div>
+
+            {/* 현재 분석된 GPS 세션 결과 카드 */}
+            {gpsSession ? (
+              <div className="space-y-3 animate-in fade-in">
+                {/* 선수/쿼터 지정 및 저장/공유 컨트롤 바 */}
+                <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-3 space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={gpsSelectedPlayerId}
+                      onChange={(e) => setGpsSelectedPlayerId(e.target.value)}
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none"
+                    >
+                      <option value="">선수 선택 (내 이름 지정)</option>
+                      {currentTeamPlayers.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.birthYear})</option>
+                      ))}
+                    </select>
+                    <select
+                      value={gpsQuarterLabel}
+                      onChange={(e) => setGpsQuarterLabel(e.target.value)}
+                      className="w-24 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-emerald-400 outline-none"
+                    >
+                      <option value="1Q">1쿼터</option>
+                      <option value="2Q">2쿼터</option>
+                      <option value="3Q">3쿼터</option>
+                      <option value="4Q">4쿼터</option>
+                      <option value="전체">경기 전체</option>
+                    </select>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={saveGpsSessionToTeam}
+                      className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow"
+                    >
+                      💾 팀 기록에 저장
+                    </button>
+                    <button
+                      type="button"
+                      onClick={triggerGpsShare}
+                      className="flex-1 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5"
+                    >
+                      <Share2 size={14}/> 히트맵 카드 공유
+                    </button>
+                  </div>
+                </div>
+
+                {/* 캡처 및 공유 대상 영역 */}
+                <div ref={gpsCardCaptureRef} className="bg-slate-900 border border-slate-700/90 rounded-3xl p-4 space-y-4 shadow-xl">
+                  {/* 리포트 헤더 */}
+                  <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                          {gpsQuarterLabel}
+                        </span>
+                        <span className="text-base font-black text-white">
+                          {currentTeamPlayers.find(p => p.id === gpsSelectedPlayerId)?.name || gpsSession.playerName || 'GPS 활동 리포트'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-1">
+                        {gpsSession.date} · {gpsSession.title}
+                      </div>
+                    </div>
+                    <div className="text-right bg-slate-800/90 px-3 py-1.5 rounded-2xl border border-slate-700">
+                      <div className="text-[10px] text-slate-400 font-bold">활동 평점</div>
+                      <div className="text-lg font-black text-yellow-400 leading-tight">{gpsSession.activityScore}<span className="text-xs text-slate-400 font-normal">점</span></div>
+                    </div>
+                  </div>
+
+                  {/* 피치 뷰 모드 전환 & 방향 보정 컨트롤 */}
+                  <div className="flex items-center justify-between gap-1.5">
+                    <div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700 flex-1 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => { setGpsViewMode('heatmap'); setGpsReplayPlaying(false); }}
+                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition ${gpsViewMode === 'heatmap' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                      >
+                        🔥 히트맵
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setGpsViewMode('sprint'); setGpsReplayPlaying(false); }}
+                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition ${gpsViewMode === 'sprint' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'}`}
+                      >
+                        ⚡ 스프린트
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setGpsViewMode('replay'); if (gpsReplayProgress >= 100) setGpsReplayProgress(0); setGpsReplayPlaying(true); }}
+                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition ${gpsViewMode === 'replay' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                      >
+                        ▶️ 2D 리플레이
+                      </button>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setGpsFlipVertical(v => !v)}
+                        className="h-8 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-[11px] font-bold transition"
+                        title="공격 방향 상하 반전"
+                      >
+                        🔄 반전
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGpsRotate90(v => !v)}
+                        className="h-8 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-[11px] font-bold transition"
+                        title="경기장 축 90도 회전"
+                      >
+                        📐 축회전
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 2D 축구장 히트맵 캔버스 */}
+                  <div className="relative flex flex-col items-center">
+                    <canvas
+                      ref={gpsCanvasRef}
+                      width={340}
+                      height={490}
+                      className="w-full max-w-[320px] rounded-2xl border-2 border-emerald-500/40 shadow-inner"
+                    />
+                    {/* 범례 */}
+                    <div className="flex items-center justify-center gap-4 mt-2 text-[10px] text-slate-400 font-bold">
+                      {gpsViewMode === 'sprint' ? (
+                        <>
+                          <span className="flex items-center gap-1"><span className="w-2.5 h-1 bg-sky-400 inline-block rounded"></span> 고속 러닝 (14~20km/h)</span>
+                          <span className="flex items-center gap-1"><span className="w-2.5 h-1 bg-yellow-400 inline-block rounded"></span> 스프린트 (20km/h+)</span>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span>낮음</span>
+                          <div className="w-28 h-2 rounded-full bg-gradient-to-r from-blue-500 via-green-400 via-yellow-400 to-red-500"></div>
+                          <span>높음 (활동 밀집도)</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 리플레이 컨트롤 바 (리플레이 모드일 때만 표시) */}
+                  {gpsViewMode === 'replay' && (
+                    <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-3 flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (gpsReplayProgress >= 100) setGpsReplayProgress(0);
+                          setGpsReplayPlaying(p => !p);
+                        }}
+                        className="px-3 py-1.5 bg-blue-500 hover:bg-blue-400 text-white rounded-lg text-xs font-black shrink-0"
+                      >
+                        {gpsReplayPlaying ? '⏸ 일시정지' : '▶ 재생'}
+                      </button>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={Math.round(gpsReplayProgress)}
+                        onChange={(e) => { setGpsReplayPlaying(false); setGpsReplayProgress(Number(e.target.value)); }}
+                        className="flex-1 accent-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setGpsReplaySpeed(s => (s === 1 ? 2 : s === 2 ? 4 : 1))}
+                        className="px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-[11px] font-black text-blue-400 shrink-0"
+                      >
+                        {gpsReplaySpeed}x 배속
+                      </button>
+                    </div>
+                  )}
+
+                  {/* 핵심 스탯 6종 그리드 */}
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5">
+                      <div className="text-[10px] font-bold text-slate-400">총 이동거리</div>
+                      <div className="text-base font-black text-emerald-400 mt-0.5">{gpsSession.totalDistanceKm} <span className="text-[11px] font-bold">km</span></div>
+                    </div>
+                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5">
+                      <div className="text-[10px] font-bold text-slate-400">최고 속도</div>
+                      <div className="text-base font-black text-amber-400 mt-0.5">{gpsSession.maxSpeedKmh} <span className="text-[11px] font-bold">km/h</span></div>
+                    </div>
+                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5">
+                      <div className="text-[10px] font-bold text-slate-400">스프린트</div>
+                      <div className="text-base font-black text-yellow-300 mt-0.5">{gpsSession.sprintCount} <span className="text-[11px] font-bold">회 ({gpsSession.sprintDistanceM}m)</span></div>
+                    </div>
+                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5">
+                      <div className="text-[10px] font-bold text-slate-400">활동 시간</div>
+                      <div className="text-sm font-black text-white mt-0.5">{formatDurationKo(gpsSession.durationSec)}</div>
+                    </div>
+                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5">
+                      <div className="text-[10px] font-bold text-slate-400">평균 속도</div>
+                      <div className="text-sm font-black text-blue-400 mt-0.5">{gpsSession.avgSpeedKmh} <span className="text-[10px]">km/h</span></div>
+                    </div>
+                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5">
+                      <div className="text-[10px] font-bold text-slate-400">{gpsSession.avgHr ? '평균/최고 심박' : '소모 칼로리'}</div>
+                      <div className="text-sm font-black text-rose-400 mt-0.5">
+                        {gpsSession.avgHr ? `${gpsSession.avgHr}/${gpsSession.maxHr} bpm` : `${gpsSession.calories} kcal`}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 속도 구간별 비중 바 (Speed Zones) */}
+                  <div className="bg-slate-800/70 border border-slate-700/70 rounded-2xl p-3 space-y-2">
+                    <div className="flex justify-between items-center text-[11px] font-bold text-slate-300">
+                      <span>속도 구간별 활동 비율</span>
+                      <span className="text-[10px] text-slate-400">소모 칼로리 약 {gpsSession.calories} kcal</span>
+                    </div>
+                    <div className="w-full h-3 rounded-full overflow-hidden flex bg-slate-900">
+                      <div style={{ width: `${gpsSession.zones?.walk || 0}%` }} className="bg-slate-500 h-full" title="걷기" />
+                      <div style={{ width: `${gpsSession.zones?.jog || 0}%` }} className="bg-emerald-500 h-full" title="조깅" />
+                      <div style={{ width: `${gpsSession.zones?.run || 0}%` }} className="bg-sky-400 h-full" title="러닝" />
+                      <div style={{ width: `${gpsSession.zones?.sprint || 0}%` }} className="bg-amber-400 h-full" title="스프린트" />
+                    </div>
+                    <div className="grid grid-cols-4 gap-1 text-[10px] text-center font-bold pt-0.5">
+                      <div className="text-slate-400">걷기 {gpsSession.zones?.walk || 0}%</div>
+                      <div className="text-emerald-400">조깅 {gpsSession.zones?.jog || 0}%</div>
+                      <div className="text-sky-400">러닝 {gpsSession.zones?.run || 0}%</div>
+                      <div className="text-amber-400">질주 {gpsSession.zones?.sprint || 0}%</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-slate-800/50 border border-slate-700/70 rounded-2xl p-6 text-center space-y-3">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-2xl">
+                  ⌚
+                </div>
+                <div className="text-white font-bold text-base">스마트워치 GPS 기록을 불러와보세요!</div>
+                <p className="text-xs text-slate-400 leading-relaxed max-w-xs mx-auto">
+                  애플워치·갤럭시워치로 측정한 운동 파일(<strong className="text-slate-200">GPX/TCX</strong>)을 열면 2D 축구장 <strong className="text-emerald-400">네온 히트맵, 최고 속도, 스프린트 횟수, 동선 리플레이</strong>가 즉시 생성됩니다.
+                </p>
+                <div className="flex justify-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={loadSampleGpsSession}
+                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition shadow"
+                  >
+                    🧪 샘플 데이터로 미리보기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGpsGuideModal(true)}
+                    className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold text-xs rounded-xl transition"
+                  >
+                    ⌚ 워치 파일 추출법
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 팀원 저장된 GPS 기록 리스트 */}
+            <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 space-y-3">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xs font-black text-slate-300 flex items-center gap-1.5">
+                  🏆 우리 팀 저장된 GPS 기록 ({savedGpsRecords.length})
+                </h3>
+                <span className="text-[10px] text-slate-500">터치하여 히트맵 보기</span>
+              </div>
+              {savedGpsRecords.length === 0 ? (
+                <div className="text-center py-6 text-xs text-slate-500 bg-slate-900/50 rounded-xl border border-slate-800">
+                  아직 저장된 팀원 GPS 기록이 없습니다.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {savedGpsRecords.map(rec => (
+                    <div
+                      key={rec.id}
+                      onClick={() => {
+                        setGpsSession(rec);
+                        setGpsSelectedPlayerId(rec.playerId || '');
+                        setGpsQuarterLabel(rec.quarterLabel || '1Q');
+                        setGpsViewMode('heatmap');
+                        setGpsReplayPlaying(false);
+                      }}
+                      className={`p-3 rounded-xl border transition cursor-pointer flex items-center justify-between gap-2 ${gpsSession?.id === rec.id ? 'bg-slate-900 border-emerald-500/50' : 'bg-slate-900/70 border-slate-700/80 hover:border-slate-600'}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                            {rec.quarterLabel || '기록'}
+                          </span>
+                          <span className="text-sm font-black text-white truncate">{rec.playerName || '선수'}</span>
+                          <span className="text-[10px] text-slate-500">{rec.date}</span>
+                        </div>
+                        <div className="flex items-center gap-2.5 mt-1 text-[11px] text-slate-300 font-bold">
+                          <span>🏃 <strong className="text-emerald-400">{rec.totalDistanceKm}km</strong></span>
+                          <span>⚡ 최고 <strong className="text-amber-400">{rec.maxSpeedKmh}km/h</strong></span>
+                          <span>🔥 질주 <strong className="text-yellow-300">{rec.sprintCount}회</strong></span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-xs font-black text-yellow-400 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700">
+                          {rec.activityScore}점
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); requestDeleteGpsRecord(rec.id); }}
+                          className="p-1.5 text-slate-500 hover:text-red-400 transition"
+                          title="기록 삭제"
+                        >
+                          <Trash2 size={14}/>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {activeTab === 'roster' && (
           <div className="space-y-4 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar">
             <div className="flex justify-between items-center">
@@ -2825,6 +3989,7 @@ const renderGoalFlowModal = () => {
         <button onClick={() => setActiveTab('schedule')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'schedule' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}><Calendar size={20} className="mb-1" /><span className="text-[10px] font-bold">일정</span></button>
         <button onClick={() => setActiveTab('stats')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'stats' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}><BarChart2 size={20} className="mb-1" /><span className="text-[10px] font-bold">통계</span></button>
         <button onClick={() => setActiveTab('tactics')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'tactics' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}><Target size={20} className="mb-1" /><span className="text-[10px] font-bold">전술</span></button>
+        <button onClick={() => setActiveTab('gps')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'gps' ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}><Activity size={20} className="mb-1" /><span className="text-[10px] font-bold">GPS</span></button>
         <button onClick={() => setActiveTab('roster')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'roster' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}><Users size={20} className="mb-1" /><span className="text-[10px] font-bold">명단</span></button>
       </nav>
 
@@ -2840,6 +4005,97 @@ const renderGoalFlowModal = () => {
               </div>
               <button onClick={() => setTacticsTutorialModal(false)} className="w-full mt-8 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3.5 rounded-xl transition">닫기</button>
            </div>
+        </div>
+      )}
+
+      {gpsGuideModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[200] p-4 animate-in fade-in zoom-in-95">
+          <div className="bg-slate-800 p-5 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[86vh] flex flex-col relative">
+            <div className="flex justify-between items-center mb-4 shrink-0">
+              <h2 className="text-lg font-black text-white flex items-center gap-2">
+                <span>⌚</span> 스마트워치 GPS 연동 가이드
+              </h2>
+              <button onClick={() => setGpsGuideModal(false)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+            </div>
+
+            <div className="grid grid-cols-2 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1 mb-4 shrink-0">
+              <button
+                type="button"
+                onClick={() => setGpsGuideTab('android')}
+                className={`py-2 rounded-lg text-xs font-bold transition ${gpsGuideTab === 'android' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+              >
+                🤖 갤럭시워치 (삼성헬스)
+              </button>
+              <button
+                type="button"
+                onClick={() => setGpsGuideTab('ios')}
+                className={`py-2 rounded-lg text-xs font-bold transition ${gpsGuideTab === 'ios' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+              >
+                🍎 애플워치 (iOS)
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
+              {gpsGuideTab === 'android' ? (
+                <>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">1</div>
+                    <div>
+                      <div className="font-bold text-white mb-0.5">워치에서 운동 기록 시작</div>
+                      갤럭시워치 <strong className="text-emerald-400">[삼성 헬스]</strong>에서 <strong className="text-white">[달리기]</strong>(또는 야외 GPS가 켜진 운동 종목)를 선택하고 경기를 진행하세요.
+                      <div className="text-[11px] text-amber-300 mt-1">* 경로(GPS) 저장이 지원되는 '달리기/걷기/자전거' 모드로 측정해야 GPX 내보내기가 활성화됩니다.</div>
+                    </div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">2</div>
+                    <div>
+                      <div className="font-bold text-white mb-0.5">스마트폰 삼성 헬스에서 GPX 내보내기</div>
+                      경기 종료 후 스마트폰 <strong className="text-white">[삼성 헬스]</strong> 앱 → 방금 기록된 운동 선택 → 우측 상단 <strong className="text-amber-400">[⋮ (점 3개)]</strong> → <strong className="text-white">[GPX로 내보내기]</strong>를 눌러 저장하세요.
+                    </div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">3</div>
+                    <div>
+                      <div className="font-bold text-white mb-0.5">MATCHBOARD에서 파일 열기</div>
+                      현재 GPS 탭의 <strong className="text-blue-400">[📂 워치 파일(GPX/TCX) 열기]</strong> 버튼을 눌러 내보낸 파일을 선택하면 히트맵과 최고속도·스프린트가 자동 분석됩니다!
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">1</div>
+                    <div>
+                      <div className="font-bold text-white mb-0.5">애플워치로 경기 측정</div>
+                      애플워치 기본 <strong className="text-emerald-400">[운동]</strong> 앱에서 <strong className="text-white">[실외 달리기]</strong> 또는 <strong className="text-white">[축구]</strong>를 켜고 경기를 뛰세요.
+                    </div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">2</div>
+                    <div>
+                      <div className="font-bold text-white mb-0.5">GPX 파일로 내보내기</div>
+                      아이폰 무료 연동 앱(<strong className="text-white">HealthFit, WorkOutDoors, RunGap, Strava</strong> 등)에서 해당 운동 기록을 선택해 <strong className="text-amber-400">[GPX 파일 내보내기(공유) → 파일에 저장]</strong>을 선택하세요.
+                    </div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">3</div>
+                    <div>
+                      <div className="font-bold text-white mb-0.5">MATCHBOARD에서 파일 열기</div>
+                      현재 GPS 탭의 <strong className="text-blue-400">[📂 워치 파일(GPX/TCX) 열기]</strong> 버튼으로 저장된 `.gpx` 파일을 불러오면 히트맵과 스탯이 즉시 생성됩니다!
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setGpsGuideModal(false)}
+              className="w-full mt-4 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl text-sm transition shrink-0"
+            >
+              확인했어요
+            </button>
+          </div>
         </div>
       )}
 
