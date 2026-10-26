@@ -737,11 +737,32 @@ export default function App() {
     }, 500); 
   };
 
+  const downloadShareFile = () => {
+    const file = shareModal.file;
+    if (!file || !shareModal.imgUrl) return;
+    const a = document.createElement('a');
+    a.href = shareModal.imgUrl;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   const doActualShare = async () => {
-    const file = shareModal.file; if (!file) return; const isKakaotalk = navigator.userAgent.toLowerCase().includes('kakaotalk');
-    if (isKakaotalk) { setSystemAlert({ isOpen: true, message: '🚨 카카오톡 브라우저에서는 파일 다이렉트 전송이 제한됩니다.\n\n💡 방법: 하단의 공유버튼(⠇)을 눌러 "다른 브라우저(Safari 등)로 열기"를 한 뒤 공유해주세요.' }); return; }
-    if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ title: 'MATCHBOARD', files: [file] }); } catch (e) { if (e.name !== 'AbortError') { const a = document.createElement('a'); a.href = shareModal.imgUrl; a.download = file.name; a.click(); } } } 
-    else { const a = document.createElement('a'); a.href = shareModal.imgUrl; a.download = file.name; a.click(); }
+    const file = shareModal.file; if (!file) return;
+    const ua = navigator.userAgent || '';
+    const isKakaotalk = ua.toLowerCase().includes('kakaotalk');
+    if (isKakaotalk) { setSystemAlert({ isOpen: true, message: '🚨 카카오톡 인앱브라우저에서는 파일 다이렉트 전송이 제한됩니다.\n\n💡 방법: 우측 하단/상단 메뉴를 눌러 "다른 브라우저(크롬/Safari 등)로 열기"를 한 뒤 진행해주세요.' }); return; }
+    const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(ua);
+    if (isMobileDevice && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ title: 'MATCHBOARD', files: [file] });
+      } catch (e) {
+        if (e.name !== 'AbortError') downloadShareFile();
+      }
+    } else {
+      downloadShareFile();
+    }
   };
 
   const handleGoalSubmit = async (selectedId, teamLetter) => {
@@ -962,20 +983,42 @@ export default function App() {
 
   const exportAnimationToVideo = async () => {
     if ((animationFrames||[]).length < 2) return; setShareModal({ isOpen: true, step: 1, data: null, file: null, imgUrl: null, isVideo: true });
-    const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = pitchType === 'full' ? 900 : 800; const ctx = canvas.getContext('2d');
-    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+    const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = pitchType === 'full' ? 900 : 450; const ctx = canvas.getContext('2d');
+    const candidateTypes = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
+    const mimeType = (typeof MediaRecorder !== 'undefined' && candidateTypes.find(t => MediaRecorder.isTypeSupported(t))) || 'video/webm';
     try {
       const stream = canvas.captureStream(30); const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 }); const chunks = [];
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onstop = () => { const ext = mimeType.includes('mp4') ? 'mp4' : 'webm'; const blob = new Blob(chunks, { type: mimeType }); const file = new File([blob], `tactic_animation.${ext}`, { type: mimeType }); const url = URL.createObjectURL(blob); setShareModal(prev => ({ ...prev, step: 2, file, imgUrl: url, isVideo: true })); };
+      recorder.onstop = () => { const isMp4 = mimeType.includes('mp4'); const ext = isMp4 ? 'mp4' : 'webm'; const cleanMime = isMp4 ? 'video/mp4' : 'video/webm'; const blob = new Blob(chunks, { type: cleanMime }); const file = new File([blob], `tactic_animation.${ext}`, { type: cleanMime }); const url = URL.createObjectURL(blob); setShareModal(prev => ({ ...prev, step: 2, file, imgUrl: url, isVideo: true })); };
       ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, canvas.height); recorder.start();
       let frameIdx = 0; let progress = 0; const fps = 30; const stepsPerFrame = fps * 0.5; 
       const draw = () => {
           ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 4;
-          ctx.beginPath(); ctx.moveTo(0, canvas.height/2); ctx.lineTo(canvas.width, canvas.height/2); ctx.stroke(); ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height/2, 60, 0, Math.PI*2); ctx.stroke();
+          if (pitchType === 'full') {
+            ctx.beginPath(); ctx.moveTo(0, canvas.height/2); ctx.lineTo(canvas.width, canvas.height/2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height/2, 60, 0, Math.PI*2); ctx.stroke();
+            ctx.strokeRect(canvas.width * 0.2, 0, canvas.width * 0.6, canvas.height * 0.16);
+            ctx.strokeRect(canvas.width * 0.2, canvas.height * 0.84, canvas.width * 0.6, canvas.height * 0.16);
+          } else {
+            ctx.strokeRect(canvas.width * 0.2, 0, canvas.width * 0.6, canvas.height * 0.33);
+            ctx.strokeRect(canvas.width * 0.35, 0, canvas.width * 0.3, canvas.height * 0.12);
+            ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height, 70, Math.PI, 0); ctx.stroke();
+          }
           const currentFrame = animationFrames[frameIdx]; const nextFrame = animationFrames[Math.min(frameIdx + 1, animationFrames.length - 1)];
           currentFrame.drawings.forEach(d => {
-              if(d.type === 'arrow' || d.type === 'pass') { ctx.strokeStyle = d.type === 'arrow' ? '#FACC15' : '#60A5FA'; ctx.lineWidth = 5; if(d.type==='pass') ctx.setLineDash([12, 12]); else ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo((d.start.x/100)*canvas.width, (d.start.y/100)*canvas.height); ctx.lineTo((d.end.x/100)*canvas.width, (d.end.y/100)*canvas.height); ctx.stroke(); ctx.setLineDash([]); } 
+              if(d.type === 'arrow' || d.type === 'pass') {
+                const x1 = (d.start.x/100)*canvas.width; const y1 = (d.start.y/100)*canvas.height;
+                const x2 = (d.end.x/100)*canvas.width; const y2 = (d.end.y/100)*canvas.height;
+                const color = d.type === 'arrow' ? '#FACC15' : '#38BDF8';
+                ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 4;
+                if(d.type==='pass') ctx.setLineDash([10, 8]); else ctx.setLineDash([]);
+                ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.setLineDash([]);
+                const angle = Math.atan2(y2 - y1, x2 - x1); const headLen = 14;
+                ctx.beginPath(); ctx.moveTo(x2, y2);
+                ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+                ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+                ctx.closePath(); ctx.fill();
+              } 
               else if(d.type === 'zone') { ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; ctx.strokeStyle = '#3B82F6'; ctx.lineWidth = 3; const x = Math.min(d.start.x, d.end.x)/100 * canvas.width; const y = Math.min(d.start.y, d.end.y)/100 * canvas.height; const w = Math.abs(d.start.x - d.end.x)/100 * canvas.width; const h = Math.abs(d.start.y - d.end.y)/100 * canvas.height; ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h); }
           });
           currentFrame.tokens.forEach(t1 => {
@@ -1732,18 +1775,29 @@ const renderGoalFlowModal = () => {
 
   const renderShareModal = () => {
     if (!shareModal.isOpen) return null;
+    const isMobileDevice = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     return (
       <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[200] p-4 animate-in fade-in">
-        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl text-center flex flex-col items-center">
+        <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl text-center flex flex-col items-center relative">
           {shareModal.step === 1 ? (
             <><div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div><h2 className="text-lg font-bold text-white mb-2">공유용 파일 생성 중...</h2><p className="text-xs text-slate-400">잠시만 기다려 주세요.</p></>
           ) : (
             <>
-              <div className="w-full bg-slate-900 rounded-2xl p-2 mb-6 border border-slate-700 h-64 overflow-y-auto overscroll-contain flex flex-col items-start relative shadow-inner">
-                {shareModal.isVideo ? ( <video src={shareModal.imgUrl} controls autoPlay loop className="w-full h-auto rounded-xl shadow-lg border border-slate-700" /> ) : ( <img src={shareModal.imgUrl} alt="preview" className="w-full h-auto rounded-xl shadow-lg border border-slate-700" /> )}
+              <button onClick={() => setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white p-1"><X size={20}/></button>
+              <div className="w-full bg-slate-900 rounded-2xl p-2 mb-4 border border-slate-700 h-64 overflow-y-auto overscroll-contain flex flex-col items-center justify-center relative shadow-inner">
+                {shareModal.isVideo ? ( <video src={shareModal.imgUrl} controls autoPlay loop playsInline className="max-h-full w-auto mx-auto rounded-xl shadow-lg border border-slate-700" /> ) : ( <img src={shareModal.imgUrl} alt="preview" className="w-full h-auto rounded-xl shadow-lg border border-slate-700" /> )}
               </div>
-              <h2 className="text-lg font-bold text-white mb-6 w-full flex items-center justify-center gap-2"><CheckCircle className="text-green-400"/> 파일 생성 완료!</h2>
-              <div className="flex w-full gap-3"><button onClick={() => setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false })} className="flex-1 py-3.5 bg-slate-700 text-white rounded-xl font-bold hover:bg-slate-600 transition">닫기</button><button onClick={doActualShare} className="flex-1 py-3.5 bg-blue-500 text-white rounded-xl font-bold hover:bg-blue-400 transition shadow-lg flex items-center justify-center gap-2"><Share2 size={18}/> 공유하기</button></div>
+              <h2 className="text-base font-bold text-white mb-2 w-full flex items-center justify-center gap-2"><CheckCircle size={18} className="text-green-400"/> 파일 생성 완료! ({shareModal.file?.name})</h2>
+              <p className="text-[11px] text-slate-400 mb-5 leading-relaxed">
+                {isMobileDevice ? '공유하기를 눌러 카카오톡 등으로 바로 전송하거나 파일로 저장할 수 있습니다.' : 'PC에서는 파일을 저장한 뒤 카카오톡 채팅창으로 끌어다 놓아(드래그) 공유할 수 있습니다.'}
+              </p>
+              <div className="flex w-full gap-2.5">
+                <button onClick={() => setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false })} className="px-4 py-3.5 bg-slate-700 text-slate-200 rounded-xl font-bold text-xs hover:bg-slate-600 transition shrink-0">닫기</button>
+                <button onClick={downloadShareFile} className="flex-1 py-3.5 bg-emerald-600 text-white rounded-xl font-bold text-xs hover:bg-emerald-500 transition shadow-lg flex items-center justify-center gap-1.5">💾 파일 저장</button>
+                {isMobileDevice && (
+                  <button onClick={doActualShare} className="flex-1 py-3.5 bg-blue-500 text-white rounded-xl font-bold text-xs hover:bg-blue-400 transition shadow-lg flex items-center justify-center gap-1.5"><Share2 size={15}/> 공유하기</button>
+                )}
+              </div>
             </>
           )}
         </div>
