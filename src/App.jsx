@@ -1355,25 +1355,25 @@ export default function App() {
     ];
 
     for (let sec = 0; sec <= 1500; sec += 2) {
-      const target = hotspots[Math.floor((sec / 90) % hotspots.length)];
-      const isSprintBurst = (sec % 170 >= 20 && sec % 170 <= 30) || (sec % 230 >= 50 && sec % 230 <= 58);
-      const pull = isSprintBurst ? 0.22 : 0.07;
-      vx = vx * 0.65 + (target.x - curX) * pull + (Math.sin(sec * 0.17) * 1.9);
-      vy = vy * 0.65 + (target.y - curY) * pull + (Math.cos(sec * 0.13) * 2.4);
+      const target = hotspots[Math.floor((sec / 45) % hotspots.length)];
+      const isSprintBurst = (sec % 150 >= 16 && sec % 150 <= 26) || (sec % 210 >= 44 && sec % 210 <= 52);
+      const isRunPhase = !isSprintBurst && (sec % 60 < 28);
+      const targetSpeedMps = isSprintBurst ? 6.8 : isRunPhase ? 4.3 : 2.1; // 24.5km/h, 15.5km/h, 7.5km/h
+      const dx = target.x - curX + Math.sin(sec * 0.23) * 14;
+      const dy = target.y - curY + Math.cos(sec * 0.19) * 22;
+      const angle = Math.atan2(dy, dx);
+      const stepMeters = targetSpeedMps * 2 * (0.88 + 0.22 * Math.abs(Math.sin(sec * 0.31)));
 
-      const stepDist = Math.hypot(vx, vy);
-      const maxStep = isSprintBurst ? 13.8 : 6.2; // 2초당 이동거리 (최대 약 25~27km/h)
-      if (stepDist > maxStep) {
-        vx = (vx / stepDist) * maxStep;
-        vy = (vy / stepDist) * maxStep;
-      }
-
-      curX = Math.max(-29, Math.min(29, curX + vx * 0.45));
-      curY = Math.max(-46, Math.min(46, curY + vy * 0.45));
+      curX = curX + Math.cos(angle) * stepMeters;
+      curY = curY + Math.sin(angle) * stepMeters;
+      if (curX > 30) curX = 30 - (curX - 30) * 0.7;
+      if (curX < -30) curX = -30 - (curX + 30) * 0.7;
+      if (curY > 48) curY = 48 - (curY - 48) * 0.7;
+      if (curY < -48) curY = -48 - (curY + 48) * 0.7;
 
       const lat = baseLat + curY / 110540;
       const lon = baseLon + curX / (111320 * Math.cos((baseLat * Math.PI) / 180));
-      const hr = Math.round(138 + (isSprintBurst ? 36 : 14) + Math.sin(sec * 0.03) * 8);
+      const hr = Math.round(142 + (isSprintBurst ? 36 : isRunPhase ? 18 : 4) + Math.sin(sec * 0.03) * 6);
       rawPoints.push({ lat, lon, timeMs: startMs + sec * 1000, hr });
     }
 
@@ -3553,8 +3553,8 @@ const renderGoalFlowModal = () => {
             {/* 측정 / 파일 불러오기 액션 컨트롤 카드 */}
             <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-3.5 space-y-2.5 shadow-sm">
               <div className="grid grid-cols-2 gap-2">
-                <label className="cursor-pointer bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-black text-xs py-3 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow-md transition text-center">
-                  <span>📂</span> 워치 파일(GPX/TCX) 열기
+                <label className="cursor-pointer bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-black text-xs py-3 px-2 rounded-xl flex items-center justify-center gap-1.5 shadow-md transition text-center whitespace-nowrap">
+                  <span>📂</span> GPX/TCX 파일 열기
                   <input type="file" accept=".gpx,.tcx,.xml" onChange={handleGpsFileUpload} className="hidden" />
                 </label>
 
@@ -3562,7 +3562,7 @@ const renderGoalFlowModal = () => {
                   <button
                     type="button"
                     onClick={startLiveSmartphoneGps}
-                    className="bg-slate-900 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 font-bold text-xs py-3 px-3 rounded-xl flex items-center justify-center gap-1.5 transition"
+                    className="bg-slate-900 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 font-bold text-xs py-3 px-2 rounded-xl flex items-center justify-center gap-1.5 transition whitespace-nowrap"
                   >
                     <span>📡</span> 폰 실시간 GPS 측정
                   </button>
@@ -3570,7 +3570,7 @@ const renderGoalFlowModal = () => {
                   <button
                     type="button"
                     onClick={stopLiveSmartphoneGps}
-                    className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 font-black text-xs py-3 px-3 rounded-xl flex items-center justify-center gap-1.5 animate-pulse transition"
+                    className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 font-black text-xs py-3 px-2 rounded-xl flex items-center justify-center gap-1.5 animate-pulse transition whitespace-nowrap"
                   >
                     <span>⏹</span> 측정 종료 및 분석
                   </button>
@@ -3604,12 +3604,12 @@ const renderGoalFlowModal = () => {
                 </div>
               )}
 
-              <div className="flex items-center justify-between pt-0.5 px-0.5">
-                <span className="text-[11px] text-slate-400">워치 파일이 없어도 기능을 바로 테스트해볼 수 있어요!</span>
+              <div className="flex items-center justify-between gap-2 pt-0.5 px-0.5">
+                <span className="text-[11px] text-slate-400 whitespace-nowrap truncate">워치 파일 없이도 바로 체험해보세요!</span>
                 <button
                   type="button"
                   onClick={loadSampleGpsSession}
-                  className="text-[11px] font-bold text-blue-400 hover:text-blue-300 bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-lg transition shrink-0"
+                  className="text-[11px] font-bold text-blue-400 hover:text-blue-300 bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-lg transition shrink-0 whitespace-nowrap"
                 >
                   🧪 샘플 기록 체험
                 </button>
@@ -3685,36 +3685,36 @@ const renderGoalFlowModal = () => {
                     </div>
                   </div>
 
-                  {/* 피치 뷰 모드 전환 & 방향 보정 컨트롤 */}
-                  <div className="flex items-center justify-between gap-1.5">
-                    <div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700 flex-1 gap-1">
+                  {/* 피치 뷰 모드 전환 & 방향 보정 컨트롤 (반전/축회전 상하 배치로 뷰 탭 가로 폭 확보) */}
+                  <div className="flex items-stretch justify-between gap-2">
+                    <div className="grid grid-cols-3 bg-slate-800 p-1 rounded-xl border border-slate-700 flex-1 gap-1 items-center">
                       <button
                         type="button"
                         onClick={() => { setGpsViewMode('heatmap'); setGpsReplayPlaying(false); }}
-                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition ${gpsViewMode === 'heatmap' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                        className={`h-full py-2 px-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1 ${gpsViewMode === 'heatmap' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                       >
                         🔥 히트맵
                       </button>
                       <button
                         type="button"
                         onClick={() => { setGpsViewMode('sprint'); setGpsReplayPlaying(false); }}
-                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition ${gpsViewMode === 'sprint' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'}`}
+                        className={`h-full py-2 px-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1 ${gpsViewMode === 'sprint' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'}`}
                       >
                         ⚡ 스프린트
                       </button>
                       <button
                         type="button"
                         onClick={() => { setGpsViewMode('replay'); if (gpsReplayProgress >= 100) setGpsReplayProgress(0); setGpsReplayPlaying(true); }}
-                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition ${gpsViewMode === 'replay' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                        className={`h-full py-2 px-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1 ${gpsViewMode === 'replay' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                       >
                         ▶️ 2D 리플레이
                       </button>
                     </div>
-                    <div className="flex gap-1 shrink-0">
+                    <div className="flex flex-col gap-1 shrink-0">
                       <button
                         type="button"
                         onClick={() => setGpsFlipVertical(v => !v)}
-                        className="h-8 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-[11px] font-bold transition"
+                        className="h-6 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[10px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1"
                         title="공격 방향 상하 반전"
                       >
                         🔄 반전
@@ -3722,7 +3722,7 @@ const renderGoalFlowModal = () => {
                       <button
                         type="button"
                         onClick={() => setGpsRotate90(v => !v)}
-                        className="h-8 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-[11px] font-bold transition"
+                        className="h-6 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[10px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1"
                         title="경기장 축 90도 회전"
                       >
                         📐 축회전
@@ -4038,19 +4038,23 @@ const renderGoalFlowModal = () => {
             <div className="flex-1 overflow-y-auto space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
               {gpsGuideTab === 'android' ? (
                 <>
+                  <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3 text-[11px] text-amber-200 leading-relaxed">
+                    <strong className="text-amber-400 block mb-0.5">⚠️ 삼성 헬스에서 [GPX로 내보내기]가 안 보일 때!</strong>
+                    삼성 헬스는 <strong>'축구'</strong> 종목으로 측정하거나 <strong>'자동 감지된 운동'</strong>에는 GPX 내보내기 메뉴를 제공하지 않습니다.<br/>
+                    반드시 워치에서 <strong className="text-white underline">[달리기] 또는 [걷기]를 직접 눌러 시작</strong>해야 우측 상단 <strong>⋮</strong> 메뉴에 <strong>[GPX로 내보내기]</strong>가 나타납니다!
+                  </div>
                   <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
                     <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">1</div>
                     <div>
-                      <div className="font-bold text-white mb-0.5">워치에서 운동 기록 시작</div>
-                      갤럭시워치 <strong className="text-emerald-400">[삼성 헬스]</strong>에서 <strong className="text-white">[달리기]</strong>(또는 야외 GPS가 켜진 운동 종목)를 선택하고 경기를 진행하세요.
-                      <div className="text-[11px] text-amber-300 mt-1">* 경로(GPS) 저장이 지원되는 '달리기/걷기/자전거' 모드로 측정해야 GPX 내보내기가 활성화됩니다.</div>
+                      <div className="font-bold text-white mb-0.5">워치에서 [달리기] 모드로 측정 시작</div>
+                      갤럭시워치 <strong className="text-emerald-400">[삼성 헬스]</strong>에서 축구가 아닌 <strong className="text-white">[달리기]</strong>(또는 걷기/하이킹)를 직접 눌러 시작하고 경기를 진행하세요. (시작 전 워치 상단 위치 아이콘이 깜빡이다 고정되는지 확인)
                     </div>
                   </div>
                   <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
                     <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">2</div>
                     <div>
                       <div className="font-bold text-white mb-0.5">스마트폰 삼성 헬스에서 GPX 내보내기</div>
-                      경기 종료 후 스마트폰 <strong className="text-white">[삼성 헬스]</strong> 앱 → 방금 기록된 운동 선택 → 우측 상단 <strong className="text-amber-400">[⋮ (점 3개)]</strong> → <strong className="text-white">[GPX로 내보내기]</strong>를 눌러 저장하세요.
+                      경기 종료 후 스마트폰 <strong className="text-white">[삼성 헬스]</strong> 앱 → <strong className="text-white">[운동 기록]</strong>에서 방금 뛴 달리기 항목 터치(상세 화면에 지도 경로 표시 확인) → 우측 상단 <strong className="text-amber-400">[⋮ (점 3개)]</strong> → <strong className="text-white">[GPX로 내보내기]</strong>를 눌러 저장하세요.
                     </div>
                   </div>
                   <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
