@@ -176,6 +176,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState(() => savedSession?.activeTab || 'matches'); 
   const [statsPeriod, setStatsPeriod] = useState('month'); 
   const [statsType, setStatsType] = useState('total'); 
+  const [statsExpanded, setStatsExpanded] = useState({ field: true, chemistry: true, gk: true });
+  const [chemistryMode, setChemistryMode] = useState('duo'); // 'duo' | 'route'
   const [isAdmin, setIsAdmin] = useState(() => !!savedSession?.isAdmin); 
   const [adminPassword, setAdminPassword] = useState('admin');
   const [isLoaded, setIsLoaded] = useState(false);
@@ -397,6 +399,76 @@ export default function App() {
       .filter(s => s.gkQuarters > 0)
       .sort((a, b) => a.gaRate !== b.gaRate ? a.gaRate - b.gaRate : (b.cleanSheets !== a.cleanSheets ? b.cleanSheets - a.cleanSheets : b.gkQuarters - a.gkQuarters));
   }, [filteredStats]);
+
+  const chemistryStats = useMemo(() => {
+    let targetMatches = currentTeamMatches.filter(m => m.status === 'completed');
+    if (statsPeriod === 'month') targetMatches = targetMatches.filter(m => m.date.startsWith(viewYearMonth));
+    else if (statsPeriod === 'year') targetMatches = targetMatches.filter(m => m.date.startsWith(viewYear));
+    if (statsType === 'total') targetMatches = targetMatches.filter(m => m.matchType === 'internal' || m.matchType === 'external');
+    else targetMatches = targetMatches.filter(m => m.matchType === statsType);
+
+    const playerById = {};
+    const playerByName = {};
+    currentTeamPlayers.forEach(p => {
+      playerById[p.id] = p;
+      playerByName[p.name] = p;
+    });
+
+    const resolvePlayer = (id, rawName) => {
+      if (id && playerById[id]) return { id: playerById[id].id, name: playerById[id].name };
+      if (!rawName) return null;
+      const cleanName = String(rawName).replace(/^\([A-D]팀\)\s*/, '').trim();
+      if (!cleanName || cleanName === '상대팀' || cleanName === '용병') return null;
+      if (playerByName[cleanName]) return { id: playerByName[cleanName].id, name: playerByName[cleanName].name };
+      return null;
+    };
+
+    const duoMap = {};
+    const routeMap = {};
+
+    targetMatches.forEach(m => {
+      (m.logs || []).forEach(log => {
+        const scorer = resolvePlayer(log.scorerId, log.scorerName);
+        const assister = resolvePlayer(log.assistId, log.assistName);
+        if (!scorer || !assister || scorer.id === assister.id) return;
+
+        const routeKey = `${assister.id}__${scorer.id}`;
+        if (!routeMap[routeKey]) {
+          routeMap[routeKey] = {
+            key: routeKey,
+            assisterId: assister.id,
+            assisterName: assister.name,
+            scorerId: scorer.id,
+            scorerName: scorer.name,
+            count: 0
+          };
+        }
+        routeMap[routeKey].count += 1;
+
+        const [p1, p2] = [scorer, assister].sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+        const duoKey = `${p1.id}__${p2.id}`;
+        if (!duoMap[duoKey]) {
+          duoMap[duoKey] = {
+            key: duoKey,
+            p1Id: p1.id,
+            p1Name: p1.name,
+            p2Id: p2.id,
+            p2Name: p2.name,
+            total: 0,
+            p1GoalP2Assist: 0,
+            p2GoalP1Assist: 0
+          };
+        }
+        duoMap[duoKey].total += 1;
+        if (scorer.id === p1.id) duoMap[duoKey].p1GoalP2Assist += 1;
+        else duoMap[duoKey].p2GoalP1Assist += 1;
+      });
+    });
+
+    const duoList = Object.values(duoMap).sort((a, b) => b.total - a.total || a.p1Name.localeCompare(b.p1Name, 'ko'));
+    const routeList = Object.values(routeMap).sort((a, b) => b.count - a.count || a.assisterName.localeCompare(b.assisterName, 'ko'));
+    return { duoList, routeList };
+  }, [currentTeamMatches, currentTeamPlayers, statsPeriod, viewYearMonth, viewYear, statsType]);
 
   const titlePrefix = statsPeriod === 'month' ? '이달의' : '올해의';
   const maxGoals = filteredStats.length > 0 ? Math.max(...filteredStats.map(s => s.goals)) : 0; const topScorers = filteredStats.filter(s => s.goals === maxGoals && maxGoals > 0);
@@ -3259,13 +3331,25 @@ const renderGoalFlowModal = () => {
         )}
 
         {activeTab === 'stats' && (
-          <div className="space-y-6 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar">
-            <h2 className="text-xl font-black text-white">팀 통계</h2>
+          <div className="space-y-4 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar pb-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-black text-white">팀 통계</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  const allOpen = statsExpanded.field && statsExpanded.chemistry && statsExpanded.gk;
+                  setStatsExpanded({ field: !allOpen, chemistry: !allOpen, gk: !allOpen });
+                }}
+                className="text-[11px] font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg border border-slate-700 transition"
+              >
+                {statsExpanded.field && statsExpanded.chemistry && statsExpanded.gk ? '전체 접기 ▲' : '전체 펼치기 ▼'}
+              </button>
+            </div>
             <div className="flex bg-slate-900 rounded-xl p-1 shrink-0">
                <button type="button" onClick={() => setStatsPeriod('month')} className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition ${statsPeriod === 'month' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'}`}>월간 통계</button>
                <button type="button" onClick={() => setStatsPeriod('year')} className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition ${statsPeriod === 'year' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'}`}>연간 통계</button>
             </div>
-            <div className="flex bg-slate-900 rounded-xl p-1 mb-4 shrink-0 overflow-x-auto hide-scrollbar">
+            <div className="flex bg-slate-900 rounded-xl p-1 shrink-0 overflow-x-auto hide-scrollbar">
                <button type="button" onClick={() => setStatsType('total')} className={`flex-1 py-2 px-3 rounded-lg text-[11px] font-bold transition whitespace-nowrap ${statsType === 'total' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'}`}>통합 (자체+교류)</button>
                <button type="button" onClick={() => setStatsType('internal')} className={`flex-1 py-2 px-3 rounded-lg text-[11px] font-bold transition whitespace-nowrap ${statsType === 'internal' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'}`}>자체전</button>
                <button type="button" onClick={() => setStatsType('external')} className={`flex-1 py-2 px-3 rounded-lg text-[11px] font-bold transition whitespace-nowrap ${statsType === 'external' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'}`}>교류전</button>
@@ -3298,64 +3382,204 @@ const renderGoalFlowModal = () => {
                     <span className="text-[13px] font-black text-white leading-tight mb-0.5" style={{wordBreak: 'keep-all'}}>{topCaps.length===0?'없음':topCaps.length===1?topCaps[0].name:`${topCaps[0].name} 외 ${topCaps.length-1}명`}</span><span className="text-xs font-bold text-blue-400">{maxCaps > 0 ? `${maxCaps}회` : ''}</span>
                   </div>
                 </div>
-                <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-sm">
-                  <div className="text-xs font-black text-slate-400 mb-3 flex items-center gap-1.5">⚽ 필드 플레이어 기록</div>
-                  <table className="w-full text-sm text-center">
-                    <thead>
-                      <tr className="text-slate-500 font-bold border-b border-slate-700">
-                        <th className="pb-3 text-left pl-2">선수명</th><th className="pb-3">참석</th><th className="pb-3">득점</th><th className="pb-3">도움</th><th className="pb-3">포인트</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredStats.filter(s => s.caps > 0).map(st => (
-                        <tr key={st.id} className="border-b border-slate-700/50 last:border-0">
-                          <td className="py-3 text-left pl-2 font-bold text-white">{st.name}</td>
-                          <td className="py-3 text-slate-300">{st.caps}</td>
-                          <td className="py-3 text-blue-400 font-bold">{st.goals}</td>
-                          <td className="py-3 text-emerald-400 font-bold">{st.assists}</td>
-                          <td className="py-3 text-yellow-400 font-black">{st.goals + st.assists}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+
+                {/* 1. 필드 플레이어 기록 (접기/펼치기 지원) */}
+                <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-sm overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setStatsExpanded(prev => ({ ...prev, field: !prev.field }))}
+                    className="w-full p-4 flex justify-between items-center hover:bg-slate-700/40 transition text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-slate-200 flex items-center gap-1.5">⚽ 필드 플레이어 기록</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-900 text-blue-400 border border-slate-700">
+                        {filteredStats.filter(s => s.caps > 0).length}명
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-400 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700">
+                      {statsExpanded.field ? '축소 ▲' : '확대 ▼'}
+                    </span>
+                  </button>
+
+                  {statsExpanded.field && (
+                    <div className="px-4 pb-4 pt-1 border-t border-slate-700/60 animate-in fade-in">
+                      <table className="w-full text-sm text-center">
+                        <thead>
+                          <tr className="text-slate-500 font-bold border-b border-slate-700 text-xs">
+                            <th className="py-2.5 text-left pl-2">선수명</th><th className="py-2.5">참석</th><th className="py-2.5">득점</th><th className="py-2.5">도움</th><th className="py-2.5">포인트</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredStats.filter(s => s.caps > 0).map(st => (
+                            <tr key={st.id} className="border-b border-slate-700/50 last:border-0">
+                              <td className="py-3 text-left pl-2 font-bold text-white">{st.name}</td>
+                              <td className="py-3 text-slate-300">{st.caps}</td>
+                              <td className="py-3 text-blue-400 font-bold">{st.goals}</td>
+                              <td className="py-3 text-emerald-400 font-bold">{st.assists}</td>
+                              <td className="py-3 text-yellow-400 font-black">{st.goals + st.assists}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
 
-                <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-sm">
-                  <div className="flex justify-between items-center mb-3">
-                    <div className="text-xs font-black text-emerald-400 flex items-center gap-1.5">🧤 골키퍼 방어율 기록</div>
-                    <span className="text-[10px] text-slate-500 font-bold">실점율 = 실점 ÷ 출전 쿼터 (낮을수록 우수)</span>
-                  </div>
-                  {gkStatsList.length === 0 ? (
-                    <div className="text-center py-6 text-slate-500 text-xs border border-slate-700/50 rounded-xl bg-slate-900/40">
-                      해당 기간에 골키퍼(GK)로 지정된 쿼터 기록이 없습니다.<br/>
-                      <span className="text-[11px] text-slate-600">경기 진행 중 또는 경기 상세 &gt; 쿼터 수정에서 GK를 지정해보세요!</span>
+                {/* 2. 득점·어시스트 호흡(케미) 기록 (접기/펼치기 지원) */}
+                <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-sm overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setStatsExpanded(prev => ({ ...prev, chemistry: !prev.chemistry }))}
+                    className="w-full p-4 flex justify-between items-center hover:bg-slate-700/40 transition text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-amber-400 flex items-center gap-1.5">🤝 환상의 호흡 (득점·도움 합작)</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-900 text-amber-300 border border-slate-700">
+                        {chemistryStats.duoList.length}조합
+                      </span>
                     </div>
-                  ) : (
-                    <table className="w-full text-sm text-center">
-                      <thead>
-                        <tr className="text-slate-500 font-bold border-b border-slate-700 text-xs">
-                          <th className="pb-3 text-left pl-2">선수명</th>
-                          <th className="pb-3">출전(Q)</th>
-                          <th className="pb-3">실점</th>
-                          <th className="pb-3">클린시트</th>
-                          <th className="pb-3">실점율(당)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {gkStatsList.map((st, idx) => (
-                          <tr key={st.id} className="border-b border-slate-700/50 last:border-0">
-                            <td className="py-3 text-left pl-2 font-bold text-white flex items-center gap-1.5">
-                              {idx === 0 && <span className="text-xs">🥇</span>}
-                              {st.name}
-                            </td>
-                            <td className="py-3 text-slate-300 font-bold">{st.gkQuarters}Q</td>
-                            <td className="py-3 text-red-400 font-bold">{st.goalsConceded}</td>
-                            <td className="py-3 text-emerald-400 font-bold">{st.cleanSheets}회 <span className="text-[10px] text-slate-500 font-normal">({st.cleanSheetRate || 0}%)</span></td>
-                            <td className="py-3 text-yellow-400 font-black">{Number(st.gaRate || 0).toFixed(2)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <span className="text-[11px] font-bold text-slate-400 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700">
+                      {statsExpanded.chemistry ? '축소 ▲' : '확대 ▼'}
+                    </span>
+                  </button>
+
+                  {statsExpanded.chemistry && (
+                    <div className="px-4 pb-4 pt-3 border-t border-slate-700/60 space-y-3 animate-in fade-in">
+                      {/* 양방향 듀오 vs 단방향(어시->득점) 전환 탭 */}
+                      <div className="grid grid-cols-2 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setChemistryMode('duo')}
+                          className={`py-1.5 rounded-lg text-xs font-bold transition ${chemistryMode === 'duo' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'}`}
+                        >
+                          🤝 듀오 합작 (A ↔ B)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setChemistryMode('route')}
+                          className={`py-1.5 rounded-lg text-xs font-bold transition ${chemistryMode === 'route' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                        >
+                          🎯 어시 ➔ 득점 루트
+                        </button>
+                      </div>
+
+                      {chemistryStats.duoList.length === 0 ? (
+                        <div className="text-center py-6 text-slate-500 text-xs border border-slate-700/50 rounded-xl bg-slate-900/40">
+                          해당 기간에 도움(어시스트)이 함께 기록된 합작 득점이 없습니다.
+                        </div>
+                      ) : chemistryMode === 'duo' ? (
+                        <div className="space-y-2">
+                          {chemistryStats.duoList.map((duo, idx) => (
+                            <div key={duo.key} className={`p-3 rounded-xl border flex items-center justify-between gap-2 ${idx === 0 ? 'bg-amber-500/10 border-amber-500/40' : 'bg-slate-900/70 border-slate-700/70'}`}>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-black w-5 text-center shrink-0">
+                                    {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : <span className="text-slate-500">{idx + 1}</span>}
+                                  </span>
+                                  <span className="text-sm font-black text-white">{duo.p1Name}</span>
+                                  <span className="text-xs text-amber-400 font-bold">↔</span>
+                                  <span className="text-sm font-black text-white">{duo.p2Name}</span>
+                                </div>
+                                <div className="text-[11px] text-slate-400 pl-6 mt-1 flex flex-wrap gap-x-2.5 gap-y-0.5">
+                                  {duo.p1GoalP2Assist > 0 && (
+                                    <span>👟{duo.p2Name} ➔ ⚽{duo.p1Name} <strong className="text-slate-200">{duo.p1GoalP2Assist}골</strong></span>
+                                  )}
+                                  {duo.p2GoalP1Assist > 0 && (
+                                    <span>👟{duo.p1Name} ➔ ⚽{duo.p2Name} <strong className="text-slate-200">{duo.p2GoalP1Assist}골</strong></span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <span className={`inline-block px-2.5 py-1 rounded-lg text-xs font-black border ${idx === 0 ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-slate-800 text-amber-400 border-slate-700'}`}>
+                                  {duo.total}골 합작
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {chemistryStats.routeList.map((rt, idx) => (
+                            <div key={rt.key} className={`p-3 rounded-xl border flex items-center justify-between gap-2 ${idx === 0 ? 'bg-blue-500/10 border-blue-500/40' : 'bg-slate-900/70 border-slate-700/70'}`}>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="text-xs font-black w-5 text-center shrink-0">
+                                  {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : <span className="text-slate-500">{idx + 1}</span>}
+                                </span>
+                                <span className="text-xs bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-md font-bold whitespace-nowrap">
+                                  👟 {rt.assisterName}
+                                </span>
+                                <span className="text-slate-400 text-xs font-black">➔</span>
+                                <span className="text-xs bg-blue-500/15 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-md font-bold whitespace-nowrap">
+                                  ⚽ {rt.scorerName}
+                                </span>
+                              </div>
+                              <span className={`shrink-0 px-2.5 py-1 rounded-lg text-xs font-black border ${idx === 0 ? 'bg-blue-500 text-white border-blue-400' : 'bg-slate-800 text-blue-400 border-slate-700'}`}>
+                                {rt.count}회
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. 골키퍼 방어율 기록 (접기/펼치기 지원) */}
+                <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-sm overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setStatsExpanded(prev => ({ ...prev, gk: !prev.gk }))}
+                    className="w-full p-4 flex justify-between items-center hover:bg-slate-700/40 transition text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-emerald-400 flex items-center gap-1.5">🧤 골키퍼 방어율 기록</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-900 text-emerald-400 border border-slate-700">
+                        {gkStatsList.length}명
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-400 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700">
+                      {statsExpanded.gk ? '축소 ▲' : '확대 ▼'}
+                    </span>
+                  </button>
+
+                  {statsExpanded.gk && (
+                    <div className="px-4 pb-4 pt-2 border-t border-slate-700/60 animate-in fade-in">
+                      <div className="text-right mb-2">
+                        <span className="text-[10px] text-slate-500 font-bold">실점율 = 실점 ÷ 출전 쿼터 (낮을수록 우수)</span>
+                      </div>
+                      {gkStatsList.length === 0 ? (
+                        <div className="text-center py-6 text-slate-500 text-xs border border-slate-700/50 rounded-xl bg-slate-900/40">
+                          해당 기간에 골키퍼(GK)로 지정된 쿼터 기록이 없습니다.<br/>
+                          <span className="text-[11px] text-slate-600">경기 진행 중 또는 경기 상세 &gt; 쿼터 수정에서 GK를 지정해보세요!</span>
+                        </div>
+                      ) : (
+                        <table className="w-full text-sm text-center">
+                          <thead>
+                            <tr className="text-slate-500 font-bold border-b border-slate-700 text-xs">
+                              <th className="pb-3 text-left pl-2">선수명</th>
+                              <th className="pb-3">출전(Q)</th>
+                              <th className="pb-3">실점</th>
+                              <th className="pb-3">클린시트</th>
+                              <th className="pb-3">실점율(당)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {gkStatsList.map((st, idx) => (
+                              <tr key={st.id} className="border-b border-slate-700/50 last:border-0">
+                                <td className="py-3 text-left pl-2 font-bold text-white flex items-center gap-1.5">
+                                  {idx === 0 && <span className="text-xs">🥇</span>}
+                                  {st.name}
+                                </td>
+                                <td className="py-3 text-slate-300 font-bold">{st.gkQuarters}Q</td>
+                                <td className="py-3 text-red-400 font-bold">{st.goalsConceded}</td>
+                                <td className="py-3 text-emerald-400 font-bold">{st.cleanSheets}회 <span className="text-[10px] text-slate-500 font-normal">({st.cleanSheetRate || 0}%)</span></td>
+                                <td className="py-3 text-yellow-400 font-black">{Number(st.gaRate || 0).toFixed(2)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
                   )}
                 </div>
               </>
