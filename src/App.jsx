@@ -286,6 +286,7 @@ export default function App() {
   const [pitchSearchResults, setPitchSearchResults] = useState([]);
   const [isPitchSearching, setIsPitchSearching] = useState(false);
   const [draftPitchCorners, setDraftPitchCorners] = useState(null); // [{lat, lon} x 4]
+  const [pitchMapStyle, setPitchMapStyle] = useState('naver_sat'); // 'naver_sat' | 'naver_basic' | 'google_sat'
   const gpsCanvasRef = useRef(null);
   const gpsCardCaptureRef = useRef(null);
   const gpsReplayRafRef = useRef(null);
@@ -295,6 +296,7 @@ export default function App() {
   const wakeLockRef = useRef(null);
   const pitchMapContainerRef = useRef(null);
   const pitchMapInstanceRef = useRef(null);
+  const pitchTileLayerRef = useRef(null);
   const pitchMapMarkersRef = useRef([]);
   const pitchMapPolygonRef = useRef(null);
   const pitchMapMidLineRef = useRef(null);
@@ -2074,11 +2076,65 @@ export default function App() {
     }
   };
 
+  const applyMapTileStyle = async (styleKey) => {
+    const L = window.L;
+    const map = pitchMapInstanceRef.current;
+    if (!L || !map) return;
+
+    if (pitchTileLayerRef.current) {
+      map.removeLayer(pitchTileLayerRef.current);
+      pitchTileLayerRef.current = null;
+    }
+
+    let tileUrl = 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=ko';
+    let attr = 'Google Satellite';
+
+    if (styleKey === 'naver_sat' || styleKey === 'naver_basic') {
+      const mode = styleKey === 'naver_sat' ? 'satellite' : 'basic';
+      const mtParam = styleKey === 'naver_sat' ? 'bg.ol.ts.lko' : 'bg.ol.ts.ar.lko';
+      attr = '© NAVER Corp.';
+      try {
+        const res = await fetch(`https://map.pstatic.net/nrb/styles/${mode}.json?fmt=png&mt=${mtParam}`);
+        const data = await res.json();
+        if (data?.version) {
+          tileUrl = `https://map.pstatic.net/nrb/styles/${mode}/${data.version}/{z}/{x}/{y}@2x.png?mt=${mtParam}`;
+        } else {
+          tileUrl = `https://map.pstatic.net/nrb/styles/${mode}/{z}/{x}/{y}@2x.png?mt=${mtParam}`;
+        }
+      } catch {
+        tileUrl = `https://map.pstatic.net/nrb/styles/${mode}/{z}/{x}/{y}@2x.png?mt=${mtParam}`;
+      }
+    }
+
+    const layer = L.tileLayer(tileUrl, {
+      maxZoom: 20,
+      minZoom: 5,
+      attribution: attr
+    });
+
+    // 만약 브라우저 환경에서 네이버 타일 직접 호출이 차단될 경우 한글 구글 위성지도로 자동 폴백
+    let errorCount = 0;
+    layer.on('tileerror', () => {
+      errorCount++;
+      if (errorCount === 4 && styleKey.startsWith('naver') && pitchMapInstanceRef.current) {
+        const fallbackUrl = styleKey === 'naver_basic'
+          ? 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=ko'
+          : 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=ko';
+        if (pitchTileLayerRef.current) pitchMapInstanceRef.current.removeLayer(pitchTileLayerRef.current);
+        pitchTileLayerRef.current = L.tileLayer(fallbackUrl, { maxZoom: 20, attribution: 'Google Maps KR' }).addTo(pitchMapInstanceRef.current);
+      }
+    });
+
+    layer.addTo(map);
+    pitchTileLayerRef.current = layer;
+  };
+
   useEffect(() => {
     if (!pitchManagerModal) {
       if (pitchMapInstanceRef.current) {
         pitchMapInstanceRef.current.remove();
         pitchMapInstanceRef.current = null;
+        pitchTileLayerRef.current = null;
         pitchMapMarkersRef.current = [];
         pitchMapPolygonRef.current = null;
         pitchMapMidLineRef.current = null;
@@ -2105,10 +2161,7 @@ export default function App() {
       });
       pitchMapInstanceRef.current = map;
 
-      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        maxZoom: 20,
-        attribution: 'Esri Satellite'
-      }).addTo(map);
+      applyMapTileStyle(pitchMapStyle);
 
       // 현재 불러온 GPX 경로가 있으면 위성지도 위에 하늘색 궤적으로 표시
       const gpsLatLngs = (gpsSession?.points || [])
@@ -2128,6 +2181,12 @@ export default function App() {
 
     return () => { isCancelled = true; };
   }, [pitchManagerModal]);
+
+  useEffect(() => {
+    if (pitchManagerModal && pitchMapInstanceRef.current) {
+      applyMapTileStyle(pitchMapStyle);
+    }
+  }, [pitchMapStyle]);
 
   const placeCornersAtMapCenter = () => {
     const map = pitchMapInstanceRef.current;
@@ -2162,9 +2221,20 @@ export default function App() {
     e.preventDefault();
     const q = pitchSearchQuery.trim();
     if (!q) return;
+
+    // 위도,경도 좌표 직접 입력 지원 (예: 37.654, 127.056)
+    const coordMatch = q.match(/^(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)$/);
+    if (coordMatch && pitchMapInstanceRef.current) {
+      const lat = parseFloat(coordMatch[1]);
+      const lon = parseFloat(coordMatch[2]);
+      pitchMapInstanceRef.current.setView([lat, lon], 18);
+      applyCornersToSatelliteMap(createDefaultCornersAround(lat, lon, 96, 62), false);
+      return;
+    }
+
     setIsPitchSearching(true);
     try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=kr&limit=5&q=${encodeURIComponent(q)}`);
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&accept-language=ko&countrycodes=kr&limit=6&q=${encodeURIComponent(q)}`);
       const data = await res.json();
       setPitchSearchResults(Array.isArray(data) ? data : []);
       if (data && data.length > 0 && pitchMapInstanceRef.current) {
@@ -4728,7 +4798,32 @@ const renderGoalFlowModal = () => {
               <button onClick={() => setPitchManagerModal(false)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-3 pr-0.5 hide-scrollbar">
+            <div className="flex-1 overflow-y-auto space-y-2.5 pr-0.5 hide-scrollbar">
+              {/* 지도 종류 선택 탭 (네이버 위성 / 네이버 일반 / 구글 위성) */}
+              <div className="grid grid-cols-3 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPitchMapStyle('naver_sat')}
+                  className={`py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap ${pitchMapStyle === 'naver_sat' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                >
+                  🟢 네이버 위성
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPitchMapStyle('naver_basic')}
+                  className={`py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap ${pitchMapStyle === 'naver_basic' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                >
+                  🗺️ 네이버 일반
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPitchMapStyle('google_sat')}
+                  className={`py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap ${pitchMapStyle === 'google_sat' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                >
+                  🌏 구글 위성
+                </button>
+              </div>
+
               {/* 구장 위치 검색 바 */}
               <form onSubmit={handlePitchPlaceSearch} className="flex gap-1.5">
                 <input
