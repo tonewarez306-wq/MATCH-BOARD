@@ -135,6 +135,24 @@ const loadHtml2Canvas = () => {
   });
 };
 
+const loadLeaflet = () => {
+  return new Promise((resolve, reject) => {
+    if (window.L) { resolve(window.L); return; }
+    if (!document.getElementById('leaflet-css')) {
+      const link = document.createElement('link');
+      link.id = 'leaflet-css';
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(link);
+    }
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.onload = () => resolve(window.L);
+    script.onerror = () => reject(new Error('Leaflet 위성지도 로드 실패'));
+    document.head.appendChild(script);
+  });
+};
+
 const formatTimeAmPm = (timeStr) => {
   if (!timeStr) return ''; const [h, m] = timeStr.split(':'); const hour = parseInt(h, 10);
   const ampm = hour >= 12 ? '오후' : '오전'; const formattedHour = hour % 12 || 12; return `${ampm} ${formattedHour}:${m}`;
@@ -261,6 +279,13 @@ export default function App() {
   const [gpsGuideTab, setGpsGuideTab] = useState(() => (typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent)) ? 'ios' : 'android');
   const [isLiveGpsTracking, setIsLiveGpsTracking] = useState(false);
   const [liveGpsStats, setLiveGpsStats] = useState({ elapsedSec: 0, distanceKm: 0, currentSpeedKmh: 0, maxSpeedKmh: 0, pointCount: 0 });
+  const [gpsSelectedPitchId, setGpsSelectedPitchId] = useState('auto'); // 'auto' | pitch.id
+  const [pitchManagerModal, setPitchManagerModal] = useState(false);
+  const [pitchFormName, setPitchFormName] = useState('');
+  const [pitchSearchQuery, setPitchSearchQuery] = useState('');
+  const [pitchSearchResults, setPitchSearchResults] = useState([]);
+  const [isPitchSearching, setIsPitchSearching] = useState(false);
+  const [draftPitchCorners, setDraftPitchCorners] = useState(null); // [{lat, lon} x 4]
   const gpsCanvasRef = useRef(null);
   const gpsCardCaptureRef = useRef(null);
   const gpsReplayRafRef = useRef(null);
@@ -268,6 +293,11 @@ export default function App() {
   const liveGpsTimerRef = useRef(null);
   const liveGpsPointsRef = useRef([]);
   const wakeLockRef = useRef(null);
+  const pitchMapContainerRef = useRef(null);
+  const pitchMapInstanceRef = useRef(null);
+  const pitchMapMarkersRef = useRef([]);
+  const pitchMapPolygonRef = useRef(null);
+  const pitchMapMidLineRef = useRef(null);
 
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
@@ -1143,6 +1173,78 @@ export default function App() {
     }
   }, [memos]);
 
+  const savedGpsPitches = useMemo(() => {
+    const raw = memos?.['__gps_pitches__'];
+    if (!raw) return [];
+    try {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [memos]);
+
+  const defaultSamplePitch = useMemo(() => ({
+    id: 'preset_worldcup',
+    name: '서울월드컵경기장 (샘플 구장)',
+    isPreset: true,
+    center: { lat: 37.56826, lon: 126.89724 },
+    corners: [
+      { lat: 37.56871, lon: 126.89695 }, // 1. 좌상 (북서)
+      { lat: 37.56862, lon: 126.89769 }, // 2. 우상 (북동)
+      { lat: 37.56781, lon: 126.89753 }, // 3. 우하 (남동)
+      { lat: 37.56790, lon: 126.89679 }  // 4. 좌하 (남서)
+    ]
+  }), []);
+
+  const allGpsPitches = useMemo(() => [...savedGpsPitches, defaultSamplePitch], [savedGpsPitches, defaultSamplePitch]);
+
+  const createDefaultCornersAround = (centerLat, centerLon, lengthM = 96, widthM = 62) => {
+    const cosLat = Math.cos((centerLat * Math.PI) / 180);
+    const dLat = (lengthM / 2) / 110540;
+    const dLon = (widthM / 2) / (111320 * cosLat);
+    return [
+      { lat: Number((centerLat + dLat).toFixed(6)), lon: Number((centerLon - dLon).toFixed(6)) }, // 1. 좌상
+      { lat: Number((centerLat + dLat).toFixed(6)), lon: Number((centerLon + dLon).toFixed(6)) }, // 2. 우상
+      { lat: Number((centerLat - dLat).toFixed(6)), lon: Number((centerLon + dLon).toFixed(6)) }, // 3. 우하
+      { lat: Number((centerLat - dLat).toFixed(6)), lon: Number((centerLon - dLon).toFixed(6)) }  // 4. 좌하
+    ];
+  };
+
+  const projectLatLonToPitch = (lat, lon, pitch) => {
+    if (!pitch || !Array.isArray(pitch.corners) || pitch.corners.length < 4) return null;
+    const [tl, tr, br, bl] = pitch.corners;
+    const cLat = (tl.lat + tr.lat + br.lat + bl.lat) / 4;
+    const cLon = (tl.lon + tr.lon + br.lon + bl.lon) / 4;
+    const cosLat = Math.cos((cLat * Math.PI) / 180);
+    const toMeters = (p) => ({
+      x: (p.lon - cLon) * 111320 * cosLat,
+      y: (p.lat - cLat) * 110540
+    });
+    const mTL = toMeters(tl), mTR = toMeters(tr), mBR = toMeters(br), mBL = toMeters(bl);
+    const mTop = { x: (mTL.x + mTR.x) / 2, y: (mTL.y + mTR.y) / 2 };
+    const mBot = { x: (mBL.x + mBR.x) / 2, y: (mBL.y + mBR.y) / 2 };
+    const mLeft = { x: (mTL.x + mBL.x) / 2, y: (mTL.y + mBL.y) / 2 };
+    const mRight = { x: (mTR.x + mBR.x) / 2, y: (mTR.y + mBR.y) / 2 };
+
+    const vx = mRight.x - mLeft.x, vy = mRight.y - mLeft.y;
+    const widthM = Math.max(10, Math.hypot(vx, vy));
+    const ux = vx / widthM, uy = vy / widthM;
+
+    const lx = mBot.x - mTop.x, ly = mBot.y - mTop.y;
+    const lengthM = Math.max(10, Math.hypot(lx, ly));
+    const ex = lx / lengthM, ey = ly / lengthM;
+
+    const ptM = toMeters({ lat, lon });
+    const u = 0.5 + (ptM.x * ux + ptM.y * uy) / widthM;   // 0(좌측 터치라인) ~ 1(우측 터치라인)
+    const v = 0.5 + (ptM.x * ex + ptM.y * ey) / lengthM;  // 0(상단 골라인) ~ 1(하단 골라인)
+
+    return {
+      x: Number(Math.max(2, Math.min(98, 5.5 + u * 89)).toFixed(1)),
+      y: Number(Math.max(2, Math.min(98, 4.0 + v * 92)).toFixed(1))
+    };
+  };
+
   const calcHaversineMeters = (lat1, lon1, lat2, lon2) => {
     const R = 6371000;
     const toRad = d => (d * Math.PI) / 180;
@@ -1287,6 +1389,8 @@ export default function App() {
       return {
         x: Number(nx.toFixed(1)),
         y: Number(ny.toFixed(1)),
+        lat: Number(p.lat.toFixed(6)),
+        lon: Number(p.lon.toFixed(6)),
         speed: p.speed,
         t: Math.round(p.elapsedSec),
         hr: p.hr
@@ -1322,10 +1426,22 @@ export default function App() {
     const activityScore = Math.min(99, Math.max(55, Math.round(60 + totalDistanceKm * 6 + sprintCount * 1.5 + (maxSpeedKmh > 22 ? 6 : 0))));
     const recordedDate = new Date(pts[0].timeMs).toISOString().split('T')[0];
 
+    // 등록된 구장 중 반경 250m 이내 구장이 있으면 자동 매칭
+    const matchedPitch = allGpsPitches.find(pitch => {
+      if (!pitch?.center) return false;
+      return calcHaversineMeters(meanLat, meanLon, pitch.center.lat, pitch.center.lon) <= 250;
+    });
+    if (matchedPitch) {
+      setGpsSelectedPitchId(matchedPitch.id);
+    }
+
     return {
       id: 'gps_' + Date.now(),
       title,
       date: recordedDate,
+      centerLat: Number(meanLat.toFixed(6)),
+      centerLon: Number(meanLon.toFixed(6)),
+      matchedPitchId: matchedPitch?.id || null,
       totalDistanceKm,
       durationSec: Math.round(durationSec),
       maxSpeedKmh: Number(maxSpeedKmh.toFixed(1)),
@@ -1410,9 +1526,10 @@ export default function App() {
   };
 
   const loadSampleGpsSession = () => {
-    // 실제 축구 1쿼터(25분) 미드필더/윙어 움직임을 모사한 정교한 샘플 시뮬레이션
-    const baseLat = 37.5665;
-    const baseLon = 126.9780;
+    // 실제 축구 1쿼터(25분) 미드필더/윙어 움직임을 모사한 정교한 샘플 시뮬레이션 (서울월드컵경기장 실제 좌표 위에서 생성)
+    const activePitch = allGpsPitches.find(p => p.id === gpsSelectedPitchId) || defaultSamplePitch;
+    const baseLat = activePitch?.center?.lat || 37.56826;
+    const baseLon = activePitch?.center?.lon || 126.89724;
     const rawPoints = [];
     const startMs = Date.now() - 25 * 60 * 1000;
     let curX = 0; // -28m ~ +28m
@@ -1554,6 +1671,16 @@ export default function App() {
   const getTransformedPitchPoint = (pt) => {
     let x = pt.x;
     let y = pt.y;
+    if (gpsSelectedPitchId && gpsSelectedPitchId !== 'auto' && Number.isFinite(pt.lat) && Number.isFinite(pt.lon)) {
+      const targetPitch = allGpsPitches.find(p => p.id === gpsSelectedPitchId);
+      if (targetPitch) {
+        const projected = projectLatLonToPitch(pt.lat, pt.lon, targetPitch);
+        if (projected) {
+          x = projected.x;
+          y = projected.y;
+        }
+      }
+    }
     if (gpsRotate90) {
       const tmp = x;
       x = 100 - y;
@@ -1782,7 +1909,7 @@ export default function App() {
       ctx.textBaseline = 'middle';
       ctx.fillText(label, bx + tw / 2, by + 9);
     }
-  }, [activeTab, gpsSession, gpsViewMode, gpsFlipVertical, gpsRotate90, gpsReplayProgress]);
+  }, [activeTab, gpsSession, gpsViewMode, gpsFlipVertical, gpsRotate90, gpsReplayProgress, gpsSelectedPitchId, allGpsPitches]);
 
   // 2D 동선 리플레이 애니메이션 루프
   useEffect(() => {
@@ -1876,6 +2003,241 @@ export default function App() {
         setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
       }
     }, 300);
+  };
+
+  // ================= 위성지도 기반 구장(꼭짓점 4곳) 등록/관리 =================
+  const updateMapOverlaysFromCorners = (corners) => {
+    const L = window.L;
+    const map = pitchMapInstanceRef.current;
+    if (!L || !map || !corners || corners.length < 4) return;
+    const latlngs = corners.map(c => [c.lat, c.lon]);
+    if (pitchMapPolygonRef.current) {
+      pitchMapPolygonRef.current.setLatLngs(latlngs);
+    } else {
+      pitchMapPolygonRef.current = L.polygon(latlngs, {
+        color: '#10B981',
+        weight: 2.5,
+        fillColor: '#10B981',
+        fillOpacity: 0.22
+      }).addTo(map);
+    }
+    const midLeft = [(corners[0].lat + corners[3].lat) / 2, (corners[0].lon + corners[3].lon) / 2];
+    const midRight = [(corners[1].lat + corners[2].lat) / 2, (corners[1].lon + corners[2].lon) / 2];
+    if (pitchMapMidLineRef.current) {
+      pitchMapMidLineRef.current.setLatLngs([midLeft, midRight]);
+    } else {
+      pitchMapMidLineRef.current = L.polyline([midLeft, midRight], {
+        color: '#FFFFFF',
+        weight: 2,
+        dashArray: '5, 5',
+        opacity: 0.85
+      }).addTo(map);
+    }
+  };
+
+  const applyCornersToSatelliteMap = (corners, flyToCenter = false) => {
+    setDraftPitchCorners(corners);
+    const L = window.L;
+    const map = pitchMapInstanceRef.current;
+    if (!L || !map || !corners || corners.length < 4) return;
+
+    pitchMapMarkersRef.current.forEach(m => map.removeLayer(m));
+    pitchMapMarkersRef.current = [];
+
+    const labels = ['1.좌상(공격)', '2.우상(공격)', '3.우하(수비)', '4.좌하(수비)'];
+    const colors = ['#EF4444', '#EF4444', '#3B82F6', '#3B82F6'];
+
+    corners.forEach((c, idx) => {
+      const icon = L.divIcon({
+        className: 'custom-pitch-corner',
+        html: `<div style="background:${colors[idx]};color:#fff;font-weight:900;font-size:10px;padding:2px 6px;border-radius:999px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.6);white-space:nowrap;transform:translate(-50%,-50%);">${labels[idx]}</div>`,
+        iconSize: [0, 0]
+      });
+      const marker = L.marker([c.lat, c.lon], { icon, draggable: true }).addTo(map);
+      marker.on('drag', () => {
+        const updated = pitchMapMarkersRef.current.map(mk => {
+          const ll = mk.getLatLng();
+          return { lat: Number(ll.lat.toFixed(6)), lon: Number(ll.lng.toFixed(6)) };
+        });
+        setDraftPitchCorners(updated);
+        updateMapOverlaysFromCorners(updated);
+      });
+      pitchMapMarkersRef.current.push(marker);
+    });
+
+    updateMapOverlaysFromCorners(corners);
+
+    if (flyToCenter) {
+      const cLat = (corners[0].lat + corners[1].lat + corners[2].lat + corners[3].lat) / 4;
+      const cLon = (corners[0].lon + corners[1].lon + corners[2].lon + corners[3].lon) / 4;
+      map.setView([cLat, cLon], 18);
+    }
+  };
+
+  useEffect(() => {
+    if (!pitchManagerModal) {
+      if (pitchMapInstanceRef.current) {
+        pitchMapInstanceRef.current.remove();
+        pitchMapInstanceRef.current = null;
+        pitchMapMarkersRef.current = [];
+        pitchMapPolygonRef.current = null;
+        pitchMapMidLineRef.current = null;
+      }
+      return;
+    }
+
+    let isCancelled = false;
+    loadLeaflet().then((L) => {
+      if (isCancelled || !pitchMapContainerRef.current) return;
+      if (pitchMapInstanceRef.current) {
+        pitchMapInstanceRef.current.remove();
+        pitchMapInstanceRef.current = null;
+      }
+
+      const activePitch = allGpsPitches.find(p => p.id === gpsSelectedPitchId);
+      const initLat = gpsSession?.centerLat || activePitch?.center?.lat || 37.56826;
+      const initLon = gpsSession?.centerLon || activePitch?.center?.lon || 126.89724;
+
+      const map = L.map(pitchMapContainerRef.current, {
+        center: [initLat, initLon],
+        zoom: 18,
+        zoomControl: true
+      });
+      pitchMapInstanceRef.current = map;
+
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 20,
+        attribution: 'Esri Satellite'
+      }).addTo(map);
+
+      // 현재 불러온 GPX 경로가 있으면 위성지도 위에 하늘색 궤적으로 표시
+      const gpsLatLngs = (gpsSession?.points || [])
+        .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lon))
+        .map(p => [p.lat, p.lon]);
+      if (gpsLatLngs.length > 2) {
+        L.polyline(gpsLatLngs, { color: '#38BDF8', weight: 2.5, opacity: 0.75 }).addTo(map);
+      }
+
+      const initialCorners = (activePitch && !gpsSession?.centerLat)
+        ? activePitch.corners
+        : createDefaultCornersAround(initLat, initLon, 96, 62);
+
+      applyCornersToSatelliteMap(initialCorners, false);
+      setTimeout(() => map.invalidateSize(), 200);
+    }).catch(console.error);
+
+    return () => { isCancelled = true; };
+  }, [pitchManagerModal]);
+
+  const placeCornersAtMapCenter = () => {
+    const map = pitchMapInstanceRef.current;
+    if (!map) return;
+    const center = map.getCenter();
+    const corners = createDefaultCornersAround(center.lat, center.lng, 96, 62);
+    applyCornersToSatelliteMap(corners, false);
+  };
+
+  const rotateDraftCorners = (deg = 30) => {
+    if (!draftPitchCorners || draftPitchCorners.length < 4) return;
+    const cLat = draftPitchCorners.reduce((s, c) => s + c.lat, 0) / 4;
+    const cLon = draftPitchCorners.reduce((s, c) => s + c.lon, 0) / 4;
+    const cosLat = Math.cos((cLat * Math.PI) / 180);
+    const rad = (deg * Math.PI) / 180;
+    const cosR = Math.cos(rad), sinR = Math.sin(rad);
+
+    const rotated = draftPitchCorners.map(c => {
+      const mx = (c.lon - cLon) * 111320 * cosLat;
+      const my = (c.lat - cLat) * 110540;
+      const rx = mx * cosR - my * sinR;
+      const ry = mx * sinR + my * cosR;
+      return {
+        lat: Number((cLat + ry / 110540).toFixed(6)),
+        lon: Number((cLon + rx / (111320 * cosLat)).toFixed(6))
+      };
+    });
+    applyCornersToSatelliteMap(rotated, false);
+  };
+
+  const handlePitchPlaceSearch = async (e) => {
+    e.preventDefault();
+    const q = pitchSearchQuery.trim();
+    if (!q) return;
+    setIsPitchSearching(true);
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=kr&limit=5&q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      setPitchSearchResults(Array.isArray(data) ? data : []);
+      if (data && data.length > 0 && pitchMapInstanceRef.current) {
+        const first = data[0];
+        const lat = parseFloat(first.lat);
+        const lon = parseFloat(first.lon);
+        pitchMapInstanceRef.current.setView([lat, lon], 18);
+        applyCornersToSatelliteMap(createDefaultCornersAround(lat, lon, 96, 62), false);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsPitchSearching(false);
+    }
+  };
+
+  const savePitchToTeam = async () => {
+    if (!activeTeamId || !draftPitchCorners || draftPitchCorners.length < 4 || isProcessing) return;
+    const name = pitchFormName.trim();
+    if (!name) {
+      setSystemAlert({ isOpen: true, message: '구장 이름을 입력해주세요. (예: 노원 마들구장)' });
+      return;
+    }
+    const cLat = Number((draftPitchCorners.reduce((s, c) => s + c.lat, 0) / 4).toFixed(6));
+    const cLon = Number((draftPitchCorners.reduce((s, c) => s + c.lon, 0) / 4).toFixed(6));
+    const newPitch = {
+      id: 'pitch_' + Date.now(),
+      name,
+      center: { lat: cLat, lon: cLon },
+      corners: draftPitchCorners,
+      createdAt: new Date().toISOString()
+    };
+
+    setIsProcessing(true);
+    try {
+      const updated = [newPitch, ...savedGpsPitches];
+      await setDoc(doc(db, 'memos', `${activeTeamId}___gps_pitches__`), {
+        teamId: activeTeamId,
+        date: '__gps_pitches__',
+        content: JSON.stringify(updated)
+      });
+      setGpsSelectedPitchId(newPitch.id);
+      setPitchFormName('');
+      setPitchManagerModal(false);
+      setSystemAlert({ isOpen: true, message: `'${name}' 구장(위성 4점 좌표)이 등록 및 적용되었습니다!` });
+    } catch (err) {
+      console.error(err);
+      setSystemAlert({ isOpen: true, message: '구장 저장 중 오류가 발생했습니다.' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const requestDeletePitch = (pitchId) => {
+    setSystemConfirm({
+      isOpen: true,
+      message: '이 구장 정보를 삭제하시겠습니까?',
+      onConfirm: async () => {
+        if (!activeTeamId || isProcessing) return;
+        setIsProcessing(true);
+        try {
+          const updated = savedGpsPitches.filter(p => p.id !== pitchId);
+          await setDoc(doc(db, 'memos', `${activeTeamId}___gps_pitches__`), {
+            teamId: activeTeamId,
+            date: '__gps_pitches__',
+            content: JSON.stringify(updated)
+          });
+          if (gpsSelectedPitchId === pitchId) setGpsSelectedPitchId('auto');
+        } finally {
+          setIsProcessing(false);
+        }
+      }
+    });
   };
 
   const StandingsTable = ({ match, isLarge }) => {
@@ -3838,6 +4200,29 @@ const renderGoalFlowModal = () => {
                   🧪 샘플 기록 체험
                 </button>
               </div>
+
+              {/* 구장(위성 4점 좌표) 선택 및 등록 바 */}
+              <div className="pt-2 border-t border-slate-700/70 flex items-center gap-2">
+                <select
+                  value={gpsSelectedPitchId}
+                  onChange={(e) => setGpsSelectedPitchId(e.target.value)}
+                  className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-white outline-none"
+                >
+                  <option value="auto">⚡ 자동 영역 맞춤 (구장 미지정)</option>
+                  {allGpsPitches.map(pitch => (
+                    <option key={pitch.id} value={pitch.id}>
+                      🏟️ {pitch.name} (위성 4점 매핑)
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setPitchManagerModal(true)}
+                  className="bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 px-3 py-2 rounded-xl text-xs font-bold transition shrink-0 whitespace-nowrap flex items-center gap-1"
+                >
+                  <span>🏟️</span> 구장 등록/관리
+                </button>
+              </div>
             </div>
 
             {/* 현재 분석된 GPS 세션 결과 카드 */}
@@ -3899,8 +4284,11 @@ const renderGoalFlowModal = () => {
                           {currentTeamPlayers.find(p => p.id === gpsSelectedPlayerId)?.name || gpsSession.playerName || 'GPS 활동 리포트'}
                         </span>
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-1">
-                        {gpsSession.date} · {gpsSession.title}
+                      <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5 flex-wrap">
+                        <span>{gpsSession.date} · {gpsSession.title}</span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${gpsSelectedPitchId !== 'auto' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'}`}>
+                          {gpsSelectedPitchId !== 'auto' ? `🏟️ ${allGpsPitches.find(p => p.id === gpsSelectedPitchId)?.name || '지정 구장'}` : '⚡ 자동 맞춤'}
+                        </span>
                       </div>
                     </div>
                     <div className="text-right bg-slate-800/90 px-3 py-1.5 rounded-2xl border border-slate-700">
@@ -4323,6 +4711,166 @@ const renderGoalFlowModal = () => {
             >
               확인했어요
             </button>
+          </div>
+        </div>
+      )}
+
+      {pitchManagerModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[210] p-3 sm:p-4 animate-in fade-in zoom-in-95">
+          <div className="bg-slate-800 p-4 sm:p-5 rounded-3xl w-full max-w-md border border-slate-700 shadow-2xl max-h-[92vh] flex flex-col relative">
+            <div className="flex justify-between items-center mb-3 shrink-0">
+              <div>
+                <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">
+                  <span>🏟️</span> 위성지도 구장(코너 4곳) 등록
+                </h2>
+                <p className="text-[11px] text-slate-400">위성사진의 축구장 네 귀퉁이에 1~4번 핀을 맞춰주세요</p>
+              </div>
+              <button onClick={() => setPitchManagerModal(false)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-3 pr-0.5 hide-scrollbar">
+              {/* 구장 위치 검색 바 */}
+              <form onSubmit={handlePitchPlaceSearch} className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={pitchSearchQuery}
+                  onChange={(e) => setPitchSearchQuery(e.target.value)}
+                  placeholder="구장/학교/공원 검색 (예: 마들스타디움)"
+                  className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={isPitchSearching}
+                  className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition shrink-0 whitespace-nowrap"
+                >
+                  {isPitchSearching ? '검색중..' : '🔍 검색'}
+                </button>
+              </form>
+
+              {/* 검색 결과 리스트 */}
+              {pitchSearchResults.length > 0 && (
+                <div className="bg-slate-900 border border-slate-700 rounded-xl p-1.5 max-h-28 overflow-y-auto space-y-1">
+                  {pitchSearchResults.map((item, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        const lat = parseFloat(item.lat);
+                        const lon = parseFloat(item.lon);
+                        if (pitchMapInstanceRef.current) {
+                          pitchMapInstanceRef.current.setView([lat, lon], 18);
+                          applyCornersToSatelliteMap(createDefaultCornersAround(lat, lon, 96, 62), false);
+                        }
+                        if (!pitchFormName) setPitchFormName(item.display_name.split(',')[0]);
+                        setPitchSearchResults([]);
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-[11px] text-slate-200 truncate block"
+                    >
+                      📍 {item.display_name}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* 위성지도 컨트롤 버튼 바 */}
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  onClick={placeCornersAtMapCenter}
+                  className="py-1.5 px-2 bg-slate-900 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 rounded-lg text-[11px] font-bold transition whitespace-nowrap"
+                >
+                  🎯 화면중앙에 틀 배치
+                </button>
+                <button
+                  type="button"
+                  onClick={() => rotateDraftCorners(30)}
+                  className="py-1.5 px-2 bg-slate-900 hover:bg-slate-700 text-amber-300 border border-amber-500/30 rounded-lg text-[11px] font-bold transition whitespace-nowrap"
+                >
+                  🔄 구장 틀 회전
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (gpsSession?.centerLat && gpsSession?.centerLon && pitchMapInstanceRef.current) {
+                      pitchMapInstanceRef.current.setView([gpsSession.centerLat, gpsSession.centerLon], 18);
+                      applyCornersToSatelliteMap(createDefaultCornersAround(gpsSession.centerLat, gpsSession.centerLon, 96, 62), false);
+                    } else if (navigator.geolocation) {
+                      navigator.geolocation.getCurrentPosition((pos) => {
+                        const { latitude, longitude } = pos.coords;
+                        if (pitchMapInstanceRef.current) {
+                          pitchMapInstanceRef.current.setView([latitude, longitude], 18);
+                          applyCornersToSatelliteMap(createDefaultCornersAround(latitude, longitude, 96, 62), false);
+                        }
+                      });
+                    }
+                  }}
+                  className="py-1.5 px-2 bg-slate-900 hover:bg-slate-700 text-blue-400 border border-blue-500/30 rounded-lg text-[11px] font-bold transition whitespace-nowrap"
+                >
+                  {gpsSession?.centerLat ? '📂 GPX 위치로 이동' : '📍 내 위치로 이동'}
+                </button>
+              </div>
+
+              {/* 위성지도 영역 */}
+              <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-500/40 shadow-inner bg-slate-950">
+                <div ref={pitchMapContainerRef} className="w-full h-64 sm:h-72 z-10" />
+                <div className="bg-slate-900/95 px-3 py-1.5 text-[10px] text-slate-300 flex items-center justify-between border-t border-slate-800">
+                  <span>🔴 <strong className="text-red-400">1·2번 핀</strong>: 공격 진영 코너</span>
+                  <span>🔵 <strong className="text-blue-400">3·4번 핀</strong>: 수비 진영 코너 (드래그 이동)</span>
+                </div>
+              </div>
+
+              {/* 구장 이름 입력 및 저장 */}
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3 space-y-2">
+                <div className="text-xs font-bold text-white">새 구장으로 저장하기</div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={pitchFormName}
+                    onChange={(e) => setPitchFormName(e.target.value)}
+                    placeholder="구장 이름 입력 (예: 마들스타디움)"
+                    className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={savePitchToTeam}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition shrink-0 whitespace-nowrap shadow"
+                  >
+                    💾 구장 저장
+                  </button>
+                </div>
+              </div>
+
+              {/* 등록된 구장 목록 */}
+              <div className="bg-slate-900/70 border border-slate-700/70 rounded-2xl p-3 space-y-2">
+                <div className="text-xs font-bold text-slate-300">등록된 구장 목록 ({allGpsPitches.length})</div>
+                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                  {allGpsPitches.map(p => (
+                    <div
+                      key={p.id}
+                      onClick={() => {
+                        setGpsSelectedPitchId(p.id);
+                        applyCornersToSatelliteMap(p.corners, true);
+                      }}
+                      className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition ${gpsSelectedPitchId === p.id ? 'bg-emerald-500/15 border-emerald-500/40' : 'bg-slate-800/80 border-slate-700 hover:border-slate-600'}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white truncate">🏟️ {p.name}</div>
+                        <div className="text-[10px] text-slate-400">터치하여 위성지도 위치 확인 및 적용</div>
+                      </div>
+                      {!p.isPreset && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); requestDeletePitch(p.id); }}
+                          className="p-1.5 text-slate-400 hover:text-red-400 transition shrink-0"
+                        >
+                          <Trash2 size={14}/>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
