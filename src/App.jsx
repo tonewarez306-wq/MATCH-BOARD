@@ -284,6 +284,7 @@ export default function App() {
   const [pitchFormName, setPitchFormName] = useState('');
   const [pitchSearchQuery, setPitchSearchQuery] = useState('');
   const [pitchSearchResults, setPitchSearchResults] = useState([]);
+  const [pitchSearchMessage, setPitchSearchMessage] = useState('');
   const [isPitchSearching, setIsPitchSearching] = useState(false);
   const [draftPitchCorners, setDraftPitchCorners] = useState(null); // [{lat, lon} x 4]
   const [pitchMapStyle, setPitchMapStyle] = useState('naver_sat'); // 'naver_sat' | 'naver_basic' | 'google_sat'
@@ -2217,35 +2218,405 @@ export default function App() {
     applyCornersToSatelliteMap(rotated, false);
   };
 
+  const KOREA_SOCCER_PLACE_PRESETS = useMemo(() => ([
+    { title: '능내근린공원 축구장 (능내공원)', address: '인천 검단구(서구) 검단로540번길 41 (마전동 657-11)', category: '근린공원·축구장', lat: 37.60093, lon: 126.66730, keywords: ['능내근린공원', '능내공원', '능내공원관리사무소', '능내축구장', '검단로540번길 41', '마전동 축구장'] },
+    { title: '인천서구검단다목적체육관', address: '인천 검단구(서구) 검단로540번길 18 (마전동)', category: '체육관·운동장', lat: 37.60015, lon: 126.66642, keywords: ['검단다목적체육관', '인천서구검단다목적체육관'] },
+    { title: '마들스타디움 (마들체육공원 축구장)', address: '서울 노원구 덕릉로 450 (상계동)', category: '축구장·체육공원', lat: 37.64438, lon: 127.05742, keywords: ['마들스타디움', '마들체육공원', '마들구장', '노원마들'] },
+    { title: '초안산근린공원 인조잔디축구장', address: '서울 노원구 마들로5가길 103 (월계동)', category: '근린공원·축구장', lat: 37.63278, lon: 127.05182, keywords: ['초안산근린공원', '초안산공원', '초안산축구장', '초안산구장'] },
+    { title: '불암산종합스타디움 (불암산체육공원)', address: '서울 노원구 한글비석로 68 (중계동)', category: '축구장·체육공원', lat: 37.64312, lon: 127.08195, keywords: ['불암산스타디움', '불암산체육공원', '불암산종합스타디움', '불암산축구장'] },
+    { title: '육사체육관·육군사관학교 축구장', address: '서울 노원구 화랑로 574 (공릉동)', category: '운동장', lat: 37.62381, lon: 127.09245, keywords: ['육사축구장', '육군사관학교', '화랑구장'] },
+    { title: '서울월드컵경기장 보조구장', address: '서울 마포구 월드컵로 240 (성산동)', category: '축구장', lat: 37.56982, lon: 126.89925, keywords: ['상암보조구장', '서울월드컵보조구장', '월드컵공원축구장'] },
+    { title: '난지천공원 인조잔디축구장', address: '서울 마포구 상암동 487-257', category: '공원·축구장', lat: 37.57462, lon: 126.88514, keywords: ['난지천공원', '난지천축구장', '난지축구장'] },
+    { title: '보라매공원 인조잔디축구장', address: '서울 동작구 여의대방로20길 33 (신대방동)', category: '근린공원·축구장', lat: 37.49386, lon: 126.91972, keywords: ['보라매공원', '보라매근린공원', '보라매축구장'] },
+    { title: '효창운동장', address: '서울 용산구 임정로 29 (효창동)', category: '축구장·운동장', lat: 37.54356, lon: 126.96124, keywords: ['효창운동장', '효창공원', '효창구장'] },
+    { title: '목동종합운동장 주경기장', address: '서울 양천구 안양천로 939 (목동)', category: '운동장', lat: 37.53028, lon: 126.88062, keywords: ['목동운동장', '목동종합운동장', '목동구장'] },
+    { title: '잠실종합운동장 보조경기장', address: '서울 송파구 올림픽로 25 (잠실동)', category: '운동장', lat: 37.51582, lon: 127.07465, keywords: ['잠실종합운동장', '잠실보조구장', '잠실운동장'] },
+    { title: '올림픽공원 벨로드롬·축구장', address: '서울 송파구 올림픽로 424 (방이동)', category: '공원·축구장', lat: 37.52068, lon: 127.12152, keywords: ['올림픽공원', '올림픽공원축구장'] },
+    { title: '살곶이체육공원 축구장', address: '서울 성동구 사근동 102-28', category: '체육공원·축구장', lat: 37.55294, lon: 127.04682, keywords: ['살곶이체육공원', '살곶이공원', '살곶이축구장'] },
+    { title: '어린이대공원 축구장', address: '서울 광진구 능동로 216 (능동)', category: '공원·축구장', lat: 37.54985, lon: 127.08192, keywords: ['어린이대공원', '어린이대공원축구장'] },
+    { title: '아차산배수지체육공원 축구장', address: '서울 광진구 천호대로 670 (구의동)', category: '체육공원·축구장', lat: 37.55042, lon: 127.09284, keywords: ['아차산배수지', '아차산배수지체육공원', '아차산축구장'] },
+    { title: '중랑구립잔디운동장', address: '서울 중랑구 신내로15길 189 (망우동)', category: '축구장', lat: 37.60952, lon: 127.10724, keywords: ['중랑구립잔디운동장', '중랑구립운동장', '중랑축구장'] },
+    { title: '용마폭포공원 축구장', address: '서울 중랑구 용마산로 250-12 (면목동)', category: '공원·축구장', lat: 37.57364, lon: 127.09062, keywords: ['용마폭포공원', '용마공원', '용마축구장'] },
+    { title: '다락원체육공원 축구장', address: '경기 의정부시 평화로 49 (호원동)', category: '체육공원·축구장', lat: 37.69084, lon: 127.04812, keywords: ['다락원체육공원', '다락원공원', '다락원축구장', '서울다락원'] },
+    { title: '계양아시아드양궁장·축구장', address: '인천 계양구 봉오대로 855 (서운동)', category: '체육공원·축구장', lat: 37.53052, lon: 126.74986, keywords: ['계양아시아드', '서운체육공원', '계양축구장'] },
+    { title: '인천아시아드주경기장 보조구장', address: '인천 서구 봉수대로 806 (연희동)', category: '운동장', lat: 37.54712, lon: 126.66725, keywords: ['인천아시아드', '연희근린공원', '아시아드보조구장'] },
+    { title: '청라근린공원·청라체육공원 축구장', address: '인천 서구 청라동 105-145', category: '근린공원·축구장', lat: 37.53362, lon: 126.63452, keywords: ['청라근린공원', '청라체육공원', '청라공원', '청라축구장'] },
+    { title: '수도권매립지 드림파크 체육공원 축구장', address: '인천 서구 거월로 61 (백석동)', category: '체육공원·축구장', lat: 37.57784, lon: 126.64762, keywords: ['드림파크', '드림파크축구장', '백석체육공원'] },
+    { title: '문학경기장 보조경기장', address: '인천 미추홀구 매소홀로 618 (문학동)', category: '운동장', lat: 37.43628, lon: 126.69324, keywords: ['문학경기장', '문학보조구장', '인천문학'] },
+    { title: '송도달빛축제공원·송도체육센터 축구장', address: '인천 연수구 센트럴로 350 (송도동)', category: '공원·축구장', lat: 37.40684, lon: 126.62612, keywords: ['송도달빛축제공원', '송도달빛공원', '송도축구장', '송도LNG축구장'] },
+    { title: '수원월드컵경기장 보조구장', address: '경기 수원시 팔달구 월드컵로 310 (우만동)', category: '축구장', lat: 37.28694, lon: 127.03912, keywords: ['수원월드컵보조구장', '수원월드컵경기장'] },
+    { title: '탄천종합운동장', address: '경기 성남시 분당구 탄천로 215 (야탑동)', category: '운동장', lat: 37.41018, lon: 127.12138, keywords: ['탄천종합운동장', '탄천운동장', '야탑축구장'] },
+    { title: '고양종합운동장 보조경기장', address: '경기 고양시 일산서구 중앙로 1601 (대화동)', category: '운동장', lat: 37.67492, lon: 126.74318, keywords: ['고양종합운동장', '대화레포츠공원', '고양보조구장'] },
+    { title: '부천종합운동장 보조구장', address: '경기 부천시 원미구 소사로 482 (춘의동)', category: '운동장', lat: 37.50254, lon: 126.79812, keywords: ['부천종합운동장', '부천보조구장'] }
+  ]), []);
+
+  const buildKoreanSearchQueries = (rawQuery) => {
+    const q = rawQuery.trim();
+    const set = new Set([q]);
+
+    // 1. 공백 제거 / 공백 분리 변형
+    const noSpace = q.replace(/\s+/g, '');
+    if (noSpace.length >= 2) set.add(noSpace);
+
+    // 2. '근린공원', '체육공원', '어린이공원', '수변공원', '문화공원', '역사공원', '생태공원' -> '공원' 변환
+    // (네이버지도에서는 '능내근린공원'으로 표기되지만 OSM/ArcGIS 등에서는 '능내공원'으로 등록된 경우가 매우 많음)
+    const parkReplaced = q.replace(/(근린|체육|어린이|수변|문화|역사|생태|도시자연|소)공원/g, '공원');
+    if (parkReplaced !== q) {
+      set.add(parkReplaced);
+      set.add(parkReplaced.replace(/\s+/g, ''));
+    }
+
+    // 3. '인조잔디축구장', '축구장', '풋살장', '다목적구장', '운동장', '구장', '관리사무소' 접미어 분리
+    const strippedFacility = parkReplaced
+      .replace(/(인조잔디)?(축구장|풋살장|다목적구장|보조경기장|보조구장|운동장|구장|관리사무소)$/g, '')
+      .trim();
+    if (strippedFacility && strippedFacility.length >= 2) {
+      set.add(strippedFacility);
+      if (!strippedFacility.endsWith('공원') && q.includes('공원')) {
+        set.add(`${strippedFacility}공원`);
+      }
+    }
+
+    // 4. 'OO근린공원'에서 핵심 지명('능내' 등) + '공원' 조합
+    const coreParkMatch = noSpace.match(/^(.+?)(근린|체육|어린이|수변|문화|역사|생태)?공원/);
+    if (coreParkMatch && coreParkMatch[1] && coreParkMatch[1].length >= 2) {
+      set.add(`${coreParkMatch[1]}공원`);
+      set.add(`${coreParkMatch[1]}근린공원`);
+    }
+
+    // 5. 신설/개편 행정구역 호환 (예: '인천 검단구' <-> '인천 서구')
+    if (q.includes('검단구')) {
+      set.add(q.replace(/검단구/g, '서구'));
+    }
+    // 도로명 주소 뒤에 건물명이 붙은 경우 도로명+번지까지만 추출 (예: '인천 검단구 검단로540번길 41 능내공원관리사무소')
+    const roadMatch = q.match(/([가-힣]+(?:로|길)\s*\d+(?:-\d+)?)/);
+    if (roadMatch) {
+      set.add(roadMatch[1]);
+      if (q.includes('인천')) set.add(`인천 서구 ${roadMatch[1]}`);
+    }
+
+    return Array.from(set).filter(Boolean).slice(0, 6);
+  };
+
+  const parseNaverSearchPayload = (data, queryText) => {
+    const items = [];
+    if (!data) return items;
+
+    // 1. /api/naver-search 서버리스 응답 형태
+    if (Array.isArray(data.items)) {
+      data.items.forEach((it) => {
+        const lat = parseFloat(it.lat ?? it.y);
+        const lon = parseFloat(it.lon ?? it.x);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          items.push({
+            title: it.title || it.name || queryText,
+            address: it.address || it.roadAddress || '',
+            category: it.category || '',
+            lat,
+            lon,
+            display_name: it.display_name || (it.address ? `${it.title || it.name} (${it.address})` : (it.title || it.name))
+          });
+        }
+      });
+    }
+
+    // 2. map.naver.com/p/api/search/allSearch 응답 형태
+    const placeList = data?.result?.place?.list || [];
+    placeList.forEach((p) => {
+      const lat = parseFloat(p.y);
+      const lon = parseFloat(p.x);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        const addr = p.roadAddress || p.address || p.abbrAddress || '';
+        const cat = Array.isArray(p.category) ? p.category.join('·') : (p.category || '');
+        items.push({
+          title: p.name || queryText,
+          address: addr,
+          category: cat,
+          lat,
+          lon,
+          display_name: addr ? `${p.name} (${addr})` : p.name
+        });
+      }
+    });
+
+    const roadAddrList = data?.result?.address?.roadAddress?.list || [];
+    const jibunAddrList = data?.result?.address?.jibunsAddress?.list || [];
+    [...roadAddrList, ...jibunAddrList].forEach((a) => {
+      const lat = parseFloat(a.y);
+      const lon = parseFloat(a.x);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        const fullAddr = a.fullAddress || a.roadAddress || a.jibunAddress || a.name || queryText;
+        items.push({
+          title: a.siteName || a.name || fullAddr,
+          address: fullAddr,
+          category: '주소',
+          lat,
+          lon,
+          display_name: fullAddr
+        });
+      }
+    });
+
+    // 3. map.naver.com/p/api/search/instant-search 응답 형태
+    const instantPlaces = data?.result?.place?.items || (Array.isArray(data?.place) ? data.place : []);
+    instantPlaces.forEach((p) => {
+      const lat = parseFloat(p.y);
+      const lon = parseFloat(p.x);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        const name = p.name || p.title || queryText;
+        const addr = p.roadAddress || p.address || p.jibunAddress || '';
+        items.push({
+          title: name,
+          address: addr,
+          category: p.category || p.type || '',
+          lat,
+          lon,
+          display_name: addr ? `${name} (${addr})` : name
+        });
+      }
+    });
+
+    const instantAddrs = data?.result?.address?.items || (Array.isArray(data?.address) ? data.address : []);
+    instantAddrs.forEach((a) => {
+      const lat = parseFloat(a.y);
+      const lon = parseFloat(a.x);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        const fullAddr = a.roadAddress || a.jibunAddress || a.fullAddress || a.title || queryText;
+        items.push({
+          title: fullAddr,
+          address: fullAddr,
+          category: '주소',
+          lat,
+          lon,
+          display_name: fullAddr
+        });
+      }
+    });
+
+    return items;
+  };
+
+  const fetchWithTimeout = async (url, options = {}, timeoutMs = 3500) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      return res;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   const handlePitchPlaceSearch = async (e) => {
     e.preventDefault();
     const q = pitchSearchQuery.trim();
     if (!q) return;
 
-    // 위도,경도 좌표 직접 입력 지원 (예: 37.654, 127.056)
-    const coordMatch = q.match(/^(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)$/);
+    setPitchSearchMessage('');
+
+    // 1. 위도,경도 좌표 직접 입력 지원 (예: 37.6009, 126.6673)
+    const coordMatch = q.match(/(-?\d{2}\.\d{3,})\s*[,\s]\s*(-?\d{2,3}\.\d{3,})/);
     if (coordMatch && pitchMapInstanceRef.current) {
       const lat = parseFloat(coordMatch[1]);
       const lon = parseFloat(coordMatch[2]);
-      pitchMapInstanceRef.current.setView([lat, lon], 18);
-      applyCornersToSatelliteMap(createDefaultCornersAround(lat, lon, 96, 62), false);
-      return;
+      if (lat >= 32 && lat <= 39.5 && lon >= 124 && lon <= 132) {
+        pitchMapInstanceRef.current.setView([lat, lon], 18);
+        applyCornersToSatelliteMap(createDefaultCornersAround(lat, lon, 96, 62), false);
+        setPitchSearchResults([]);
+        return;
+      }
     }
 
     setIsPitchSearching(true);
     try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&accept-language=ko&countrycodes=kr&limit=6&q=${encodeURIComponent(q)}`);
-      const data = await res.json();
-      setPitchSearchResults(Array.isArray(data) ? data : []);
-      if (data && data.length > 0 && pitchMapInstanceRef.current) {
-        const first = data[0];
-        const lat = parseFloat(first.lat);
-        const lon = parseFloat(first.lon);
-        pitchMapInstanceRef.current.setView([lat, lon], 18);
-        applyCornersToSatelliteMap(createDefaultCornersAround(lat, lon, 96, 62), false);
+      const queryVariants = buildKoreanSearchQueries(q);
+      const qNorm = q.replace(/\s+/g, '').toLowerCase();
+      const collected = [];
+
+      // A. 내장 주요 국내 근린공원·축구장 프리셋 사전 즉시 매칭
+      KOREA_SOCCER_PLACE_PRESETS.forEach((preset) => {
+        const hit =
+          preset.title.replace(/\s+/g, '').toLowerCase().includes(qNorm) ||
+          preset.address.replace(/\s+/g, '').toLowerCase().includes(qNorm) ||
+          preset.keywords.some((kw) => {
+            const kwNorm = kw.replace(/\s+/g, '').toLowerCase();
+            return kwNorm.includes(qNorm) || qNorm.includes(kwNorm);
+          });
+        if (hit) {
+          collected.push({
+            title: preset.title,
+            address: preset.address,
+            category: preset.category,
+            lat: preset.lat,
+            lon: preset.lon,
+            display_name: `${preset.title} · ${preset.address}`,
+            priority: 100
+          });
+        }
+      });
+
+      // B. 네이버 지도 검색 연동 (1순위: 자체 프록시/서버리스 -> 2순위: CORS 프록시 경유 네이버 instant-search/allSearch)
+      const fetchNaverResults = async () => {
+        // B-1. 로컬 Vite 프록시 또는 Vercel 서버리스 함수 시도
+        try {
+          const localRes = await fetchWithTimeout(`/api/naver-search?q=${encodeURIComponent(q)}`, {}, 2500);
+          if (localRes.ok) {
+            const contentType = localRes.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+              const json = await localRes.json();
+              const parsed = parseNaverSearchPayload(json, q);
+              if (parsed.length > 0) return parsed.map((it) => ({ ...it, priority: 95 }));
+            }
+          }
+        } catch {}
+
+        try {
+          const viteRes = await fetchWithTimeout(`/api/naver-map-search/allSearch?query=${encodeURIComponent(q)}&type=all&searchCoord=126.9780;37.5665&boundary=`, {}, 2500);
+          if (viteRes.ok) {
+            const contentType = viteRes.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+              const json = await viteRes.json();
+              const parsed = parseNaverSearchPayload(json, q);
+              if (parsed.length > 0) return parsed.map((it) => ({ ...it, priority: 95 }));
+            }
+          }
+        } catch {}
+
+        // B-2. 정적 호스팅/모바일 웹뷰 환경을 위한 공개 프록시 경유 네이버 지도 검색
+        const naverInstantUrl = `https://map.naver.com/p/api/search/instant-search?query=${encodeURIComponent(q)}&coords=37.5665,126.9780`;
+        const naverAllUrl = `https://map.naver.com/p/api/search/allSearch?query=${encodeURIComponent(q)}&type=all&searchCoord=126.9780;37.5665&boundary=`;
+        const proxyUrls = [
+          `https://corsproxy.io/?${encodeURIComponent(naverInstantUrl)}`,
+          `https://corsproxy.io/?${encodeURIComponent(naverAllUrl)}`,
+          `https://api.allorigins.win/raw?url=${encodeURIComponent(naverInstantUrl)}`,
+          `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(naverInstantUrl)}`
+        ];
+
+        const proxyAttempts = proxyUrls.map(async (pUrl) => {
+          const r = await fetchWithTimeout(pUrl, {}, 3200);
+          if (!r.ok) throw new Error('proxy fail');
+          const d = await r.json();
+          const items = parseNaverSearchPayload(d, q);
+          if (!items.length) throw new Error('empty');
+          return items.map((it) => ({ ...it, priority: 92 }));
+        });
+
+        try {
+          return await Promise.any(proxyAttempts);
+        } catch {
+          return [];
+        }
+      };
+
+      // C. ArcGIS Korea POI & 도로명주소 지오코더 (브라우저 CORS 공식 지원, '능내공원' 및 '검단로540번길 41' 등 국내 POI/주소 검색)
+      const fetchArcGisResults = async () => {
+        const arcVariants = queryVariants.slice(0, 3);
+        const responses = await Promise.allSettled(
+          arcVariants.map(async (vq, vIdx) => {
+            const url = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?SingleLine=${encodeURIComponent(vq)}&sourceCountry=KOR&langCode=ko&outFields=PlaceName,Place_addr,Match_addr,Type&maxLocations=6&f=json`;
+            const res = await fetchWithTimeout(url, {}, 3500);
+            if (!res.ok) return [];
+            const data = await res.json();
+            return (data?.candidates || []).map((c) => {
+              const lat = parseFloat(c.location?.y);
+              const lon = parseFloat(c.location?.x);
+              const title = c.attributes?.PlaceName || c.address || vq;
+              const addr = c.attributes?.Place_addr || c.attributes?.Match_addr || '';
+              return {
+                title,
+                address: addr !== title ? addr : '',
+                category: c.attributes?.Type || '장소/주소',
+                lat,
+                lon,
+                display_name: addr && addr !== title ? `${title} (${addr})` : title,
+                priority: 80 - vIdx * 3
+              };
+            });
+          })
+        );
+        return responses.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+      };
+
+      // D. OpenStreetMap Nominatim + 한국어 명칭 확장 검색 ('능내근린공원' -> '능내공원' 동시 조회)
+      const fetchNominatimResults = async () => {
+        const nomVariants = queryVariants.slice(0, 4);
+        const responses = await Promise.allSettled(
+          nomVariants.map(async (vq, vIdx) => {
+            const url = `https://nominatim.openstreetmap.org/search?format=json& addressdetails=1&accept-language=ko&countrycodes=kr&limit=6&q=${encodeURIComponent(vq)}`;
+            const res = await fetchWithTimeout(url, {}, 3500);
+            if (!res.ok) return [];
+            const data = await res.json();
+            if (!Array.isArray(data)) return [];
+            return data.map((item) => {
+              const parts = String(item.display_name || '').split(',').map((s) => s.trim()).filter(Boolean);
+              const title = item.name || parts[0] || vq;
+              const subAddr = parts.slice(1, 4).reverse().join(' ');
+              return {
+                title,
+                address: subAddr,
+                category: item.type || '',
+                lat: parseFloat(item.lat),
+                lon: parseFloat(item.lon),
+                display_name: subAddr ? `${title} (${subAddr})` : (item.display_name || title),
+                priority: 85 - vIdx * 3
+              };
+            });
+          })
+        );
+        return responses.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+      };
+
+      const [naverItems, arcItems, nomItems] = await Promise.all([
+        fetchNaverResults(),
+        fetchArcGisResults(),
+        fetchNominatimResults()
+      ]);
+
+      const allRaw = [...collected, ...naverItems, ...nomItems, ...arcItems];
+
+      // 대한민국 영역 필터링 + 중복 위치(약 70m 이내 동일 장소) 제거 + 관련도 정렬
+      const deduped = [];
+      allRaw.forEach((item) => {
+        if (!Number.isFinite(item.lat) || !Number.isFinite(item.lon)) return;
+        if (item.lat < 32 || item.lat > 39.5 || item.lon < 124 || item.lon > 132) return;
+
+        let score = item.priority || 50;
+        const tNorm = String(item.title || '').replace(/\s+/g, '').toLowerCase();
+        const dNorm = String(item.display_name || '').replace(/\s+/g, '').toLowerCase();
+        if (tNorm === qNorm) score += 30;
+        else if (tNorm.includes(qNorm)) score += 20;
+        else if (queryVariants.some((vq) => tNorm.includes(vq.replace(/\s+/g, '').toLowerCase()))) score += 15;
+        if (/(축구|운동장|풋살|구장|스타디움|공원|체육|학교|초등|중학|고등)/.test(dNorm)) score += 8;
+
+        const existingIdx = deduped.findIndex(
+          (ex) => Math.abs(ex.lat - item.lat) < 0.0007 && Math.abs(ex.lon - item.lon) < 0.0007
+        );
+        if (existingIdx > -1) {
+          if (score > deduped[existingIdx].score) {
+            deduped[existingIdx] = { ...item, score };
+          }
+        } else {
+          deduped.push({ ...item, score });
+        }
+      });
+
+      deduped.sort((a, b) => b.score - a.score);
+      const finalResults = deduped.slice(0, 8);
+      setPitchSearchResults(finalResults);
+
+      if (finalResults.length > 0 && pitchMapInstanceRef.current) {
+        const first = finalResults[0];
+        pitchMapInstanceRef.current.setView([first.lat, first.lon], 18);
+        applyCornersToSatelliteMap(createDefaultCornersAround(first.lat, first.lon, 96, 62), false);
+        if (!pitchFormName && first.title) {
+          setPitchFormName(first.title.split('(')[0].trim());
+        }
+      } else if (finalResults.length === 0) {
+        setPitchSearchMessage(`'${q}' 검색 결과가 없습니다. 도로명 주소(예: 검단로540번길 41)나 주변 지하철역/학교명으로 검색해보세요.`);
       }
     } catch (err) {
       console.error(err);
+      setPitchSearchMessage('검색 중 일시적인 네트워크 오류가 발생했습니다.');
     } finally {
       setIsPitchSearching(false);
     }
@@ -4829,8 +5200,11 @@ const renderGoalFlowModal = () => {
                 <input
                   type="text"
                   value={pitchSearchQuery}
-                  onChange={(e) => setPitchSearchQuery(e.target.value)}
-                  placeholder="구장/학교/공원 검색 (예: 마들스타디움)"
+                  onChange={(e) => {
+                    setPitchSearchQuery(e.target.value);
+                    if (pitchSearchMessage) setPitchSearchMessage('');
+                  }}
+                  placeholder="구장/공원/도로명주소 검색 (예: 능내근린공원, 마들스타디움)"
                   className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none"
                 />
                 <button
@@ -4842,9 +5216,16 @@ const renderGoalFlowModal = () => {
                 </button>
               </form>
 
+              {/* 검색 결과 없음 안내 */}
+              {pitchSearchMessage && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 text-[11px] text-amber-300 leading-relaxed">
+                  💡 {pitchSearchMessage}
+                </div>
+              )}
+
               {/* 검색 결과 리스트 */}
               {pitchSearchResults.length > 0 && (
-                <div className="bg-slate-900 border border-slate-700 rounded-xl p-1.5 max-h-28 overflow-y-auto space-y-1">
+                <div className="bg-slate-900 border border-slate-700 rounded-xl p-1.5 max-h-36 overflow-y-auto space-y-1">
                   {pitchSearchResults.map((item, idx) => (
                     <button
                       key={idx}
@@ -4856,12 +5237,27 @@ const renderGoalFlowModal = () => {
                           pitchMapInstanceRef.current.setView([lat, lon], 18);
                           applyCornersToSatelliteMap(createDefaultCornersAround(lat, lon, 96, 62), false);
                         }
-                        if (!pitchFormName) setPitchFormName(item.display_name.split(',')[0]);
+                        const cleanTitle = (item.title || item.display_name || '').split('(')[0].split(',')[0].trim();
+                        if (cleanTitle) setPitchFormName(cleanTitle);
                         setPitchSearchResults([]);
                       }}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-[11px] text-slate-200 truncate block"
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 transition flex items-start justify-between gap-2"
                     >
-                      📍 {item.display_name}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11px] font-bold text-emerald-300 truncate">
+                          📍 {item.title || item.display_name}
+                        </div>
+                        {item.address && (
+                          <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                            {item.address}
+                          </div>
+                        )}
+                      </div>
+                      {item.category && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 shrink-0 mt-0.5">
+                          {item.category}
+                        </span>
+                      )}
                     </button>
                   ))}
                 </div>
