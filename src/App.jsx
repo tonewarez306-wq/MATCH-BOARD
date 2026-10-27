@@ -5290,10 +5290,24 @@ const renderGoalFlowModal = () => {
             <div className="flex-1 overflow-y-auto space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
               {gpsGuideTab === 'android' ? (
                 <>
-                  <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3 text-[11px] text-amber-200 leading-relaxed">
-                    <strong className="text-amber-400 block mb-0.5">⚠️ 삼성 헬스에서 [GPX로 내보내기]가 안 보일 때!</strong>
-                    삼성 헬스는 <strong>'축구'</strong> 종목으로 측정하거나 <strong>'자동 감지된 운동'</strong>에는 GPX 내보내기 메뉴를 제공하지 않습니다.<br/>
-                    반드시 워치에서 <strong className="text-white underline">[달리기] 또는 [걷기]를 직접 눌러 시작</strong>해야 우측 상단 <strong>⋮</strong> 메뉴에 <strong>[GPX로 내보내기]</strong>가 나타납니다!
+                  <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3 text-[11px] text-amber-200 leading-relaxed space-y-1.5">
+                    <strong className="text-amber-400 block">🚨 [달리기]로 측정했는데도 GPX 내보내기가 안 보일 때 체크리스트!</strong>
+                    <div>
+                      <strong>① 상세 화면에 '지도(이동 경로)'가 그려져 있나요?</strong><br/>
+                      삼성 헬스 달리기 상세 화면에 지도가 아예 없다면 워치 GPS가 꺼져 있었거나 실내에서 시작해 위성 신호를 못 잡은 상태입니다. (지도 데이터가 없으면 GPX 메뉴 자체가 숨겨집니다)
+                    </div>
+                    <div>
+                      <strong>② 워치 [달리기 설정]에서 '위치(GPS)' 켜기</strong><br/>
+                      워치 삼성 헬스 → [달리기] 옆 ⚙️설정 → <strong>[위치] ON</strong> 확인 후, 야외에서 상단 📍위성 아이콘이 깜빡임을 멈추고 <strong>초록색으로 고정</strong>된 뒤 시작하세요.
+                    </div>
+                    <div>
+                      <strong>③ 스마트폰 삼성 헬스 '위치 정보' 권한 허용</strong><br/>
+                      폰 삼성 헬스 홈 → 우측 상단 <strong>⋮</strong> → <strong>[설정]</strong> → 맨 아래 <strong>[위치 정보]</strong>가 켜져 있어야 지도가 표시되고 GPX 추출 메뉴가 나타납니다.
+                    </div>
+                    <div>
+                      <strong>④ 공유 버튼이 아닌 우측 상단 [⋮ (더보기)] 메뉴 확인</strong><br/>
+                      운동 상세 화면의 [공유] 아이콘이 아니라, 화면 맨 위 우측 모서리의 <strong>[⋮ (점 3개)]</strong>를 누르면 <strong>[경로 내보내기]</strong> 또는 <strong>[GPX 파일로 내보내기/공유]</strong>가 있습니다.
+                    </div>
                   </div>
                   <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
                     <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">1</div>
