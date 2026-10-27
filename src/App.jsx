@@ -273,8 +273,7 @@ export default function App() {
   const [gpsSelectedPlayerId, setGpsSelectedPlayerId] = useState('');
   const [gpsQuarterLabel, setGpsQuarterLabel] = useState('1Q');
   const [gpsSelectedMatchId, setGpsSelectedMatchId] = useState('');
-  const [gpsScheduleFilter, setGpsScheduleFilter] = useState('all'); // 'all' | 'recorded'
-  const [gpsExpandedScheduleMap, setGpsExpandedScheduleMap] = useState({});
+  const [gpsViewScheduleKey, setGpsViewScheduleKey] = useState('all');
   const [gpsReplayPlaying, setGpsReplayPlaying] = useState(false);
   const [gpsReplayProgress, setGpsReplayProgress] = useState(0); // 0..100
   const [gpsReplaySpeed, setGpsReplaySpeed] = useState(2); // 1 | 2 | 4
@@ -2066,7 +2065,11 @@ export default function App() {
         content: JSON.stringify(updated)
       });
       const schedKey = linkedMatch ? `match_${linkedMatch.id}` : `date_${effectiveDate}`;
-      setGpsExpandedScheduleMap(prev => ({ ...prev, [schedKey]: true }));
+      setGpsViewScheduleKey(schedKey);
+      if (effectiveDate) {
+        const [y, m] = effectiveDate.split('-').map(Number);
+        if (y && m) setViewDate(new Date(y, m - 1, 1));
+      }
       const matchLabel = linkedMatch ? `[${linkedMatch.date} ${linkedMatch.location}] 일정에 ` : '';
       setSystemAlert({ isOpen: true, message: `${matchLabel}${playerName} 선수의 ${gpsQuarterLabel} GPS 기록이 저장되었습니다!` });
     } catch (err) {
@@ -4780,30 +4783,24 @@ const renderGoalFlowModal = () => {
             {gpsSession ? (
               <div className="space-y-3 animate-in fade-in">
                 {/* 경기 일정 / 선수 / 쿼터 지정 및 저장/공유 컨트롤 바 */}
-                <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-3 space-y-2.5">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 mb-1 px-0.5">
-                      📅 연결할 팀 경기 일정 선택
-                    </label>
-                    <select
-                      value={gpsSelectedMatchId}
-                      onChange={(e) => setGpsSelectedMatchId(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none"
-                    >
-                      <option value="">📅 일정 미지정 ({gpsSession.date} 자유/개인 기록)</option>
-                      {[...currentTeamMatches]
-                        .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-                        .map(m => {
-                          const typeLabel = m.matchType === 'external' ? `교류전 vs ${m.opponentName || '상대팀'}` : m.matchType === 'futsal' ? '풋살' : '자체전';
-                          const statusLabel = m.status === 'completed' ? '종료' : '예정';
-                          return (
-                            <option key={m.id} value={m.id}>
-                              📅 {m.date} · [{typeLabel}] {m.location} ({statusLabel})
-                            </option>
-                          );
-                        })}
-                    </select>
-                  </div>
+                <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-3 space-y-2">
+                  <select
+                    value={gpsSelectedMatchId}
+                    onChange={(e) => setGpsSelectedMatchId(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-200 outline-none"
+                  >
+                    <option value="">📅 저장할 경기 일정 선택 (미선택 시 {gpsSession.date} 기록)</option>
+                    {[...currentTeamMatches]
+                      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+                      .map(m => {
+                        const typeLabel = m.matchType === 'external' ? `교류전` : m.matchType === 'futsal' ? '풋살' : '자체전';
+                        return (
+                          <option key={m.id} value={m.id}>
+                            📅 {m.date} · [{typeLabel}] {m.location}
+                          </option>
+                        );
+                      })}
+                  </select>
 
                   <div className="flex items-center gap-2">
                     <select
@@ -4836,7 +4833,7 @@ const renderGoalFlowModal = () => {
                       onClick={() => saveGpsSessionToTeam()}
                       className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow"
                     >
-                      💾 선택 일정에 GPS 저장
+                      💾 팀 기록에 저장
                     </button>
                     <button
                       type="button"
@@ -5054,257 +5051,130 @@ const renderGoalFlowModal = () => {
               </div>
             )}
 
-            {/* 실제 진행된 경기 일정별 GPS 기록 리스트 */}
-            <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 space-y-3">
-              <div className="flex justify-between items-center gap-2">
-                <div>
-                  <h3 className="text-xs sm:text-sm font-black text-white flex items-center gap-1.5">
-                    🏆 우리 팀 일정별 GPS 기록 <span className="text-emerald-400">({savedGpsRecords.length})</span>
-                  </h3>
-                  <p className="text-[10px] text-slate-400 mt-0.5">실제 진행된 경기 일정별로 팀원들의 활동량 히트맵을 확인하세요</p>
-                </div>
-              </div>
+            {/* 팀원 저장된 GPS 기록 리스트 (월별 선택 + 일정 드롭다운) */}
+            {(() => {
+              const monthGroups = gpsScheduleGroups.filter(g => (g.date || '').startsWith(viewYearMonth));
+              const activeKey = monthGroups.some(g => g.key === gpsViewScheduleKey) ? gpsViewScheduleKey : 'all';
+              const displayedRecords = activeKey === 'all'
+                ? monthGroups.flatMap(g => g.records.map(r => ({ ...r, _scheduleLabel: g.location })))
+                : (monthGroups.find(g => g.key === activeKey)?.records.map(r => ({
+                    ...r,
+                    _scheduleLabel: monthGroups.find(g => g.key === activeKey)?.location
+                  })) || []);
 
-              {/* 일정 필터 탭 (전체 경기 일정 vs GPS 기록 있는 일정) */}
-              {gpsScheduleGroups.length > 0 && (
-                <div className="grid grid-cols-2 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setGpsScheduleFilter('all')}
-                    className={`py-1.5 rounded-lg text-[11px] font-bold transition ${gpsScheduleFilter === 'all' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+              return (
+                <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-xs font-black text-slate-300 flex items-center gap-1.5">
+                      🏆 우리 팀 저장된 GPS 기록 ({displayedRecords.length})
+                    </h3>
+                    <span className="text-[10px] text-slate-500">터치하여 히트맵 보기</span>
+                  </div>
+
+                  {/* 경기 탭과 동일한 월별 이동 바 */}
+                  <div className="flex justify-between items-center bg-slate-900 px-3 py-2 rounded-xl border border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => { prevMonth(); setGpsViewScheduleKey('all'); }}
+                      className="p-1 text-slate-400 hover:text-white transition"
+                    >
+                      <ChevronLeft size={18}/>
+                    </button>
+                    <span className="text-sm font-black text-white">
+                      {viewDate.getFullYear()}년 {viewDate.getMonth() + 1}월
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => { nextMonth(); setGpsViewScheduleKey('all'); }}
+                      className="p-1 text-slate-400 hover:text-white transition"
+                    >
+                      <ChevronRight size={18}/>
+                    </button>
+                  </div>
+
+                  {/* 해당 월의 경기 일정 선택 드롭다운 */}
+                  <select
+                    value={activeKey}
+                    onChange={(e) => setGpsViewScheduleKey(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
                   >
-                    📅 전체 경기 일정 ({gpsScheduleGroups.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setGpsScheduleFilter('recorded')}
-                    className={`py-1.5 rounded-lg text-[11px] font-bold transition ${gpsScheduleFilter === 'recorded' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-                  >
-                    ⌚ GPS 기록된 일정 ({gpsScheduleGroups.filter(g => g.records.length > 0).length})
-                  </button>
-                </div>
-              )}
-
-              {(() => {
-                const visibleGroups = gpsScheduleFilter === 'recorded'
-                  ? gpsScheduleGroups.filter(g => g.records.length > 0)
-                  : gpsScheduleGroups;
-
-                if (visibleGroups.length === 0) {
-                  return (
-                    <div className="text-center py-7 px-3 text-xs text-slate-400 bg-slate-900/50 rounded-xl border border-slate-800 space-y-1.5">
-                      <div className="text-base">📭</div>
-                      <div className="font-bold text-slate-300">
-                        {gpsScheduleFilter === 'recorded' ? '아직 GPS 기록이 저장된 경기 일정이 없습니다.' : '등록된 팀 경기 일정이나 저장된 GPS 기록이 없습니다.'}
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        위에서 워치 파일(GPX/TCX)을 열거나 샘플 기록을 불러온 뒤 <strong className="text-emerald-400">[선택 일정에 GPS 저장]</strong>을 눌러보세요!
-                      </div>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="space-y-3">
-                    {visibleGroups.map((group, gIdx) => {
-                      const hasRecords = group.records.length > 0;
-                      const isExpanded = gpsExpandedScheduleMap[group.key] !== undefined
-                        ? gpsExpandedScheduleMap[group.key]
-                        : (hasRecords || gIdx === 0);
-                      const badge = group.match ? getMatchResultBadge(group.match) : null;
-                      const dateParts = (group.date || '').split('-');
-                      const monthLabel = dateParts.length === 3 ? `${parseInt(dateParts[1], 10)}월` : '일정';
-                      const dayLabel = dateParts.length === 3 ? dateParts[2] : '-';
-
+                    <option value="all">
+                      📅 {viewDate.getMonth() + 1}월 전체 일정 보기 ({monthGroups.reduce((s, g) => s + g.records.length, 0)}건)
+                    </option>
+                    {monthGroups.map(g => {
+                      const dayStr = (g.date || '').slice(5).replace('-', '/');
+                      const typeLabel = !g.isOfficialMatch
+                        ? '자유기록'
+                        : g.matchType === 'external'
+                          ? `교류전 vs ${g.opponentName || '상대팀'}`
+                          : g.matchType === 'futsal'
+                            ? '풋살'
+                            : '자체전';
                       return (
-                        <div
-                          key={group.key}
-                          className={`rounded-2xl border transition overflow-hidden ${hasRecords ? 'bg-slate-900/90 border-emerald-500/35 shadow-md' : 'bg-slate-900/50 border-slate-700/70'}`}
-                        >
-                          {/* 일정 헤더 (터치하여 접기/펼치기) */}
-                          <button
-                            type="button"
-                            onClick={() => setGpsExpandedScheduleMap(prev => ({ ...prev, [group.key]: !isExpanded }))}
-                            className="w-full p-3.5 text-left flex items-center justify-between gap-2.5 hover:bg-slate-800/50 transition"
-                          >
-                            <div className="flex items-center gap-3 min-w-0 flex-1">
-                              {/* 날짜 캘린더 뱃지 */}
-                              <div className={`w-11 h-11 rounded-xl border flex flex-col items-center justify-center shrink-0 ${hasRecords ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-slate-800 border-slate-700'}`}>
-                                <span className="text-[9px] font-bold text-slate-400 leading-none mb-0.5">{monthLabel}</span>
-                                <span className={`text-base font-black leading-none ${hasRecords ? 'text-emerald-300' : 'text-white'}`}>{dayLabel}</span>
-                              </div>
-
-                              {/* 경기 유형 / 구장 / 결과 정보 */}
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                                  {group.isOfficialMatch ? (
-                                    <>
-                                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${group.status === 'completed' ? 'bg-slate-700 text-slate-300' : 'bg-blue-500/20 text-blue-400'}`}>
-                                        {group.status === 'completed' ? '종료' : '예정'}
-                                      </span>
-                                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 ${group.matchType === 'external' ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' : group.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-300 border-orange-500/30' : 'bg-green-500/20 text-green-300 border-green-500/30'}`}>
-                                        {group.matchType === 'external' ? '교류전' : group.matchType === 'futsal' ? '풋살' : '자체전'}
-                                      </span>
-                                      {badge && (
-                                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border shrink-0 ${badge.color}`}>
-                                          {badge.text}{badge.score ? ` (${badge.score})` : ''}
-                                        </span>
-                                      )}
-                                    </>
-                                  ) : (
-                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                                      자유/개인 일정
-                                    </span>
-                                  )}
-                                </div>
-
-                                <div className="text-xs sm:text-sm font-black text-white truncate">
-                                  {group.location}
-                                </div>
-                                <div className="text-[10px] text-slate-400 truncate mt-0.5">
-                                  {group.isOfficialMatch ? (
-                                    <>
-                                      {group.time ? `${formatTimeAmPm(group.time)} · ` : ''}
-                                      {group.matchType === 'external'
-                                        ? `vs ${group.opponentName || '상대팀'}`
-                                        : `${group.match?.teamCount || 2}팀 파전 · ${group.match?.totalQuarters || 4}Q`}
-                                      {group.match?.attendees ? ` · 참석 ${group.match.attendees.length}명` : ''}
-                                    </>
-                                  ) : (
-                                    `${group.date} 측정 기록`
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* 우측 GPS 기록 건수 & 폴딩 아이콘 */}
-                            <div className="flex flex-col items-end gap-1 shrink-0">
-                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${hasRecords ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
-                                {hasRecords ? `⌚ ${group.records.length}건` : '기록 없음'}
-                              </span>
-                              <span className="text-[10px] font-bold text-slate-400">
-                                {isExpanded ? '접기 ▲' : '펼치기 ▼'}
-                              </span>
-                            </div>
-                          </button>
-
-                          {/* 펼쳐진 일정 내부 영역 */}
-                          {isExpanded && (
-                            <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-800/90 space-y-2.5 bg-slate-950/40">
-                              {/* 일정 내 최다 활동량 / 최고 속도 요약 배너 */}
-                              {hasRecords && (
-                                <div className="grid grid-cols-2 gap-2 bg-slate-900/90 border border-slate-800 rounded-xl p-2 text-[10px]">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="text-sm shrink-0">🏃</span>
-                                    <div className="min-w-0">
-                                      <div className="text-slate-400 font-bold">이날 최다 이동거리</div>
-                                      <div className="text-emerald-400 font-black truncate">
-                                        {group.topDistRec?.playerName} · {group.topDistRec?.totalDistanceKm}km ({group.topDistRec?.quarterLabel})
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-1.5 min-w-0 border-l border-slate-800 pl-2">
-                                    <span className="text-sm shrink-0">⚡</span>
-                                    <div className="min-w-0">
-                                      <div className="text-slate-400 font-bold">이날 최고 스피드</div>
-                                      <div className="text-amber-400 font-black truncate">
-                                        {group.topSpeedRec?.playerName} · {group.topSpeedRec?.maxSpeedKmh}km/h ({group.topSpeedRec?.quarterLabel})
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* 쿼터/선수별 GPS 기록 목록 */}
-                              {hasRecords ? (
-                                <div className="space-y-1.5">
-                                  {group.records.map(rec => {
-                                    const isSelected = gpsSession?.id === rec.id;
-                                    const recPitch = rec.pitchId ? allGpsPitches.find(p => p.id === rec.pitchId) : null;
-                                    return (
-                                      <div
-                                        key={rec.id}
-                                        onClick={() => {
-                                          setGpsSession(rec);
-                                          setGpsSelectedPlayerId(rec.playerId || '');
-                                          setGpsQuarterLabel(rec.quarterLabel || '1Q');
-                                          if (rec.matchId) setGpsSelectedMatchId(rec.matchId);
-                                          else if (group.match?.id) setGpsSelectedMatchId(group.match.id);
-                                          if (rec.pitchId) setGpsSelectedPitchId(rec.pitchId);
-                                          setGpsViewMode('heatmap');
-                                          setGpsReplayPlaying(false);
-                                          if (gpsCardCaptureRef.current) {
-                                            gpsCardCaptureRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                          }
-                                        }}
-                                        className={`p-2.5 rounded-xl border transition cursor-pointer flex items-center justify-between gap-2 ${isSelected ? 'bg-emerald-950/40 border-emerald-500/60 shadow' : 'bg-slate-900 border-slate-800 hover:border-slate-600'}`}
-                                      >
-                                        <div className="min-w-0 flex-1">
-                                          <div className="flex items-center gap-1.5 flex-wrap">
-                                            <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                              {rec.quarterLabel || '기록'}
-                                            </span>
-                                            <span className="text-xs sm:text-sm font-black text-white truncate">
-                                              {rec.playerName || '선수'}
-                                            </span>
-                                            {recPitch && (
-                                              <span className="text-[9px] text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 truncate">
-                                                🏟️ {recPitch.name}
-                                              </span>
-                                            )}
-                                          </div>
-                                          <div className="flex items-center gap-2.5 mt-1 text-[11px] text-slate-300 font-bold flex-wrap">
-                                            <span>🏃 <strong className="text-emerald-400">{rec.totalDistanceKm}km</strong></span>
-                                            <span>⚡ 최고 <strong className="text-amber-400">{rec.maxSpeedKmh}km/h</strong></span>
-                                            <span>🔥 질주 <strong className="text-yellow-300">{rec.sprintCount}회</strong></span>
-                                            <span className="text-[10px] text-slate-400">⏱ {formatDurationKo(rec.durationSec)}</span>
-                                          </div>
-                                        </div>
-                                        <div className="flex items-center gap-1.5 shrink-0">
-                                          <span className="text-xs font-black text-yellow-400 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700">
-                                            {rec.activityScore}점
-                                          </span>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => { e.stopPropagation(); requestDeleteGpsRecord(rec.id); }}
-                                            className="p-1.5 text-slate-500 hover:text-red-400 transition"
-                                            title="기록 삭제"
-                                          >
-                                            <Trash2 size={14}/>
-                                          </button>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div className="text-center py-3.5 px-2 bg-slate-900/60 rounded-xl border border-slate-800/80 text-[11px] text-slate-500">
-                                  이 경기 일정에 저장된 GPS 히트맵 기록이 아직 없습니다.
-                                </div>
-                              )}
-
-                              {/* 현재 분석 중인 GPS 세션이 있을 때 해당 일정에 바로 저장하는 퀵 버튼 */}
-                              {gpsSession && group.isOfficialMatch && group.match && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setGpsSelectedMatchId(group.match.id);
-                                    saveGpsSessionToTeam(group.match.id);
-                                  }}
-                                  className="w-full py-2 px-3 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1.5"
-                                >
-                                  <span>📥</span> 현재 분석 중인 ({gpsQuarterLabel}) GPS 기록을 이 일정에 바로 저장
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
+                        <option key={g.key} value={g.key}>
+                          {dayStr} · [{typeLabel}] {g.location} ({g.records.length}건)
+                        </option>
                       );
                     })}
-                  </div>
-                );
-              })()}
-            </div>
+                  </select>
+
+                  {/* 심플한 선수별 GPS 기록 리스트 */}
+                  {displayedRecords.length === 0 ? (
+                    <div className="text-center py-6 text-xs text-slate-500 bg-slate-900/50 rounded-xl border border-slate-800">
+                      선택한 월/일정에 저장된 팀원 GPS 기록이 없습니다.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {displayedRecords.map(rec => (
+                        <div
+                          key={rec.id}
+                          onClick={() => {
+                            setGpsSession(rec);
+                            setGpsSelectedPlayerId(rec.playerId || '');
+                            setGpsQuarterLabel(rec.quarterLabel || '1Q');
+                            if (rec.matchId) setGpsSelectedMatchId(rec.matchId);
+                            if (rec.pitchId) setGpsSelectedPitchId(rec.pitchId);
+                            setGpsViewMode('heatmap');
+                            setGpsReplayPlaying(false);
+                          }}
+                          className={`p-3 rounded-xl border transition cursor-pointer flex items-center justify-between gap-2 ${gpsSession?.id === rec.id ? 'bg-slate-900 border-emerald-500/50' : 'bg-slate-900/70 border-slate-700/80 hover:border-slate-600'}`}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                                {rec.quarterLabel || '기록'}
+                              </span>
+                              <span className="text-sm font-black text-white truncate">{rec.playerName || '선수'}</span>
+                              <span className="text-[10px] text-slate-400 truncate">
+                                {(rec.date || '').slice(5).replace('-', '/')} {rec._scheduleLabel ? `· ${rec._scheduleLabel}` : ''}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2.5 mt-1 text-[11px] text-slate-300 font-bold">
+                              <span>🏃 <strong className="text-emerald-400">{rec.totalDistanceKm}km</strong></span>
+                              <span>⚡ 최고 <strong className="text-amber-400">{rec.maxSpeedKmh}km/h</strong></span>
+                              <span>🔥 질주 <strong className="text-yellow-300">{rec.sprintCount}회</strong></span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-xs font-black text-yellow-400 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700">
+                              {rec.activityScore}점
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); requestDeleteGpsRecord(rec.id); }}
+                              className="p-1.5 text-slate-500 hover:text-red-400 transition"
+                              title="기록 삭제"
+                            >
+                              <Trash2 size={14}/>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 
