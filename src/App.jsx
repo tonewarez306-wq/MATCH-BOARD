@@ -5333,25 +5333,41 @@ const renderGoalFlowModal = () => {
                 </>
               ) : (
                 <>
+                  <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3 text-[11px] text-amber-200 leading-relaxed space-y-1.5">
+                    <strong className="text-amber-400 block">🚨 아이폰 · 애플워치 필수 사전 설정 체크리스트!</strong>
+                    <div>
+                      <strong>① 워치에서 '축구'가 아닌 [실외 달리기] 선택!</strong><br/>
+                      애플워치도 기본 <strong>'축구'</strong> 종목은 심박/칼로리만 재고 <strong>GPS 지도 경로를 저장하지 않습니다.</strong> 반드시 <strong className="text-white underline">[실외 달리기]</strong>(또는 실외 걷기)로 측정해야 GPS 경로가 기록됩니다.
+                    </div>
+                    <div>
+                      <strong>② 아이폰 위치 서비스 권한 2가지 확인</strong><br/>
+                      • 아이폰 <strong>설정 → 개인정보 보호 및 보안 → 위치 서비스 → [Apple Watch 운동]</strong>을 <strong>'앱을 사용하는 동안' + '정확한 위치 ON'</strong>으로 설정<br/>
+                      • 위치 서비스 맨 아래 <strong>[시스템 서비스] → [동작 보정 및 거리] ON</strong> 확인
+                    </div>
+                    <div>
+                      <strong>③ 무료 GPX 추출 앱 1개 설치 (최초 1회)</strong><br/>
+                      아이폰 기본 피트니스 앱에는 파일 저장 버튼이 없으므로, 앱스토어에서 무료 앱(<strong>GPX Export, RunGap, Strava</strong> 등) 설치 후 <strong>'건강(운동 경로) 읽기 권한'</strong>을 허용해 두세요.
+                    </div>
+                  </div>
                   <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
                     <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">1</div>
                     <div>
-                      <div className="font-bold text-white mb-0.5">애플워치로 경기 측정</div>
-                      애플워치 기본 <strong className="text-emerald-400">[운동]</strong> 앱에서 <strong className="text-white">[실외 달리기]</strong> 또는 <strong className="text-white">[축구]</strong>를 켜고 경기를 뛰세요.
+                      <div className="font-bold text-white mb-0.5">애플워치에서 [실외 달리기]로 측정</div>
+                      애플워치 기본 <strong className="text-emerald-400">[운동]</strong> 앱에서 축구가 아닌 <strong className="text-white">[실외 달리기]</strong>를 눌러 시작하고 경기를 뛰세요.
                     </div>
                   </div>
                   <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
                     <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">2</div>
                     <div>
-                      <div className="font-bold text-white mb-0.5">GPX 파일로 내보내기</div>
-                      아이폰 무료 연동 앱(<strong className="text-white">HealthFit, WorkOutDoors, RunGap, Strava</strong> 등)에서 해당 운동 기록을 선택해 <strong className="text-amber-400">[GPX 파일 내보내기(공유) → 파일에 저장]</strong>을 선택하세요.
+                      <div className="font-bold text-white mb-0.5">연동 앱에서 GPX 파일로 내보내기</div>
+                      경기 후 아이폰 연동 앱(<strong className="text-white">GPX Export, RunGap, WorkOutDoors, HealthFit</strong> 등)을 열어 방금 기록을 선택한 뒤 <strong className="text-amber-400">[Export GPX → 파일에 저장]</strong>을 누르세요.
                     </div>
                   </div>
                   <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
                     <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">3</div>
                     <div>
                       <div className="font-bold text-white mb-0.5">MATCHBOARD에서 파일 열기</div>
-                      현재 GPS 탭의 <strong className="text-blue-400">[📂 워치 파일(GPX/TCX) 열기]</strong> 버튼으로 저장된 `.gpx` 파일을 불러오면 히트맵과 스탯이 즉시 생성됩니다!
+                      현재 GPS 탭의 <strong className="text-blue-400">[📂 GPX/TCX 파일 열기]</strong> 버튼으로 저장된 `.gpx` 파일을 불러오면 히트맵과 스탯이 즉시 생성됩니다!
                     </div>
                   </div>
                 </>
