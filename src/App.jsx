@@ -179,7 +179,10 @@ const getInitialTacticsTokens = (pitchType) => {
 const SESSION_STORAGE_KEY = 'matchboard_session_v1';
 const loadSavedSession = () => {
   try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    // 영구 저장소(localStorage)에 남아있던 이전 데이터는 제거하고,
+    // 앱 프로세스/세션이 살아있는 동안만 유지되는 sessionStorage를 사용 (백그라운드 완전 종료 시 자동 초기화)
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
     return JSON.parse(raw);
   } catch (e) {
@@ -541,13 +544,13 @@ export default function App() {
 
   useEffect(() => { return () => { if (playbackRef.current) cancelAnimationFrame(playbackRef.current); }; }, []);
 
-  // 세션 및 현재 화면 상태 localStorage 자동 저장 (뒤로가기 종료 후 재진입 시에도 화면 유지)
+  // 세션 및 현재 화면 상태 sessionStorage 자동 저장 (백그라운드 전환·새로고침 시에는 화면 유지, 앱 완전 종료 시에는 초기화되어 로그인 화면 표시)
   useEffect(() => {
     try {
       if (!activeTeamId || appState === 'login') {
-        localStorage.removeItem(SESSION_STORAGE_KEY);
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
       } else {
-        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
           activeTeamId,
           appState,
           activeTab,
@@ -672,7 +675,7 @@ export default function App() {
   backStateRef.current = {
     appState, activeTab, goalFlow, logEditModal, quarterEditModal, detailModal,
     assignmentModal, matchModal, rosterModal, dateMemoModal, galleryModal,
-    shareModal, tacticsTutorialModal, teamSettingsModal, authModal
+    shareModal, tacticsTutorialModal, gpsGuideModal, pitchManagerModal, installGuideModal, teamSettingsModal, authModal
   };
 
   useEffect(() => {
@@ -680,6 +683,9 @@ export default function App() {
     window.history.pushState({ matchboardGuard: true }, '');
     const handlePopState = () => {
       const st = backStateRef.current;
+      if (st.pitchManagerModal) { setPitchManagerModal(false); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.gpsGuideModal) { setGpsGuideModal(false); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.installGuideModal) { setInstallGuideModal(false); window.history.pushState({ matchboardGuard: true }, ''); return; }
       if (st.galleryModal.isOpen) { setGalleryModal({ isOpen: false, photos: [], currentIndex: 0, matchId: null }); window.history.pushState({ matchboardGuard: true }, ''); return; }
       if (st.shareModal.isOpen) { setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false }); window.history.pushState({ matchboardGuard: true }, ''); return; }
       if (st.goalFlow.isOpen) { setGoalFlow({ isOpen: false, step: 1, matchId: null, quarter: null, teamLetter: null, availableTeams: [], scorer: null, isPK: false, remark: '', isMissingAdd: false }); setShowOtherTeams(false); window.history.pushState({ matchboardGuard: true }, ''); return; }
@@ -695,6 +701,7 @@ export default function App() {
       if (st.authModal.isOpen) { setAuthModal({ isOpen: false, type: '', targetTeam: null }); window.history.pushState({ matchboardGuard: true }, ''); return; }
       if (st.appState === 'liveMatch') { setAppState('main'); window.history.pushState({ matchboardGuard: true }, ''); return; }
       if (st.activeTab !== 'matches') { setActiveTab('matches'); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      window.history.pushState({ matchboardGuard: true }, '');
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -725,7 +732,7 @@ export default function App() {
       const nextLiveState = computeDerivedLiveState(match);
       setLiveMatchId(match.id);
       setLiveState(nextLiveState);
-      setAppState('liveMatch');
+      setAppState('main' === 'liveMatch' ? 'main' : 'liveMatch');
     }
   };
 
@@ -739,7 +746,10 @@ export default function App() {
   };
 
   const logout = () => {
-    try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) {}
+    try {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch (e) {}
     setActiveTeamId(null); setIsAdmin(false); setLiveMatchId(null); setAppState('login'); setAuthModal({ isOpen: false, type: '', targetTeam: null });
   };
 
