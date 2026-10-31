@@ -1560,53 +1560,112 @@ export default function App() {
     if (!file) return;
     try {
       const text = await file.text();
-      const parser = new DOMParser();
-      const xml = parser.parseFromString(text, 'text/xml');
       const rawPoints = [];
 
-      // 1. GPX 포맷 (<trkpt>, <rtept>)
-      const trkpts = Array.from(xml.querySelectorAll('trkpt, rtept'));
-      if (trkpts.length > 0) {
-        trkpts.forEach((pt, idx) => {
-          const lat = parseFloat(pt.getAttribute('lat'));
-          const lon = parseFloat(pt.getAttribute('lon'));
-          const timeNode = pt.querySelector('time');
-          const timeMs = timeNode ? new Date(timeNode.textContent).getTime() : (Date.now() + idx * 1000);
-          const hrNode = pt.getElementsByTagName('gpxtpx:hr')[0] || pt.getElementsByTagName('ns3:hr')[0] || pt.querySelector('hr');
-          const hr = hrNode ? parseInt(hrNode.textContent, 10) : null;
-          if (Number.isFinite(lat) && Number.isFinite(lon)) {
-            rawPoints.push({ lat, lon, timeMs, hr });
+      // 0. JSON 포맷 (삼성헬스 location_data JSON 또는 일반 GPS JSON 배열 지원)
+      const trimmed = text.trim();
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+          const parsedJson = JSON.parse(trimmed);
+          const arr = Array.isArray(parsedJson)
+            ? parsedJson
+            : (parsedJson.points || parsedJson.data || parsedJson.locations || parsedJson.location_data || parsedJson.track || []);
+          if (Array.isArray(arr)) {
+            arr.forEach((item, idx) => {
+              const lat = parseFloat(item.lat ?? item.latitude ?? item.y);
+              const lon = parseFloat(item.lon ?? item.lng ?? item.longitude ?? item.x);
+              const rawTime = item.timeMs ?? item.start_time ?? item.timestamp ?? item.time;
+              const timeMs = rawTime
+                ? (typeof rawTime === 'number' ? (rawTime < 1e11 ? rawTime * 1000 : rawTime) : new Date(rawTime).getTime())
+                : (Date.now() + idx * 1000);
+              const hr = parseInt(item.hr ?? item.heart_rate ?? item.heartRate, 10) || null;
+              if (Number.isFinite(lat) && Number.isFinite(lon)) {
+                rawPoints.push({ lat, lon, timeMs, hr });
+              }
+            });
           }
-        });
+        } catch {}
       }
 
-      // 2. TCX 포맷 (<Trackpoint>)
       if (rawPoints.length === 0) {
-        const tcxPts = Array.from(xml.querySelectorAll('Trackpoint'));
-        tcxPts.forEach((pt, idx) => {
-          const latNode = pt.querySelector('Position > LatitudeDegrees') || pt.getElementsByTagName('LatitudeDegrees')[0];
-          const lonNode = pt.querySelector('Position > LongitudeDegrees') || pt.getElementsByTagName('LongitudeDegrees')[0];
-          const timeNode = pt.querySelector('Time') || pt.getElementsByTagName('Time')[0];
-          const hrNode = pt.querySelector('HeartRateBpm > Value') || pt.getElementsByTagName('Value')[0];
-          if (latNode && lonNode) {
-            const lat = parseFloat(latNode.textContent);
-            const lon = parseFloat(lonNode.textContent);
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(text, 'text/xml');
+
+        // 1. GPX 포맷 (<trkpt>, <rtept>, <wpt>)
+        const trkpts = Array.from(xml.querySelectorAll('trkpt, rtept, wpt'));
+        if (trkpts.length > 0) {
+          trkpts.forEach((pt, idx) => {
+            const lat = parseFloat(pt.getAttribute('lat'));
+            const lon = parseFloat(pt.getAttribute('lon'));
+            const timeNode = pt.querySelector('time') || pt.getElementsByTagName('time')[0];
             const timeMs = timeNode ? new Date(timeNode.textContent).getTime() : (Date.now() + idx * 1000);
+            const hrNode = pt.getElementsByTagName('gpxtpx:hr')[0] || pt.getElementsByTagName('ns3:hr')[0] || pt.querySelector('hr');
             const hr = hrNode ? parseInt(hrNode.textContent, 10) : null;
             if (Number.isFinite(lat) && Number.isFinite(lon)) {
               rawPoints.push({ lat, lon, timeMs, hr });
             }
+          });
+        }
+
+        // 2. TCX 포맷 (<Trackpoint>)
+        if (rawPoints.length === 0) {
+          const tcxPts = Array.from(xml.querySelectorAll('Trackpoint'));
+          tcxPts.forEach((pt, idx) => {
+            const latNode = pt.querySelector('Position > LatitudeDegrees') || pt.getElementsByTagName('LatitudeDegrees')[0];
+            const lonNode = pt.querySelector('Position > LongitudeDegrees') || pt.getElementsByTagName('LongitudeDegrees')[0];
+            const timeNode = pt.querySelector('Time') || pt.getElementsByTagName('Time')[0];
+            const hrNode = pt.querySelector('HeartRateBpm > Value') || pt.getElementsByTagName('Value')[0];
+            if (latNode && lonNode) {
+              const lat = parseFloat(latNode.textContent);
+              const lon = parseFloat(lonNode.textContent);
+              const timeMs = timeNode ? new Date(timeNode.textContent).getTime() : (Date.now() + idx * 1000);
+              const hr = hrNode ? parseInt(hrNode.textContent, 10) : null;
+              if (Number.isFinite(lat) && Number.isFinite(lon)) {
+                rawPoints.push({ lat, lon, timeMs, hr });
+              }
+            }
+          });
+        }
+
+        // 3. XML 네임스페이스/파서 이슈 대비 정규식 폴백 (삼성헬스 GPX 변형 포맷 완벽 대응)
+        if (rawPoints.length === 0) {
+          const tagRegex = /<(?:trkpt|rtept|wpt)\b([^>]*)>([\s\S]*?)<\/(?:trkpt|rtept|wpt)>/gi;
+          let match;
+          let idx = 0;
+          while ((match = tagRegex.exec(text)) !== null) {
+            const attrs = match[1] || '';
+            const inner = match[2] || '';
+            const latM = attrs.match(/lat=["']([-0-9.]+)["']/i);
+            const lonM = attrs.match(/lon=["']([-0-9.]+)["']/i);
+            if (latM && lonM) {
+              const lat = parseFloat(latM[1]);
+              const lon = parseFloat(lonM[1]);
+              const timeM = inner.match(/<time>([^<]+)<\/time>/i);
+              const hrM = inner.match(/<(?:[\w]+:)?hr>(\d+)<\/(?:[\w]+:)?hr>/i);
+              const timeMs = timeM ? new Date(timeM[1].trim()).getTime() : (Date.now() + idx * 1000);
+              const hr = hrM ? parseInt(hrM[1], 10) : null;
+              if (Number.isFinite(lat) && Number.isFinite(lon)) {
+                rawPoints.push({ lat, lon, timeMs, hr });
+                idx++;
+              }
+            }
           }
-        });
+        }
       }
 
       if (rawPoints.length < 5) {
-        setSystemAlert({ isOpen: true, message: '파일에서 GPS 경로 데이터를 찾을 수 없습니다.\nGPX 또는 TCX 파일인지 확인해주세요.' });
+        const isJsonFile = file.name.toLowerCase().endsWith('.json');
+        setSystemAlert({
+          isOpen: true,
+          message: isJsonFile
+            ? '선택하신 JSON 파일에는 GPS 위도·경도 경로가 들어있지 않습니다.\n\n삼성 헬스 달리기 상세 화면 우측 상단 [⋮] → [경로 내보내기(GPX)]로 저장한 .gpx 파일을 선택해주세요!'
+            : '파일에서 GPS 경로 데이터를 찾을 수 없습니다.\n야외에서 측정된 GPX 또는 TCX 파일인지 확인해주세요.'
+        });
         e.target.value = '';
         return;
       }
 
-      const cleanName = file.name.replace(/\.(gpx|tcx|xml)$/i, '');
+      const cleanName = file.name.replace(/\.(gpx|tcx|xml|json)$/i, '');
       const analyzed = analyzeGpsPoints(rawPoints, cleanName);
       if (analyzed) {
         setGpsSession(analyzed);
@@ -4695,7 +4754,7 @@ const renderGoalFlowModal = () => {
               <div className="grid grid-cols-2 gap-2">
                 <label className="cursor-pointer bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-black text-xs py-3 px-2 rounded-xl flex items-center justify-center gap-1.5 shadow-md transition text-center whitespace-nowrap">
                   <span>📂</span> GPX/TCX 파일 열기
-                  <input type="file" accept=".gpx,.tcx,.xml" onChange={handleGpsFileUpload} className="hidden" />
+                  <input type="file" onChange={handleGpsFileUpload} className="hidden" />
                 </label>
 
                 {!isLiveGpsTracking ? (
@@ -5327,7 +5386,7 @@ const renderGoalFlowModal = () => {
                     <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">3</div>
                     <div>
                       <div className="font-bold text-white mb-0.5">MATCHBOARD에서 파일 열기</div>
-                      현재 GPS 탭의 <strong className="text-blue-400">[📂 워치 파일(GPX/TCX) 열기]</strong> 버튼을 눌러 내보낸 파일을 선택하면 히트맵과 최고속도·스프린트가 자동 분석됩니다!
+                      현재 GPS 탭의 <strong className="text-blue-400">[📂 GPX/TCX 파일 열기]</strong> 터치 → 파일 선택창 상단 <strong className="text-white">[최근 파일]</strong> 또는 좌측 메뉴(☰) <strong className="text-white">[내 파일 → 내장 메모리 → Download → SamsungHealth]</strong>에서 <strong className="text-emerald-400">.gpx 파일</strong>을 선택하면 자동 분석됩니다!
                     </div>
                   </div>
                 </>
