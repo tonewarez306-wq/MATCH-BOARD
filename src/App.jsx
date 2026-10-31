@@ -1354,14 +1354,62 @@ export default function App() {
 
   const allGpsPitches = useMemo(() => [...savedGpsPitches, defaultSamplePitch], [savedGpsPitches, defaultSamplePitch]);
 
+  // 쿼터 라벨 복수 선택 파싱 및 포맷 헬퍼 (예: [3, 4] -> '3~4Q', [1, 3] -> '1·3Q')
+  const parseQuarterLabelToNums = (label) => {
+    if (!label || label === '전체') return [];
+    const str = String(label);
+    const rangeMatch = str.match(/^(\d+)\s*[~\-]\s*(\d+)/);
+    if (rangeMatch) {
+      const s = parseInt(rangeMatch[1], 10);
+      const e = parseInt(rangeMatch[2], 10);
+      if (s >= 1 && e >= s && e <= 8) {
+        const arr = [];
+        for (let i = s; i <= e; i++) arr.push(i);
+        return arr;
+      }
+    }
+    const matches = str.match(/\d+/g);
+    if (!matches) return [];
+    return [...new Set(matches.map(Number).filter(n => n >= 1 && n <= 8))].sort((a, b) => a - b);
+  };
+
+  const formatSelectedQuartersLabel = (nums) => {
+    const sorted = [...new Set(nums)].filter(n => n >= 1 && n <= 8).sort((a, b) => a - b);
+    if (sorted.length === 0) return '1Q';
+    if (sorted.length === 1) return `${sorted[0]}Q`;
+    const isContiguous = (sorted[sorted.length - 1] - sorted[0]) === (sorted.length - 1);
+    if (isContiguous) return `${sorted[0]}~${sorted[sorted.length - 1]}Q`;
+    return `${sorted.join('·')}Q`;
+  };
+
+  const toggleQuarterInLabel = (currentLabel, qNum) => {
+    if (qNum === '전체') return '전체';
+    const currentNums = parseQuarterLabelToNums(currentLabel);
+    let nextNums;
+    if (currentNums.includes(qNum)) {
+      nextNums = currentNums.length > 1 ? currentNums.filter(n => n !== qNum) : [qNum];
+    } else {
+      nextNums = [...currentNums, qNum];
+    }
+    return formatSelectedQuartersLabel(nextNums);
+  };
+
   // 실제 진행된 팀 경기 일정 + 저장된 GPS 기록을 일정 단위로 매칭/그룹화
   const gpsScheduleGroups = useMemo(() => {
     if (appState !== 'main' || activeTab !== 'gps') return [];
-    const quarterOrder = { '1Q': 1, '2Q': 2, '3Q': 3, '4Q': 4, '5Q': 5, '6Q': 6, '전체': 9 };
+    const getQuarterSortWeight = (label) => {
+      if (!label) return 90;
+      if (label === '전체') return 99;
+      const nums = String(label).match(/\d+/g);
+      if (!nums || nums.length === 0) return 90;
+      const first = parseInt(nums[0], 10);
+      const second = nums.length > 1 ? parseInt(nums[1], 10) : 0;
+      return first + second * 0.05;
+    };
     const sortRecords = (list) =>
       [...list].sort((a, b) => {
-        const qa = quarterOrder[a.quarterLabel] || 8;
-        const qb = quarterOrder[b.quarterLabel] || 8;
+        const qa = getQuarterSortWeight(a.quarterLabel);
+        const qb = getQuarterSortWeight(b.quarterLabel);
         if (qa !== qb) return qa - qb;
         return (b.totalDistanceKm || 0) - (a.totalDistanceKm || 0);
       });
@@ -2316,6 +2364,7 @@ export default function App() {
       playerId: matchedPlayer ? matchedPlayer.id : (hasCustomName ? '__custom__' : ''),
       customPlayerName: hasCustomName ? rec.playerName : '',
       quarterLabel: rec.quarterLabel || '1Q',
+      quarterTouched: false,
       matchId: rec.matchId || ''
     });
   };
@@ -5071,15 +5120,32 @@ const renderGoalFlowModal = () => {
                         <select
                           value={gpsQuarterLabel}
                           onChange={(e) => setGpsQuarterLabel(e.target.value)}
-                          className="w-24 shrink-0 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-emerald-400 outline-none"
+                          className="w-28 shrink-0 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-emerald-400 outline-none"
                         >
-                          <option value="1Q">1쿼터</option>
-                          <option value="2Q">2쿼터</option>
-                          <option value="3Q">3쿼터</option>
-                          <option value="4Q">4쿼터</option>
-                          <option value="5Q">5쿼터</option>
-                          <option value="6Q">6쿼터</option>
-                          <option value="전체">경기 전체</option>
+                          <optgroup label="단일 쿼터">
+                            <option value="1Q">1쿼터 (1Q)</option>
+                            <option value="2Q">2쿼터 (2Q)</option>
+                            <option value="3Q">3쿼터 (3Q)</option>
+                            <option value="4Q">4쿼터 (4Q)</option>
+                            <option value="5Q">5쿼터 (5Q)</option>
+                            <option value="6Q">6쿼터 (6Q)</option>
+                            <option value="전체">경기 전체</option>
+                          </optgroup>
+                          <optgroup label="연속 쿼터 (이어서 측정)">
+                            <option value="1~2Q">1~2쿼터 (1~2Q)</option>
+                            <option value="2~3Q">2~3쿼터 (2~3Q)</option>
+                            <option value="3~4Q">3~4쿼터 (3~4Q)</option>
+                            <option value="4~5Q">4~5쿼터 (4~5Q)</option>
+                            <option value="5~6Q">5~6쿼터 (5~6Q)</option>
+                            <option value="1~3Q">1~3쿼터 (1~3Q)</option>
+                            <option value="2~4Q">2~4쿼터 (2~4Q)</option>
+                            <option value="3~5Q">3~5쿼터 (3~5Q)</option>
+                            <option value="4~6Q">4~6쿼터 (4~6Q)</option>
+                            <option value="1~4Q">1~4쿼터 (1~4Q)</option>
+                          </optgroup>
+                          {!['1Q','2Q','3Q','4Q','5Q','6Q','전체','1~2Q','2~3Q','3~4Q','4~5Q','5~6Q','1~3Q','2~4Q','3~5Q','4~6Q','1~4Q'].includes(gpsQuarterLabel) && (
+                            <option value={gpsQuarterLabel}>{gpsQuarterLabel}</option>
+                          )}
                         </select>
                       </div>
 
@@ -5951,19 +6017,70 @@ const renderGoalFlowModal = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">⏱️ 쿼터 선택</label>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {['1Q', '2Q', '3Q', '4Q', '5Q', '6Q', '전체'].map(q => (
-                    <button
-                      key={q}
-                      type="button"
-                      onClick={() => setGpsRecordEditModal(prev => ({ ...prev, quarterLabel: q }))}
-                      className={`py-2 rounded-xl text-xs font-bold border transition whitespace-nowrap ${gpsRecordEditModal.quarterLabel === q ? 'bg-emerald-600 text-white border-emerald-500 shadow' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}`}
-                    >
-                      {q === '전체' ? '경기 전체' : `${q.replace('Q', '')}쿼터`}
-                    </button>
-                  ))}
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-400">
+                    ⏱️ 쿼터 선택 <span className="text-[10px] font-normal text-slate-500">(복수 터치 시 3~4Q 자동 조합)</span>
+                  </label>
+                  <span className="text-[11px] font-black px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
+                    표시: {gpsRecordEditModal.quarterLabel}
+                  </span>
                 </div>
+                {(() => {
+                  const selectedNums = parseQuarterLabelToNums(gpsRecordEditModal.quarterLabel);
+                  const isAll = gpsRecordEditModal.quarterLabel === '전체';
+                  return (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {[1, 2, 3, 4, 5, 6].map(qNum => {
+                          const isSelected = !isAll && selectedNums.includes(qNum);
+                          return (
+                            <button
+                              key={qNum}
+                              type="button"
+                              onClick={() => {
+                                setGpsRecordEditModal(prev => {
+                                  if (!prev.quarterTouched) {
+                                    return { ...prev, quarterTouched: true, quarterLabel: `${qNum}Q` };
+                                  }
+                                  return {
+                                    ...prev,
+                                    quarterTouched: true,
+                                    quarterLabel: toggleQuarterInLabel(prev.quarterLabel, qNum)
+                                  };
+                                });
+                              }}
+                              className={`py-2 rounded-xl text-xs font-bold border transition whitespace-nowrap ${isSelected ? 'bg-emerald-600 text-white border-emerald-500 shadow' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}`}
+                            >
+                              {qNum}쿼터
+                            </button>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          onClick={() => setGpsRecordEditModal(prev => ({ ...prev, quarterTouched: false, quarterLabel: '전체' }))}
+                          className={`col-span-2 py-2 rounded-xl text-xs font-bold border transition whitespace-nowrap ${isAll ? 'bg-emerald-600 text-white border-emerald-500 shadow' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}`}
+                        >
+                          경기 전체
+                        </button>
+                      </div>
+
+                      {/* 자주 쓰는 연속 쿼터 원터치 버튼 */}
+                      <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar pt-0.5">
+                        <span className="text-[10px] text-slate-500 font-bold shrink-0">연속 측정:</span>
+                        {['1~2Q', '2~3Q', '3~4Q', '4~5Q', '5~6Q', '1~3Q', '2~4Q'].map(preset => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setGpsRecordEditModal(prev => ({ ...prev, quarterTouched: true, quarterLabel: preset }))}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition shrink-0 whitespace-nowrap ${gpsRecordEditModal.quarterLabel === preset ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-900/80 text-slate-400 border-slate-700 hover:text-white'}`}
+                          >
+                            {preset.replace('Q', '쿼터')}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div>
