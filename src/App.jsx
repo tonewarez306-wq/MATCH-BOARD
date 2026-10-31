@@ -4741,86 +4741,37 @@ const renderGoalFlowModal = () => {
         )}
 
         {activeTab === 'gps' && (
-          <div className="space-y-4 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar pb-6">
+          <div className="space-y-3.5 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar pb-6 break-keep">
             {/* 상단 타이틀 및 가이드 버튼 */}
             <div className="flex justify-between items-center gap-2">
-              <div>
-                <h2 className="text-xl font-black text-white flex items-center gap-2">
-                  <Activity size={20} className="text-emerald-400 shrink-0"/> GPS 활동량
+              <div className="min-w-0">
+                <h2 className="text-lg sm:text-xl font-black text-white flex items-center gap-2 whitespace-nowrap">
+                  <Activity size={20} className="text-emerald-400 shrink-0"/> GPS 활동 분석
                 </h2>
-                <p className="text-[11px] text-slate-400 mt-0.5">애플워치 · 갤럭시워치 히트맵 & 스프린트 분석</p>
+                <p className="text-[11px] text-slate-400 mt-0.5 truncate">워치 GPX 파일로 히트맵 · 최고속도 · 질주 분석</p>
               </div>
               <button
                 type="button"
                 onClick={() => setGpsGuideModal(true)}
-                className="text-xs bg-slate-800 hover:bg-slate-700 text-emerald-400 px-3 py-2 rounded-xl font-bold border border-emerald-500/30 flex items-center gap-1.5 transition shrink-0 shadow-sm"
+                className="text-xs bg-slate-800 hover:bg-slate-700 text-emerald-400 px-3 py-2 rounded-xl font-bold border border-emerald-500/30 flex items-center gap-1.5 transition shrink-0 whitespace-nowrap shadow-sm"
               >
                 <span>⌚</span> 워치 연동법
               </button>
             </div>
 
-            {/* 측정 / 파일 불러오기 액션 컨트롤 카드 */}
-            <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-3.5 space-y-2.5 shadow-sm">
-              <div className="grid grid-cols-2 gap-2">
-                <label className="cursor-pointer bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-black text-xs py-3 px-2 rounded-xl flex items-center justify-center gap-1.5 shadow-md transition text-center whitespace-nowrap">
-                  <span>📂</span> GPX/TCX 파일 열기
+            {/* STEP 1. 파일 불러오기 & 구장 선택 컨트롤 카드 */}
+            <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-3 space-y-2.5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <label className="flex-1 cursor-pointer bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-black text-xs py-3 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow-md transition text-center whitespace-nowrap">
+                  <span>📂</span> 워치 기록 파일(GPX) 불러오기
                   <input type="file" onChange={handleGpsFileUpload} className="hidden" />
                 </label>
-
-                {!isLiveGpsTracking ? (
-                  <button
-                    type="button"
-                    onClick={startLiveSmartphoneGps}
-                    className="bg-slate-900 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 font-bold text-xs py-3 px-2 rounded-xl flex items-center justify-center gap-1.5 transition whitespace-nowrap"
-                  >
-                    <span>📡</span> 폰 실시간 GPS 측정
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={stopLiveSmartphoneGps}
-                    className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 font-black text-xs py-3 px-2 rounded-xl flex items-center justify-center gap-1.5 animate-pulse transition whitespace-nowrap"
-                  >
-                    <span>⏹</span> 측정 종료 및 분석
-                  </button>
-                )}
-              </div>
-
-              {/* 실시간 스마트폰 GPS 측정 중 상태창 */}
-              {isLiveGpsTracking && (
-                <div className="bg-slate-900 border border-red-500/40 rounded-xl p-3 space-y-2 animate-in fade-in">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-black text-red-400 flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
-                      실시간 GPS 경로 수집 중... (화면을 켜두세요)
-                    </span>
-                    <span className="text-[11px] text-slate-400 font-bold">{liveGpsStats.pointCount} pt</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-center pt-1">
-                    <div className="bg-slate-800/80 rounded-lg p-2">
-                      <div className="text-[10px] text-slate-400">경과 시간</div>
-                      <div className="text-sm font-black text-white">{formatDurationKo(liveGpsStats.elapsedSec)}</div>
-                    </div>
-                    <div className="bg-slate-800/80 rounded-lg p-2">
-                      <div className="text-[10px] text-slate-400">이동 거리</div>
-                      <div className="text-sm font-black text-emerald-400">{liveGpsStats.distanceKm} km</div>
-                    </div>
-                    <div className="bg-slate-800/80 rounded-lg p-2">
-                      <div className="text-[10px] text-slate-400">현재/최고 속도</div>
-                      <div className="text-sm font-black text-amber-400">{liveGpsStats.currentSpeedKmh} <span className="text-[10px] text-slate-400">/ {liveGpsStats.maxSpeedKmh}</span></div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center justify-between gap-2 pt-0.5 px-0.5">
-                <span className="text-[11px] text-slate-400 whitespace-nowrap truncate">워치 파일 없이도 바로 체험해보세요!</span>
                 <button
                   type="button"
                   onClick={loadSampleGpsSession}
-                  className="text-[11px] font-bold text-blue-400 hover:text-blue-300 bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-lg transition shrink-0 whitespace-nowrap"
+                  className="bg-slate-900 hover:bg-slate-700 text-blue-400 border border-blue-500/30 font-bold text-xs py-3 px-3 rounded-xl transition shrink-0 whitespace-nowrap"
                 >
-                  🧪 샘플 기록 체험
+                  🧪 샘플 체험
                 </button>
               </div>
 
@@ -4829,12 +4780,12 @@ const renderGoalFlowModal = () => {
                 <select
                   value={gpsSelectedPitchId}
                   onChange={(e) => setGpsSelectedPitchId(e.target.value)}
-                  className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-white outline-none"
+                  className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-white outline-none truncate"
                 >
                   <option value="auto">⚡ 자동 영역 맞춤 (구장 미지정)</option>
                   {allGpsPitches.map(pitch => (
                     <option key={pitch.id} value={pitch.id}>
-                      🏟️ {pitch.name} (위성 4점 매핑)
+                      🏟️ {pitch.name}
                     </option>
                   ))}
                 </select>
@@ -4843,7 +4794,7 @@ const renderGoalFlowModal = () => {
                   onClick={() => setPitchManagerModal(true)}
                   className="bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 px-3 py-2 rounded-xl text-xs font-bold transition shrink-0 whitespace-nowrap flex items-center gap-1"
                 >
-                  <span>🏟️</span> 구장 등록/관리
+                  <span>🏟️</span> 구장 등록
                 </button>
               </div>
             </div>
@@ -4853,12 +4804,16 @@ const renderGoalFlowModal = () => {
               <div className="space-y-3 animate-in fade-in">
                 {/* 경기 일정 / 선수 / 쿼터 지정 및 저장/공유 컨트롤 바 */}
                 <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-3 space-y-2">
+                  <div className="text-[11px] font-bold text-emerald-400 flex items-center justify-between px-0.5">
+                    <span className="whitespace-nowrap">📌 내 기록을 팀 경기 일정에 저장하기</span>
+                    <span className="text-[10px] text-slate-400 font-normal whitespace-nowrap">일정·이름·쿼터 선택</span>
+                  </div>
                   <select
                     value={gpsSelectedMatchId}
                     onChange={(e) => setGpsSelectedMatchId(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-200 outline-none"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-200 outline-none truncate"
                   >
-                    <option value="">📅 저장할 경기 일정 선택 (미선택 시 {gpsSession.date} 기록)</option>
+                    <option value="">📅 저장할 경기 일정 선택 (미선택 시 {gpsSession.date} 자유기록)</option>
                     {[...currentTeamMatches]
                       .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
                       .map(m => {
@@ -4875,9 +4830,9 @@ const renderGoalFlowModal = () => {
                     <select
                       value={gpsSelectedPlayerId}
                       onChange={(e) => setGpsSelectedPlayerId(e.target.value)}
-                      className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none"
+                      className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none truncate"
                     >
-                      <option value="">선수 선택 (내 이름 지정)</option>
+                      <option value="">👤 선수 선택 (내 이름 지정)</option>
                       {currentTeamPlayers.map(p => (
                         <option key={p.id} value={p.id}>{p.name} ({p.birthYear})</option>
                       ))}
@@ -4885,7 +4840,7 @@ const renderGoalFlowModal = () => {
                     <select
                       value={gpsQuarterLabel}
                       onChange={(e) => setGpsQuarterLabel(e.target.value)}
-                      className="w-24 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-emerald-400 outline-none"
+                      className="w-24 shrink-0 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-emerald-400 outline-none"
                     >
                       <option value="1Q">1쿼터</option>
                       <option value="2Q">2쿼터</option>
@@ -4896,80 +4851,80 @@ const renderGoalFlowModal = () => {
                       <option value="전체">경기 전체</option>
                     </select>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={() => saveGpsSessionToTeam()}
-                      className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow"
+                      className="py-2.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow whitespace-nowrap"
                     >
                       💾 팀 기록에 저장
                     </button>
                     <button
                       type="button"
                       onClick={triggerGpsShare}
-                      className="flex-1 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5"
+                      className="py-2.5 px-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 whitespace-nowrap"
                     >
-                      <Share2 size={14}/> 히트맵 카드 공유
+                      <Share2 size={14} className="shrink-0"/> 히트맵 이미지 공유
                     </button>
                   </div>
                 </div>
 
                 {/* 캡처 및 공유 대상 영역 */}
-                <div ref={gpsCardCaptureRef} className="bg-slate-900 border border-slate-700/90 rounded-3xl p-4 space-y-4 shadow-xl">
+                <div ref={gpsCardCaptureRef} className="bg-slate-900 border border-slate-700/90 rounded-3xl p-3.5 sm:p-4 space-y-3.5 shadow-xl">
                   {/* 리포트 헤더 */}
-                  <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-black px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  <div className="flex justify-between items-center gap-2 border-b border-slate-800 pb-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-black px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 whitespace-nowrap">
                           {gpsQuarterLabel}
                         </span>
-                        <span className="text-base font-black text-white">
+                        <span className="text-base font-black text-white truncate">
                           {currentTeamPlayers.find(p => p.id === gpsSelectedPlayerId)?.name || gpsSession.playerName || 'GPS 활동 리포트'}
                         </span>
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5 flex-wrap">
-                        <span>{gpsSession.date} · {gpsSession.title}</span>
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${gpsSelectedPitchId !== 'auto' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'}`}>
+                      <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5 min-w-0">
+                        <span className="truncate">{gpsSession.date} · {gpsSession.title}</span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0 whitespace-nowrap ${gpsSelectedPitchId !== 'auto' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'}`}>
                           {gpsSelectedPitchId !== 'auto' ? `🏟️ ${allGpsPitches.find(p => p.id === gpsSelectedPitchId)?.name || '지정 구장'}` : '⚡ 자동 맞춤'}
                         </span>
                       </div>
                     </div>
-                    <div className="text-right bg-slate-800/90 px-3 py-1.5 rounded-2xl border border-slate-700">
-                      <div className="text-[10px] text-slate-400 font-bold">활동 평점</div>
-                      <div className="text-lg font-black text-yellow-400 leading-tight">{gpsSession.activityScore}<span className="text-xs text-slate-400 font-normal">점</span></div>
+                    <div className="text-right bg-slate-800/90 px-3 py-1.5 rounded-2xl border border-slate-700 shrink-0 whitespace-nowrap">
+                      <div className="text-[10px] text-slate-400 font-bold whitespace-nowrap">활동 평점</div>
+                      <div className="text-lg font-black text-yellow-400 leading-tight whitespace-nowrap">{gpsSession.activityScore}<span className="text-xs text-slate-400 font-normal ml-0.5">점</span></div>
                     </div>
                   </div>
 
-                  {/* 피치 뷰 모드 전환 & 방향 보정 컨트롤 (반전/축회전 상하 배치로 뷰 탭 가로 폭 확보) */}
-                  <div className="flex items-stretch justify-between gap-2">
+                  {/* 피치 뷰 모드 전환 & 방향 보정 컨트롤 */}
+                  <div className="flex items-stretch justify-between gap-1.5">
                     <div className="grid grid-cols-3 bg-slate-800 p-1 rounded-xl border border-slate-700 flex-1 gap-1 items-center">
                       <button
                         type="button"
                         onClick={() => { setGpsViewMode('heatmap'); setGpsReplayPlaying(false); }}
-                        className={`h-full py-2 px-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1 ${gpsViewMode === 'heatmap' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                        className={`h-full py-2 px-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1 ${gpsViewMode === 'heatmap' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                       >
                         🔥 히트맵
                       </button>
                       <button
                         type="button"
                         onClick={() => { setGpsViewMode('sprint'); setGpsReplayPlaying(false); }}
-                        className={`h-full py-2 px-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1 ${gpsViewMode === 'sprint' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'}`}
+                        className={`h-full py-2 px-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1 ${gpsViewMode === 'sprint' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'}`}
                       >
                         ⚡ 스프린트
                       </button>
                       <button
                         type="button"
                         onClick={() => { setGpsViewMode('replay'); if (gpsReplayProgress >= 100) setGpsReplayProgress(0); setGpsReplayPlaying(true); }}
-                        className={`h-full py-2 px-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1 ${gpsViewMode === 'replay' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                        className={`h-full py-2 px-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1 ${gpsViewMode === 'replay' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                       >
-                        ▶️ 2D 리플레이
+                        ▶️ 리플레이
                       </button>
                     </div>
                     <div className="flex flex-col gap-1 shrink-0">
                       <button
                         type="button"
                         onClick={() => setGpsFlipVertical(v => !v)}
-                        className="h-6 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[10px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1"
+                        className="h-6 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[10px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1"
                         title="공격 방향 상하 반전"
                       >
                         🔄 반전
@@ -4977,7 +4932,7 @@ const renderGoalFlowModal = () => {
                       <button
                         type="button"
                         onClick={() => setGpsRotate90(v => !v)}
-                        className="h-6 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[10px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1"
+                        className="h-6 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[10px] font-bold transition whitespace-nowrap flex items-center justify-center gap-1"
                         title="경기장 축 90도 회전"
                       >
                         📐 축회전
@@ -4994,7 +4949,7 @@ const renderGoalFlowModal = () => {
                       className="w-full max-w-[320px] rounded-2xl border-2 border-emerald-500/40 shadow-inner"
                     />
                     {/* 범례 */}
-                    <div className="flex items-center justify-center gap-4 mt-2 text-[10px] text-slate-400 font-bold">
+                    <div className="flex items-center justify-center gap-3 mt-2 text-[10px] text-slate-400 font-bold whitespace-nowrap">
                       {gpsViewMode === 'sprint' ? (
                         <>
                           <span className="flex items-center gap-1"><span className="w-2.5 h-1 bg-sky-400 inline-block rounded"></span> 고속 러닝 (14~20km/h)</span>
@@ -5003,7 +4958,7 @@ const renderGoalFlowModal = () => {
                       ) : (
                         <div className="flex items-center gap-1.5">
                           <span>낮음</span>
-                          <div className="w-28 h-2 rounded-full bg-gradient-to-r from-blue-500 via-green-400 via-yellow-400 to-red-500"></div>
+                          <div className="w-24 sm:w-28 h-2 rounded-full bg-gradient-to-r from-blue-500 via-green-400 via-yellow-400 to-red-500"></div>
                           <span>높음 (활동 밀집도)</span>
                         </div>
                       )}
@@ -5012,16 +4967,16 @@ const renderGoalFlowModal = () => {
 
                   {/* 리플레이 컨트롤 바 (리플레이 모드일 때만 표시) */}
                   {gpsViewMode === 'replay' && (
-                    <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-3 flex items-center gap-2.5">
+                    <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-2.5 flex items-center gap-2">
                       <button
                         type="button"
                         onClick={() => {
                           if (gpsReplayProgress >= 100) setGpsReplayProgress(0);
                           setGpsReplayPlaying(p => !p);
                         }}
-                        className="px-3 py-1.5 bg-blue-500 hover:bg-blue-400 text-white rounded-lg text-xs font-black shrink-0"
+                        className="px-2.5 py-1.5 bg-blue-500 hover:bg-blue-400 text-white rounded-lg text-xs font-black shrink-0 whitespace-nowrap"
                       >
-                        {gpsReplayPlaying ? '⏸ 일시정지' : '▶ 재생'}
+                        {gpsReplayPlaying ? '⏸ 정지' : '▶ 재생'}
                       </button>
                       <input
                         type="range"
@@ -5029,51 +4984,67 @@ const renderGoalFlowModal = () => {
                         max="100"
                         value={Math.round(gpsReplayProgress)}
                         onChange={(e) => { setGpsReplayPlaying(false); setGpsReplayProgress(Number(e.target.value)); }}
-                        className="flex-1 accent-blue-500"
+                        className="flex-1 min-w-0 accent-blue-500"
                       />
                       <button
                         type="button"
                         onClick={() => setGpsReplaySpeed(s => (s === 1 ? 2 : s === 2 ? 4 : 1))}
-                        className="px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-[11px] font-black text-blue-400 shrink-0"
+                        className="px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-[11px] font-black text-blue-400 shrink-0 whitespace-nowrap"
                       >
                         {gpsReplaySpeed}x 배속
                       </button>
                     </div>
                   )}
 
-                  {/* 핵심 스탯 6종 그리드 */}
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5">
-                      <div className="text-[10px] font-bold text-slate-400">총 이동거리</div>
-                      <div className="text-base font-black text-emerald-400 mt-0.5">{gpsSession.totalDistanceKm} <span className="text-[11px] font-bold">km</span></div>
+                  {/* 핵심 스탯 6종 그리드 (갤럭시 모바일 줄바꿈 방지 적용) */}
+                  <div className="grid grid-cols-3 gap-1.5 sm:gap-2 text-center">
+                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl py-2.5 px-1.5 min-w-0">
+                      <div className="text-[10px] font-bold text-slate-400 whitespace-nowrap">총 이동거리</div>
+                      <div className="text-sm sm:text-base font-black text-emerald-400 mt-0.5 whitespace-nowrap tracking-tight">
+                        {gpsSession.totalDistanceKm}<span className="text-[10px] font-bold ml-0.5">km</span>
+                      </div>
                     </div>
-                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5">
-                      <div className="text-[10px] font-bold text-slate-400">최고 속도</div>
-                      <div className="text-base font-black text-amber-400 mt-0.5">{gpsSession.maxSpeedKmh} <span className="text-[11px] font-bold">km/h</span></div>
+                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl py-2.5 px-1.5 min-w-0">
+                      <div className="text-[10px] font-bold text-slate-400 whitespace-nowrap">최고 속도</div>
+                      <div className="text-sm sm:text-base font-black text-amber-400 mt-0.5 whitespace-nowrap tracking-tight">
+                        {gpsSession.maxSpeedKmh}<span className="text-[10px] font-bold ml-0.5">km/h</span>
+                      </div>
                     </div>
-                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5">
-                      <div className="text-[10px] font-bold text-slate-400">스프린트</div>
-                      <div className="text-base font-black text-yellow-300 mt-0.5">{gpsSession.sprintCount} <span className="text-[11px] font-bold">회 ({gpsSession.sprintDistanceM}m)</span></div>
+                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl py-2.5 px-1.5 min-w-0">
+                      <div className="text-[10px] font-bold text-slate-400 whitespace-nowrap">스프린트</div>
+                      <div className="text-sm sm:text-base font-black text-yellow-300 mt-0.5 whitespace-nowrap tracking-tight">
+                        {gpsSession.sprintCount}회<span className="text-[10px] text-slate-300 font-bold ml-0.5">({gpsSession.sprintDistanceM}m)</span>
+                      </div>
                     </div>
-                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5">
-                      <div className="text-[10px] font-bold text-slate-400">활동 시간</div>
-                      <div className="text-sm font-black text-white mt-0.5">{formatDurationKo(gpsSession.durationSec)}</div>
+                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl py-2.5 px-1.5 min-w-0">
+                      <div className="text-[10px] font-bold text-slate-400 whitespace-nowrap">활동 시간</div>
+                      <div className="text-xs sm:text-sm font-black text-white mt-0.5 whitespace-nowrap tracking-tight">
+                        {formatDurationKo(gpsSession.durationSec)}
+                      </div>
                     </div>
-                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5">
-                      <div className="text-[10px] font-bold text-slate-400">평균 속도</div>
-                      <div className="text-sm font-black text-blue-400 mt-0.5">{gpsSession.avgSpeedKmh} <span className="text-[10px]">km/h</span></div>
+                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl py-2.5 px-1.5 min-w-0">
+                      <div className="text-[10px] font-bold text-slate-400 whitespace-nowrap">평균 속도</div>
+                      <div className="text-xs sm:text-sm font-black text-blue-400 mt-0.5 whitespace-nowrap tracking-tight">
+                        {gpsSession.avgSpeedKmh}<span className="text-[10px] font-bold ml-0.5">km/h</span>
+                      </div>
                     </div>
-                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5">
-                      <div className="text-[10px] font-bold text-slate-400">{gpsSession.avgHr ? '평균/최고 심박' : '소모 칼로리'}</div>
-                      <div className="text-sm font-black text-rose-400 mt-0.5">
-                        {gpsSession.avgHr ? `${gpsSession.avgHr}/${gpsSession.maxHr} bpm` : `${gpsSession.calories} kcal`}
+                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl py-2.5 px-1.5 min-w-0">
+                      <div className="text-[10px] font-bold text-slate-400 whitespace-nowrap">
+                        {gpsSession.avgHr ? '평균/최고 심박' : '소모 칼로리'}
+                      </div>
+                      <div className="text-xs sm:text-sm font-black text-rose-400 mt-0.5 whitespace-nowrap tracking-tight">
+                        {gpsSession.avgHr ? (
+                          <>{gpsSession.avgHr}/{gpsSession.maxHr}<span className="text-[10px] font-bold ml-0.5">bpm</span></>
+                        ) : (
+                          <>{gpsSession.calories}<span className="text-[10px] font-bold ml-0.5">kcal</span></>
+                        )}
                       </div>
                     </div>
                   </div>
 
                   {/* 속도 구간별 비중 바 (Speed Zones) */}
                   <div className="bg-slate-800/70 border border-slate-700/70 rounded-2xl p-3 space-y-2">
-                    <div className="flex justify-between items-center text-[11px] font-bold text-slate-300">
+                    <div className="flex justify-between items-center text-[11px] font-bold text-slate-300 whitespace-nowrap">
                       <span>속도 구간별 활동 비율</span>
                       <span className="text-[10px] text-slate-400">소모 칼로리 약 {gpsSession.calories} kcal</span>
                     </div>
@@ -5083,7 +5054,7 @@ const renderGoalFlowModal = () => {
                       <div style={{ width: `${gpsSession.zones?.run || 0}%` }} className="bg-sky-400 h-full" title="러닝" />
                       <div style={{ width: `${gpsSession.zones?.sprint || 0}%` }} className="bg-amber-400 h-full" title="스프린트" />
                     </div>
-                    <div className="grid grid-cols-4 gap-1 text-[10px] text-center font-bold pt-0.5">
+                    <div className="grid grid-cols-4 gap-1 text-[10px] text-center font-bold pt-0.5 whitespace-nowrap">
                       <div className="text-slate-400">걷기 {gpsSession.zones?.walk || 0}%</div>
                       <div className="text-emerald-400">조깅 {gpsSession.zones?.jog || 0}%</div>
                       <div className="text-sky-400">러닝 {gpsSession.zones?.run || 0}%</div>
@@ -5093,29 +5064,35 @@ const renderGoalFlowModal = () => {
                 </div>
               </div>
             ) : (
-              <div className="bg-slate-800/50 border border-slate-700/70 rounded-2xl p-6 text-center space-y-3">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-2xl">
-                  ⌚
-                </div>
-                <div className="text-white font-bold text-base">스마트워치 GPS 기록을 불러와보세요!</div>
-                <p className="text-xs text-slate-400 leading-relaxed max-w-xs mx-auto">
-                  애플워치·갤럭시워치로 측정한 운동 파일(<strong className="text-slate-200">GPX/TCX</strong>)을 열면 2D 축구장 <strong className="text-emerald-400">네온 히트맵, 최고 속도, 스프린트 횟수, 동선 리플레이</strong>가 즉시 생성됩니다.
-                </p>
-                <div className="flex justify-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={loadSampleGpsSession}
-                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition shadow"
-                  >
-                    🧪 샘플 데이터로 미리보기
-                  </button>
+              <div className="bg-slate-800/60 border border-slate-700/70 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-black text-white flex items-center gap-1.5">
+                    <span className="text-emerald-400">💡</span> 처음 사용하시나요? 3단계로 간단합니다!
+                  </div>
                   <button
                     type="button"
                     onClick={() => setGpsGuideModal(true)}
-                    className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold text-xs rounded-xl transition"
+                    className="text-[11px] font-bold text-emerald-400 hover:underline whitespace-nowrap shrink-0"
                   >
-                    ⌚ 워치 파일 추출법
+                    상세 가이드 &gt;
                   </button>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-slate-900/80 border border-slate-700/70 rounded-xl p-2.5 space-y-1">
+                    <div className="text-[10px] font-black text-emerald-400 whitespace-nowrap">STEP 1</div>
+                    <div className="text-xs font-bold text-white whitespace-nowrap">워치 [달리기]</div>
+                    <div className="text-[10px] text-slate-400 leading-snug">축구 대신 달리기 모드로 경기 측정</div>
+                  </div>
+                  <div className="bg-slate-900/80 border border-slate-700/70 rounded-xl p-2.5 space-y-1">
+                    <div className="text-[10px] font-black text-blue-400 whitespace-nowrap">STEP 2</div>
+                    <div className="text-xs font-bold text-white whitespace-nowrap">GPX 내보내기</div>
+                    <div className="text-[10px] text-slate-400 leading-snug">운동 기록에서 GPX 파일로 폰에 저장</div>
+                  </div>
+                  <div className="bg-slate-900/80 border border-slate-700/70 rounded-xl p-2.5 space-y-1">
+                    <div className="text-[10px] font-black text-amber-400 whitespace-nowrap">STEP 3</div>
+                    <div className="text-xs font-bold text-white whitespace-nowrap">파일 불러오기</div>
+                    <div className="text-[10px] text-slate-400 leading-snug">위 파란 버튼으로 열면 히트맵 완성!</div>
+                  </div>
                 </div>
               </div>
             )}
@@ -5132,12 +5109,12 @@ const renderGoalFlowModal = () => {
                   })) || []);
 
               return (
-                <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 space-y-3">
-                  <div className="flex justify-between items-center">
-                    <h3 className="text-xs font-black text-slate-300 flex items-center gap-1.5">
+                <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-3.5 sm:p-4 space-y-3">
+                  <div className="flex justify-between items-center gap-2">
+                    <h3 className="text-xs font-black text-slate-200 flex items-center gap-1.5 whitespace-nowrap">
                       🏆 우리 팀 저장된 GPS 기록 ({displayedRecords.length})
                     </h3>
-                    <span className="text-[10px] text-slate-500">터치하여 히트맵 보기</span>
+                    <span className="text-[10px] text-slate-400 whitespace-nowrap">터치하여 히트맵 보기</span>
                   </div>
 
                   {/* 경기 탭과 동일한 월별 이동 바 */}
@@ -5149,7 +5126,7 @@ const renderGoalFlowModal = () => {
                     >
                       <ChevronLeft size={18}/>
                     </button>
-                    <span className="text-sm font-black text-white">
+                    <span className="text-sm font-black text-white whitespace-nowrap">
                       {viewDate.getFullYear()}년 {viewDate.getMonth() + 1}월
                     </span>
                     <button
@@ -5165,7 +5142,7 @@ const renderGoalFlowModal = () => {
                   <select
                     value={activeKey}
                     onChange={(e) => setGpsViewScheduleKey(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none truncate"
                   >
                     <option value="all">
                       📅 {viewDate.getMonth() + 1}월 전체 일정 보기 ({monthGroups.reduce((s, g) => s + g.records.length, 0)}건)
@@ -5208,30 +5185,30 @@ const renderGoalFlowModal = () => {
                           }}
                           className={`p-3 rounded-xl border transition cursor-pointer flex items-center justify-between gap-2 ${gpsSession?.id === rec.id ? 'bg-slate-900 border-emerald-500/50' : 'bg-slate-900/70 border-slate-700/80 hover:border-slate-600'}`}
                         >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 whitespace-nowrap">
                                 {rec.quarterLabel || '기록'}
                               </span>
-                              <span className="text-sm font-black text-white truncate">{rec.playerName || '선수'}</span>
+                              <span className="text-sm font-black text-white truncate shrink-0">{rec.playerName || '선수'}</span>
                               <span className="text-[10px] text-slate-400 truncate">
                                 {(rec.date || '').slice(5).replace('-', '/')} {rec._scheduleLabel ? `· ${rec._scheduleLabel}` : ''}
                               </span>
                             </div>
-                            <div className="flex items-center gap-2.5 mt-1 text-[11px] text-slate-300 font-bold">
+                            <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-300 font-bold whitespace-nowrap overflow-x-auto hide-scrollbar">
                               <span>🏃 <strong className="text-emerald-400">{rec.totalDistanceKm}km</strong></span>
                               <span>⚡ 최고 <strong className="text-amber-400">{rec.maxSpeedKmh}km/h</strong></span>
                               <span>🔥 질주 <strong className="text-yellow-300">{rec.sprintCount}회</strong></span>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="text-xs font-black text-yellow-400 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700">
+                          <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+                            <span className="text-xs font-black text-yellow-400 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700 whitespace-nowrap">
                               {rec.activityScore}점
                             </span>
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); requestDeleteGpsRecord(rec.id); }}
-                              className="p-1.5 text-slate-500 hover:text-red-400 transition"
+                              className="p-1.5 text-slate-500 hover:text-red-400 transition shrink-0"
                               title="기록 삭제"
                             >
                               <Trash2 size={14}/>
@@ -5330,27 +5307,27 @@ const renderGoalFlowModal = () => {
       )}
 
       {gpsGuideModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[200] p-4 animate-in fade-in zoom-in-95">
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[200] p-4 animate-in fade-in zoom-in-95 break-keep">
           <div className="bg-slate-800 p-5 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[86vh] flex flex-col relative">
             <div className="flex justify-between items-center mb-4 shrink-0">
-              <h2 className="text-lg font-black text-white flex items-center gap-2">
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2 whitespace-nowrap">
                 <span>⌚</span> 스마트워치 GPS 연동 가이드
               </h2>
-              <button onClick={() => setGpsGuideModal(false)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+              <button onClick={() => setGpsGuideModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
             </div>
 
             <div className="grid grid-cols-2 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1 mb-4 shrink-0">
               <button
                 type="button"
                 onClick={() => setGpsGuideTab('android')}
-                className={`py-2 rounded-lg text-xs font-bold transition ${gpsGuideTab === 'android' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                className={`py-2 px-1 rounded-lg text-xs font-bold transition whitespace-nowrap ${gpsGuideTab === 'android' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
               >
                 🤖 갤럭시워치 (삼성헬스)
               </button>
               <button
                 type="button"
                 onClick={() => setGpsGuideTab('ios')}
-                className={`py-2 rounded-lg text-xs font-bold transition ${gpsGuideTab === 'ios' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                className={`py-2 px-1 rounded-lg text-xs font-bold transition whitespace-nowrap ${gpsGuideTab === 'ios' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
               >
                 🍎 애플워치 (iOS)
               </button>
@@ -5455,16 +5432,16 @@ const renderGoalFlowModal = () => {
       )}
 
       {pitchManagerModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[210] p-3 sm:p-4 animate-in fade-in zoom-in-95">
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[210] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
           <div className="bg-slate-800 p-4 sm:p-5 rounded-3xl w-full max-w-md border border-slate-700 shadow-2xl max-h-[92vh] flex flex-col relative">
-            <div className="flex justify-between items-center mb-3 shrink-0">
-              <div>
-                <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">
+            <div className="flex justify-between items-center mb-3 shrink-0 gap-2">
+              <div className="min-w-0">
+                <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 whitespace-nowrap">
                   <span>🏟️</span> 위성지도 구장(코너 4곳) 등록
                 </h2>
-                <p className="text-[11px] text-slate-400">위성사진의 축구장 네 귀퉁이에 1~4번 핀을 맞춰주세요</p>
+                <p className="text-[11px] text-slate-400 truncate">위성사진의 축구장 네 귀퉁이에 1~4번 핀을 맞춰주세요</p>
               </div>
-              <button onClick={() => setPitchManagerModal(false)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+              <button onClick={() => setPitchManagerModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-2.5 pr-0.5 hide-scrollbar">
@@ -5566,14 +5543,14 @@ const renderGoalFlowModal = () => {
                 <button
                   type="button"
                   onClick={placeCornersAtMapCenter}
-                  className="py-1.5 px-2 bg-slate-900 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 rounded-lg text-[11px] font-bold transition whitespace-nowrap"
+                  className="py-1.5 px-1.5 bg-slate-900 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 rounded-lg text-[11px] font-bold transition whitespace-nowrap"
                 >
-                  🎯 화면중앙에 틀 배치
+                  🎯 중앙에 배치
                 </button>
                 <button
                   type="button"
                   onClick={() => rotateDraftCorners(30)}
-                  className="py-1.5 px-2 bg-slate-900 hover:bg-slate-700 text-amber-300 border border-amber-500/30 rounded-lg text-[11px] font-bold transition whitespace-nowrap"
+                  className="py-1.5 px-1.5 bg-slate-900 hover:bg-slate-700 text-amber-300 border border-amber-500/30 rounded-lg text-[11px] font-bold transition whitespace-nowrap"
                 >
                   🔄 구장 틀 회전
                 </button>
@@ -5593,18 +5570,18 @@ const renderGoalFlowModal = () => {
                       });
                     }
                   }}
-                  className="py-1.5 px-2 bg-slate-900 hover:bg-slate-700 text-blue-400 border border-blue-500/30 rounded-lg text-[11px] font-bold transition whitespace-nowrap"
+                  className="py-1.5 px-1.5 bg-slate-900 hover:bg-slate-700 text-blue-400 border border-blue-500/30 rounded-lg text-[11px] font-bold transition whitespace-nowrap"
                 >
-                  {gpsSession?.centerLat ? '📂 GPX 위치로 이동' : '📍 내 위치로 이동'}
+                  {gpsSession?.centerLat ? '📂 GPX 위치' : '📍 내 위치 이동'}
                 </button>
               </div>
 
               {/* 위성지도 영역 */}
               <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-500/40 shadow-inner bg-slate-950">
                 <div ref={pitchMapContainerRef} className="w-full h-64 sm:h-72 z-10" />
-                <div className="bg-slate-900/95 px-3 py-1.5 text-[10px] text-slate-300 flex items-center justify-between border-t border-slate-800">
-                  <span>🔴 <strong className="text-red-400">1·2번 핀</strong>: 공격 진영 코너</span>
-                  <span>🔵 <strong className="text-blue-400">3·4번 핀</strong>: 수비 진영 코너 (드래그 이동)</span>
+                <div className="bg-slate-900/95 px-2.5 py-1.5 text-[10px] text-slate-300 flex items-center justify-between gap-2 border-t border-slate-800 whitespace-nowrap">
+                  <span>🔴 <strong className="text-red-400">1·2번 핀</strong>: 공격 진영</span>
+                  <span>🔵 <strong className="text-blue-400">3·4번 핀</strong>: 수비 진영 (드래그)</span>
                 </div>
               </div>
 
