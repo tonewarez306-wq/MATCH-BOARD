@@ -311,8 +311,17 @@ export default function App() {
   const [gpsFlipVertical, setGpsFlipVertical] = useState(false);
   const [gpsRotate90, setGpsRotate90] = useState(false);
   const [gpsSelectedPlayerId, setGpsSelectedPlayerId] = useState('');
+  const [gpsCustomPlayerName, setGpsCustomPlayerName] = useState('');
   const [gpsQuarterLabel, setGpsQuarterLabel] = useState('1Q');
   const [gpsSelectedMatchId, setGpsSelectedMatchId] = useState('');
+  const [gpsRecordEditModal, setGpsRecordEditModal] = useState({
+    isOpen: false,
+    record: null,
+    playerId: '',
+    customPlayerName: '',
+    quarterLabel: '1Q',
+    matchId: ''
+  });
   const [gpsViewScheduleKey, setGpsViewScheduleKey] = useState('all');
   const [gpsReplayPlaying, setGpsReplayPlaying] = useState(false);
   const [gpsReplayProgress, setGpsReplayProgress] = useState(0); // 0..100
@@ -805,7 +814,7 @@ export default function App() {
   backStateRef.current = {
     appState, activeTab, goalFlow, logEditModal, quarterEditModal, detailModal,
     assignmentModal, matchModal, rosterModal, dateMemoModal, galleryModal,
-    shareModal, tacticsTutorialModal, gpsGuideModal, pitchManagerModal, installGuideModal, teamSettingsModal, authModal
+    shareModal, tacticsTutorialModal, gpsGuideModal, pitchManagerModal, gpsRecordEditModal, installGuideModal, teamSettingsModal, authModal
   };
 
   useEffect(() => {
@@ -813,6 +822,7 @@ export default function App() {
     window.history.pushState({ matchboardGuard: true }, '');
     const handlePopState = () => {
       const st = backStateRef.current;
+      if (st.gpsRecordEditModal?.isOpen) { setGpsRecordEditModal(prev => ({ ...prev, isOpen: false, record: null })); window.history.pushState({ matchboardGuard: true }, ''); return; }
       if (st.pitchManagerModal) { setPitchManagerModal(false); window.history.pushState({ matchboardGuard: true }, ''); return; }
       if (st.gpsGuideModal) { setGpsGuideModal(false); window.history.pushState({ matchboardGuard: true }, ''); return; }
       if (st.installGuideModal) { setInstallGuideModal(false); window.history.pushState({ matchboardGuard: true }, ''); return; }
@@ -2233,17 +2243,24 @@ export default function App() {
     };
   }, [gpsReplayPlaying, gpsReplaySpeed, gpsSession]);
 
-  const saveGpsSessionToTeam = async (overrideMatchId = null) => {
+  const saveGpsSessionToTeam = async (overrideMatchId = null, forceNew = false) => {
     if (!gpsSession || !activeTeamId || isProcessing) return;
-    const playerObj = currentTeamPlayers.find(p => p.id === gpsSelectedPlayerId);
-    const playerName = playerObj ? playerObj.name : '미지정 선수';
+    const isCustomName = gpsSelectedPlayerId === '__custom__';
+    const playerObj = !isCustomName ? currentTeamPlayers.find(p => p.id === gpsSelectedPlayerId) : null;
+    const playerName = isCustomName
+      ? (gpsCustomPlayerName.trim() || '미지정 선수')
+      : (playerObj ? playerObj.name : (gpsSession.playerName && gpsSession.playerName !== 'GPS 활동 리포트' ? gpsSession.playerName : '미지정 선수'));
+    const finalPlayerId = (!isCustomName && playerObj) ? playerObj.id : null;
     const targetMatchId = typeof overrideMatchId === 'string' ? overrideMatchId : gpsSelectedMatchId;
     const linkedMatch = currentTeamMatches.find(m => m.id === targetMatchId) || null;
     const effectiveDate = linkedMatch?.date || gpsSession.date;
 
+    const existingIdx = !forceNew ? savedGpsRecords.findIndex(r => r.id === gpsSession.id) : -1;
+    const isUpdatingExisting = existingIdx > -1;
+
     const recordToSave = {
       ...gpsSession,
-      id: 'gps_' + Date.now(),
+      id: isUpdatingExisting ? gpsSession.id : ('gps_' + Date.now()),
       date: effectiveDate,
       matchId: linkedMatch?.id || null,
       matchDate: effectiveDate,
@@ -2251,19 +2268,23 @@ export default function App() {
       matchType: linkedMatch?.matchType || null,
       opponentName: linkedMatch?.opponentName || null,
       pitchId: gpsSelectedPitchId !== 'auto' ? gpsSelectedPitchId : (gpsSession.matchedPitchId || null),
-      playerId: gpsSelectedPlayerId || null,
+      playerId: finalPlayerId,
       playerName,
       quarterLabel: gpsQuarterLabel,
-      savedAt: new Date().toISOString()
+      savedAt: isUpdatingExisting ? (gpsSession.savedAt || new Date().toISOString()) : new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
     setIsProcessing(true);
     try {
-      const updated = [recordToSave, ...savedGpsRecords].slice(0, 60);
+      const updated = isUpdatingExisting
+        ? savedGpsRecords.map((r, i) => (i === existingIdx ? recordToSave : r))
+        : [recordToSave, ...savedGpsRecords].slice(0, 60);
       await setDoc(doc(db, 'memos', `${activeTeamId}___gps_records__`), {
         teamId: activeTeamId,
         date: '__gps_records__',
         content: JSON.stringify(updated)
       });
+      setGpsSession(recordToSave);
       const schedKey = linkedMatch ? `match_${linkedMatch.id}` : `date_${effectiveDate}`;
       setGpsViewScheduleKey(schedKey);
       if (effectiveDate) {
@@ -2271,10 +2292,83 @@ export default function App() {
         if (y && m) setViewDate(new Date(y, m - 1, 1));
       }
       const matchLabel = linkedMatch ? `[${linkedMatch.date} ${linkedMatch.location}] 일정에 ` : '';
-      setSystemAlert({ isOpen: true, message: `${matchLabel}${playerName} 선수의 ${gpsQuarterLabel} GPS 기록이 저장되었습니다!` });
+      setSystemAlert({
+        isOpen: true,
+        message: isUpdatingExisting
+          ? `${matchLabel}${playerName} 선수의 ${gpsQuarterLabel} GPS 기록 정보가 수정되었습니다!`
+          : `${matchLabel}${playerName} 선수의 ${gpsQuarterLabel} GPS 기록이 저장되었습니다!`
+      });
     } catch (err) {
       console.error(err);
       setSystemAlert({ isOpen: true, message: 'GPS 기록 저장 중 오류가 발생했습니다.' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const openGpsRecordEditModal = (rec) => {
+    if (!rec) return;
+    const matchedPlayer = currentTeamPlayers.find(p => p.id === rec.playerId) || currentTeamPlayers.find(p => p.name === rec.playerName);
+    const hasCustomName = !matchedPlayer && rec.playerName && rec.playerName !== '미지정 선수' && rec.playerName !== '선수';
+    setGpsRecordEditModal({
+      isOpen: true,
+      record: rec,
+      playerId: matchedPlayer ? matchedPlayer.id : (hasCustomName ? '__custom__' : ''),
+      customPlayerName: hasCustomName ? rec.playerName : '',
+      quarterLabel: rec.quarterLabel || '1Q',
+      matchId: rec.matchId || ''
+    });
+  };
+
+  const saveEditedGpsRecord = async (e) => {
+    e.preventDefault();
+    const rec = gpsRecordEditModal.record;
+    if (!rec || !activeTeamId || isProcessing) return;
+
+    const isCustom = gpsRecordEditModal.playerId === '__custom__';
+    const playerObj = !isCustom ? currentTeamPlayers.find(p => p.id === gpsRecordEditModal.playerId) : null;
+    const finalPlayerId = playerObj ? playerObj.id : null;
+    const finalPlayerName = isCustom
+      ? (gpsRecordEditModal.customPlayerName.trim() || '미지정 선수')
+      : (playerObj ? playerObj.name : '미지정 선수');
+    const finalQuarter = gpsRecordEditModal.quarterLabel || '1Q';
+    const linkedMatch = currentTeamMatches.find(m => m.id === gpsRecordEditModal.matchId) || null;
+    const effectiveDate = linkedMatch?.date || rec.date;
+
+    const updatedRecord = {
+      ...rec,
+      date: effectiveDate,
+      matchId: linkedMatch?.id || null,
+      matchDate: effectiveDate,
+      matchLocation: linkedMatch?.location || null,
+      matchType: linkedMatch?.matchType || null,
+      opponentName: linkedMatch?.opponentName || null,
+      playerId: finalPlayerId,
+      playerName: finalPlayerName,
+      quarterLabel: finalQuarter,
+      updatedAt: new Date().toISOString()
+    };
+
+    setIsProcessing(true);
+    try {
+      const updatedList = savedGpsRecords.map(r => (r.id === rec.id ? updatedRecord : r));
+      await setDoc(doc(db, 'memos', `${activeTeamId}___gps_records__`), {
+        teamId: activeTeamId,
+        date: '__gps_records__',
+        content: JSON.stringify(updatedList)
+      });
+      if (gpsSession?.id === rec.id) {
+        setGpsSession(updatedRecord);
+        setGpsSelectedPlayerId(finalPlayerId || (isCustom ? '__custom__' : ''));
+        setGpsCustomPlayerName(isCustom ? finalPlayerName : '');
+        setGpsQuarterLabel(finalQuarter);
+        setGpsSelectedMatchId(linkedMatch?.id || '');
+      }
+      setGpsRecordEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', quarterLabel: '1Q', matchId: '' });
+      setSystemAlert({ isOpen: true, message: `'${finalPlayerName} (${finalQuarter})' 기록으로 수정되었습니다!` });
+    } catch (err) {
+      console.error(err);
+      setSystemAlert({ isOpen: true, message: '기록 수정 중 오류가 발생했습니다.' });
     } finally {
       setIsProcessing(false);
     }
@@ -4934,71 +5028,90 @@ const renderGoalFlowModal = () => {
             {gpsSession ? (
               <div className="space-y-3 animate-in fade-in">
                 {/* 경기 일정 / 선수 / 쿼터 지정 및 저장/공유 컨트롤 바 */}
-                <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-3 space-y-2">
-                  <div className="text-[11px] font-bold text-emerald-400 flex items-center justify-between px-0.5">
-                    <span className="whitespace-nowrap">📌 내 기록을 팀 경기 일정에 저장하기</span>
-                    <span className="text-[10px] text-slate-400 font-normal whitespace-nowrap">일정·이름·쿼터 선택</span>
-                  </div>
-                  <select
-                    value={gpsSelectedMatchId}
-                    onChange={(e) => setGpsSelectedMatchId(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-200 outline-none truncate"
-                  >
-                    <option value="">📅 저장할 경기 일정 선택 (미선택 시 {gpsSession.date} 자유기록)</option>
-                    {[...currentTeamMatches]
-                      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-                      .map(m => {
-                        const typeLabel = m.matchType === 'external' ? `교류전` : m.matchType === 'futsal' ? '풋살' : '자체전';
-                        return (
-                          <option key={m.id} value={m.id}>
-                            📅 {m.date} · [{typeLabel}] {m.location}
-                          </option>
-                        );
-                      })}
-                  </select>
+                {(() => {
+                  const isAlreadySaved = savedGpsRecords.some(r => r.id === gpsSession.id);
+                  return (
+                    <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-3 space-y-2">
+                      <div className="text-[11px] font-bold text-emerald-400 flex items-center justify-between px-0.5">
+                        <span className="whitespace-nowrap">
+                          {isAlreadySaved ? '✏️ 저장된 GPS 기록 정보 (이름·쿼터·일정) 편집' : '📌 내 기록을 팀 경기 일정에 저장하기'}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-normal whitespace-nowrap">일정·이름·쿼터 선택</span>
+                      </div>
+                      <select
+                        value={gpsSelectedMatchId}
+                        onChange={(e) => setGpsSelectedMatchId(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-200 outline-none truncate"
+                      >
+                        <option value="">📅 저장할 경기 일정 선택 (미선택 시 {gpsSession.date} 자유기록)</option>
+                        {[...currentTeamMatches]
+                          .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+                          .map(m => {
+                            const typeLabel = m.matchType === 'external' ? `교류전` : m.matchType === 'futsal' ? '풋살' : '자체전';
+                            return (
+                              <option key={m.id} value={m.id}>
+                                📅 {m.date} · [{typeLabel}] {m.location}
+                              </option>
+                            );
+                          })}
+                      </select>
 
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={gpsSelectedPlayerId}
-                      onChange={(e) => setGpsSelectedPlayerId(e.target.value)}
-                      className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none truncate"
-                    >
-                      <option value="">👤 선수 선택 (내 이름 지정)</option>
-                      {currentTeamPlayers.map(p => (
-                        <option key={p.id} value={p.id}>{p.name} ({p.birthYear})</option>
-                      ))}
-                    </select>
-                    <select
-                      value={gpsQuarterLabel}
-                      onChange={(e) => setGpsQuarterLabel(e.target.value)}
-                      className="w-24 shrink-0 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-emerald-400 outline-none"
-                    >
-                      <option value="1Q">1쿼터</option>
-                      <option value="2Q">2쿼터</option>
-                      <option value="3Q">3쿼터</option>
-                      <option value="4Q">4쿼터</option>
-                      <option value="5Q">5쿼터</option>
-                      <option value="6Q">6쿼터</option>
-                      <option value="전체">경기 전체</option>
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => saveGpsSessionToTeam()}
-                      className="py-2.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow whitespace-nowrap"
-                    >
-                      💾 팀 기록에 저장
-                    </button>
-                    <button
-                      type="button"
-                      onClick={triggerGpsShare}
-                      className="py-2.5 px-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 whitespace-nowrap"
-                    >
-                      <Share2 size={14} className="shrink-0"/> 히트맵 이미지 공유
-                    </button>
-                  </div>
-                </div>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={gpsSelectedPlayerId}
+                          onChange={(e) => setGpsSelectedPlayerId(e.target.value)}
+                          className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none truncate"
+                        >
+                          <option value="">👤 선수 선택 (팀 명단)</option>
+                          {currentTeamPlayers.map(p => (
+                            <option key={p.id} value={p.id}>{p.name} ({p.birthYear})</option>
+                          ))}
+                          <option value="__custom__">✍️ 이름 직접 입력...</option>
+                        </select>
+                        <select
+                          value={gpsQuarterLabel}
+                          onChange={(e) => setGpsQuarterLabel(e.target.value)}
+                          className="w-24 shrink-0 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-emerald-400 outline-none"
+                        >
+                          <option value="1Q">1쿼터</option>
+                          <option value="2Q">2쿼터</option>
+                          <option value="3Q">3쿼터</option>
+                          <option value="4Q">4쿼터</option>
+                          <option value="5Q">5쿼터</option>
+                          <option value="6Q">6쿼터</option>
+                          <option value="전체">경기 전체</option>
+                        </select>
+                      </div>
+
+                      {gpsSelectedPlayerId === '__custom__' && (
+                        <input
+                          type="text"
+                          value={gpsCustomPlayerName}
+                          onChange={(e) => setGpsCustomPlayerName(e.target.value)}
+                          placeholder="표시할 선수 이름 직접 입력 (예: 홍길동)"
+                          className="w-full bg-slate-900 border border-emerald-500/40 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none"
+                        />
+                      )}
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => saveGpsSessionToTeam()}
+                          className="py-2.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow whitespace-nowrap"
+                        >
+                          {isAlreadySaved ? '💾 수정 내용 저장' : '💾 팀 기록에 저장'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={triggerGpsShare}
+                          className="py-2.5 px-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 whitespace-nowrap"
+                        >
+                          <Share2 size={14} className="shrink-0"/> 히트맵 이미지 공유
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* 캡처 및 공유 대상 영역 */}
                 <div ref={gpsCardCaptureRef} className="bg-slate-900 border border-slate-700/90 rounded-3xl p-3.5 sm:p-4 space-y-3.5 shadow-xl">
@@ -5010,8 +5123,20 @@ const renderGoalFlowModal = () => {
                           {gpsQuarterLabel}
                         </span>
                         <span className="text-base font-black text-white truncate">
-                          {currentTeamPlayers.find(p => p.id === gpsSelectedPlayerId)?.name || gpsSession.playerName || 'GPS 활동 리포트'}
+                          {gpsSelectedPlayerId === '__custom__'
+                            ? (gpsCustomPlayerName.trim() || 'GPS 활동 리포트')
+                            : (currentTeamPlayers.find(p => p.id === gpsSelectedPlayerId)?.name || gpsSession.playerName || 'GPS 활동 리포트')}
                         </span>
+                        {savedGpsRecords.some(r => r.id === gpsSession.id) && (
+                          <button
+                            type="button"
+                            onClick={() => openGpsRecordEditModal(gpsSession)}
+                            className="p-1 text-slate-400 hover:text-emerald-400 bg-slate-800 border border-slate-700 rounded-lg transition shrink-0"
+                            title="이름 및 쿼터 수정"
+                          >
+                            <Edit size={12} />
+                          </button>
+                        )}
                       </div>
                       <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5 min-w-0">
                         <span className="truncate">{gpsSession.date} · {gpsSession.title}</span>
@@ -5307,9 +5432,12 @@ const renderGoalFlowModal = () => {
                           key={rec.id}
                           onClick={() => {
                             setGpsSession(rec);
-                            setGpsSelectedPlayerId(rec.playerId || '');
+                            const matchedPlayer = currentTeamPlayers.find(p => p.id === rec.playerId) || currentTeamPlayers.find(p => p.name === rec.playerName);
+                            const hasCustom = !matchedPlayer && rec.playerName && rec.playerName !== '미지정 선수' && rec.playerName !== '선수';
+                            setGpsSelectedPlayerId(matchedPlayer ? matchedPlayer.id : (hasCustom ? '__custom__' : ''));
+                            setGpsCustomPlayerName(hasCustom ? rec.playerName : '');
                             setGpsQuarterLabel(rec.quarterLabel || '1Q');
-                            if (rec.matchId) setGpsSelectedMatchId(rec.matchId);
+                            setGpsSelectedMatchId(rec.matchId || '');
                             if (rec.pitchId) setGpsSelectedPitchId(rec.pitchId);
                             setGpsViewMode('heatmap');
                             setGpsReplayPlaying(false);
@@ -5332,10 +5460,18 @@ const renderGoalFlowModal = () => {
                               <span>🔥 질주 <strong className="text-yellow-300">{rec.sprintCount}회</strong></span>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+                          <div className="flex items-center gap-1 shrink-0 whitespace-nowrap">
                             <span className="text-xs font-black text-yellow-400 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700 whitespace-nowrap">
                               {rec.activityScore}점
                             </span>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); openGpsRecordEditModal(rec); }}
+                              className="p-1.5 text-slate-400 hover:text-emerald-400 transition shrink-0"
+                              title="이름 및 쿼터 수정"
+                            >
+                              <Edit size={14}/>
+                            </button>
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); requestDeleteGpsRecord(rec.id); }}
@@ -5768,6 +5904,105 @@ const renderGoalFlowModal = () => {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {gpsRecordEditModal.isOpen && gpsRecordEditModal.record && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[220] p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-5 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl relative">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2 whitespace-nowrap">
+                <Edit size={18} className="text-emerald-400 shrink-0"/> 저장된 GPS 기록 편집
+              </h2>
+              <button
+                type="button"
+                onClick={() => setGpsRecordEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', quarterLabel: '1Q', matchId: '' })}
+                className="text-slate-400 hover:text-white p-1 shrink-0"
+              >
+                <X size={20}/>
+              </button>
+            </div>
+
+            <form onSubmit={saveEditedGpsRecord} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">👤 선수 이름</label>
+                <select
+                  value={gpsRecordEditModal.playerId}
+                  onChange={(e) => setGpsRecordEditModal(prev => ({ ...prev, playerId: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
+                >
+                  <option value="">미지정 선수</option>
+                  {currentTeamPlayers.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.birthYear})</option>
+                  ))}
+                  <option value="__custom__">✍️ 직접 이름 입력...</option>
+                </select>
+                {gpsRecordEditModal.playerId === '__custom__' && (
+                  <input
+                    type="text"
+                    value={gpsRecordEditModal.customPlayerName}
+                    onChange={(e) => setGpsRecordEditModal(prev => ({ ...prev, customPlayerName: e.target.value }))}
+                    placeholder="선수 이름 직접 입력 (예: 홍길동)"
+                    className="w-full mt-2 bg-slate-900 border border-emerald-500/50 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
+                    autoFocus
+                  />
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">⏱️ 쿼터 선택</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {['1Q', '2Q', '3Q', '4Q', '5Q', '6Q', '전체'].map(q => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => setGpsRecordEditModal(prev => ({ ...prev, quarterLabel: q }))}
+                      className={`py-2 rounded-xl text-xs font-bold border transition whitespace-nowrap ${gpsRecordEditModal.quarterLabel === q ? 'bg-emerald-600 text-white border-emerald-500 shadow' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}`}
+                    >
+                      {q === '전체' ? '경기 전체' : `${q.replace('Q', '')}쿼터`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">📅 연결할 경기 일정</label>
+                <select
+                  value={gpsRecordEditModal.matchId}
+                  onChange={(e) => setGpsRecordEditModal(prev => ({ ...prev, matchId: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-200 outline-none truncate"
+                >
+                  <option value="">자유 기록 ({gpsRecordEditModal.record.date})</option>
+                  {[...currentTeamMatches]
+                    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+                    .map(m => {
+                      const typeLabel = m.matchType === 'external' ? `교류전` : m.matchType === 'futsal' ? '풋살' : '자체전';
+                      return (
+                        <option key={m.id} value={m.id}>
+                          {m.date} · [{typeLabel}] {m.location}
+                        </option>
+                      );
+                    })}
+                </select>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setGpsRecordEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', quarterLabel: '1Q', matchId: '' })}
+                  className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs rounded-xl transition"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition shadow"
+                >
+                  💾 수정 완료
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
