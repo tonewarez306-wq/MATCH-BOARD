@@ -2565,48 +2565,75 @@ export default function App() {
       let finalReview = null;
       let lastErrorMsg = '';
 
-      // 1) 클라이언트/팀에 등록된 Gemini API 키로 직접 호출 (gemini-2.5-flash -> 실패 시 gemini-2.0-flash 폴백)
+      // 1) 클라이언트/팀에 등록된 Gemini API 키로 직접 호출
       if (customApiKey) {
-        const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+        const callGeminiModel = async (modelName) => {
+          const cleanModel = modelName.replace(/^models\//, '');
+          const geminiRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${encodeURIComponent(customApiKey)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: directPrompt }] }],
+                generationConfig: {
+                  temperature: 0.85,
+                  responseMimeType: 'application/json'
+                }
+              })
+            }
+          );
+          if (!geminiRes.ok) {
+            const errJson = await geminiRes.json().catch(() => ({}));
+            throw new Error(errJson?.error?.message || `HTTP ${geminiRes.status}`);
+          }
+          const geminiData = await geminiRes.json();
+          const parts = geminiData?.candidates?.[0]?.content?.parts || [];
+          const rawText = parts.map(p => p.text || '').join('\n').trim();
+          const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+          const cleaned = (jsonMatch ? jsonMatch[0] : rawText).replace(/```json|```/g, '').trim();
+          const parsed = JSON.parse(cleaned);
+          if (!parsed || !parsed.summary) {
+            throw new Error('AI 응답 형식이 올바르지 않습니다.');
+          }
+          return {
+            ...parsed,
+            positionCode: posObj.code,
+            positionLabel: posObj.label,
+            positionScore: Number(parsed.positionScore) || currentGpsTacticalMetrics.positionScore,
+            source: 'gemini-ai',
+            generatedAt: new Date().toISOString()
+          };
+        };
+
+        const modelsToTry = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3-flash-preview'];
         for (const modelName of modelsToTry) {
           try {
-            const geminiRes = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(customApiKey)}`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [{ role: 'user', parts: [{ text: directPrompt }] }],
-                  generationConfig: {
-                    temperature: 0.9,
-                    maxOutputTokens: 900,
-                    responseMimeType: 'application/json'
-                  }
-                })
-              }
-            );
-            if (geminiRes.ok) {
-              const geminiData = await geminiRes.json();
-              const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-              const cleaned = rawText.replace(/```json|```/g, '').trim();
-              const parsed = JSON.parse(cleaned);
-              if (parsed && parsed.summary) {
-                finalReview = {
-                  ...parsed,
-                  positionCode: posObj.code,
-                  positionLabel: posObj.label,
-                  positionScore: Number(parsed.positionScore) || currentGpsTacticalMetrics.positionScore,
-                  source: 'gemini-ai',
-                  generatedAt: new Date().toISOString()
-                };
-                break;
-              }
-            } else {
-              const errJson = await geminiRes.json().catch(() => ({}));
-              lastErrorMsg = errJson?.error?.message || `HTTP ${geminiRes.status}`;
-            }
+            finalReview = await callGeminiModel(modelName);
+            if (finalReview) break;
           } catch (directErr) {
             lastErrorMsg = String(directErr?.message || directErr);
+          }
+        }
+
+        // 만약 기본 모델명이 변경된 경우 Google API에서 사용 가능한 최신 Flash 모델을 자동 조회하여 호출
+        if (!finalReview) {
+          try {
+            const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(customApiKey)}`);
+            if (listRes.ok) {
+              const listData = await listRes.json();
+              const availableFlash = (listData?.models || []).find(m =>
+                (m.supportedGenerationMethods || []).includes('generateContent') &&
+                /gemini.*flash/i.test(m.name) &&
+                !/2\.0-flash/i.test(m.name) &&
+                !/image|audio|tts|thinking/i.test(m.name)
+              );
+              if (availableFlash?.name) {
+                finalReview = await callGeminiModel(availableFlash.name);
+              }
+            }
+          } catch (fallbackErr) {
+            lastErrorMsg = String(fallbackErr?.message || fallbackErr);
           }
         }
       }
@@ -5821,11 +5848,11 @@ const renderGoalFlowModal = () => {
 
                         {/* 1. 6대 축구 포지션 선택 버튼 */}
                         <div className="space-y-1.5">
-                          <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold">
-                            <span className="whitespace-nowrap">출전 포지션 선택</span>
-                            <span className="text-indigo-300 truncate ml-2">{activePosObj.icon} {activePosObj.label}: {activePosObj.roleDesc}</span>
+                          <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold gap-2">
+                            <span className="whitespace-nowrap shrink-0">출전 포지션 선택</span>
+                            <span className="text-indigo-300 truncate">{activePosObj.icon} {activePosObj.label}: {activePosObj.roleDesc}</span>
                           </div>
-                          <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                          <div className="grid grid-cols-3 gap-1.5">
                             {GPS_POSITIONS.map(pos => {
                               const isSel = activePosCode === pos.code;
                               return (
@@ -5836,7 +5863,7 @@ const renderGoalFlowModal = () => {
                                     setGpsSelectedPosition(pos.code);
                                     setGpsSession(prev => prev ? { ...prev, positionCode: pos.code } : prev);
                                   }}
-                                  className={`py-2 px-1.5 rounded-xl text-[11px] font-black border transition flex items-center justify-center gap-1 whitespace-nowrap ${isSel ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-950/60' : 'bg-slate-800/90 text-slate-300 border-slate-700/80 hover:border-slate-500'}`}
+                                  className={`py-2 px-2 rounded-xl text-xs font-black border transition flex items-center justify-center gap-1 whitespace-nowrap ${isSel ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-950/60' : 'bg-slate-800/90 text-slate-300 border-slate-700/80 hover:border-slate-500'}`}
                                 >
                                   <span>{pos.icon}</span>
                                   <span>{pos.label}</span>
@@ -5850,8 +5877,8 @@ const renderGoalFlowModal = () => {
                         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 space-y-2.5">
                           {/* 종적 3구역 (공격/중원/수비) */}
                           <div className="space-y-1">
-                            <div className="flex justify-between items-center text-[10px] font-bold whitespace-nowrap">
-                              <span className="text-slate-400">종적 진영 체류 비중 (▲공격 방향 기준)</span>
+                            <div className="flex justify-between items-center gap-2 text-[10px] font-bold whitespace-nowrap">
+                              <span className="text-slate-400">종적 진영 비중 (▲공격 기준)</span>
                               <span className="text-slate-300">
                                 공격 <strong className="text-rose-400">{currentGpsTacticalMetrics.attPct}%</strong> · 중원 <strong className="text-emerald-400">{currentGpsTacticalMetrics.midPct}%</strong> · 수비 <strong className="text-sky-400">{currentGpsTacticalMetrics.defPct}%</strong>
                               </span>

@@ -43,8 +43,10 @@ export default async function handler(req, res) {
     }
 
     const data = await response.json();
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const cleaned = rawText.replace(/```json|```/g, '').trim();
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const rawText = parts.map(p => p.text || '').join('\n').trim();
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    const cleaned = (jsonMatch ? jsonMatch[0] : rawText).replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(cleaned);
     return res.status(200).json({ ok: true, review: parsed });
   } catch (err) {
