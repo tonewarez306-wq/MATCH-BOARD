@@ -2454,170 +2454,7 @@ export default function App() {
     };
   }, [activeTab, gpsSession, gpsSelectedPosition, gpsFlipVertical, gpsRotate90, gpsSelectedPitchId, allGpsPitches]);
 
-  // 타임라인 이벤트·동선 문맥 기반 다각도 AI 코치 내러티브 생성기 (반복 문장 방지 + 3가지 분석 관점)
-  const buildContextualAiReviewFallback = (posCode, metrics, variantSeed = 0) => {
-    const posObj = GPS_POSITIONS.find(p => p.code === posCode) || GPS_POSITIONS[2];
-    const angleIdx = variantSeed % 3; // 0: 전술·공간 중심, 1: 피지컬·타임라인 중심, 2: 프로 코칭·성장 중심
-    const qLabel = gpsQuarterLabel || gpsSession?.quarterLabel || '1Q';
-    const distKm = gpsSession?.totalDistanceKm || 0;
-    const maxSpd = gpsSession?.maxSpeedKmh || 0;
-    const sprints = gpsSession?.sprintCount || 0;
-
-    // 같은 날 본인의 다른 쿼터 기록과 비교 문맥 추출
-    const curPlayerName = gpsSelectedPlayerId === '__custom__'
-      ? (gpsCustomPlayerName.trim() || gpsSession?.playerName)
-      : (currentTeamPlayers.find(p => p.id === gpsSelectedPlayerId)?.name || gpsSession?.playerName);
-    const sameDayOtherRecs = savedGpsRecords.filter(r =>
-      r.id !== gpsSession?.id &&
-      r.date === gpsSession?.date &&
-      curPlayerName &&
-      r.playerName === curPlayerName
-    );
-    let multiQuarterNote = '';
-    if (sameDayOtherRecs.length > 0) {
-      const prevRec = sameDayOtherRecs[0];
-      const spdDiff = Number((maxSpd - (prevRec.maxSpeedKmh || 0)).toFixed(1));
-      if (spdDiff >= 0.5) {
-        multiQuarterNote = ` 특히 같은 날 ${prevRec.quarterLabel || '이전 쿼터'}(${prevRec.maxSpeedKmh}km/h) 대비 최고 속도가 +${spdDiff}km/h 상승하며 몸이 완전히 풀린 폭발력을 보여주었습니다.`;
-      } else if (spdDiff <= -0.8) {
-        multiQuarterNote = ` 같은 날 ${prevRec.quarterLabel || '이전 쿼터'}(${prevRec.totalDistanceKm}km)에 이은 누적 출전 속에서도 끝까지 대형을 유지한 점이 돋보입니다.`;
-      }
-    }
-
-    const dominantSide = metrics.leftPct > metrics.rightPct + 12
-      ? `좌측 채널(${metrics.leftPct}%)`
-      : metrics.rightPct > metrics.leftPct + 12
-        ? `우측 채널(${metrics.rightPct}%)`
-        : `중앙·좌우 밸런스(좌 ${metrics.leftPct}%·중 ${metrics.centerPct}%·우 ${metrics.rightPct}%)`;
-
-    const staminaDesc = metrics.paceChangePct >= 4
-      ? `후반부 평균 속도가 ${metrics.secondHalfAvgSpeed}km/h로 전반(${metrics.firstHalfAvgSpeed}km/h)보다 오히려 +${metrics.paceChangePct}% 상승하는 '슬로우 스타터형 강철 체력'`
-      : metrics.paceChangePct >= -7
-        ? `전반(${metrics.firstHalfAvgSpeed}km/h)과 후반(${metrics.secondHalfAvgSpeed}km/h)의 페이스 편차가 ${Math.abs(metrics.paceChangePct)}%에 불과한 안정적인 체력 배분`
-        : `초반 ${metrics.firstHalfAvgSpeed}km/h의 강한 압박 이후 후반(${metrics.secondHalfAvgSpeed}km/h, ${metrics.paceChangePct}%)에 체력 소모가 나타난 초반 집중형 패턴`;
-
-    let styleTag = '';
-    let summary = '';
-    let spatialAnalysis = '';
-    let physicalAnalysis = '';
-    let improvementTip = '';
-
-    if (posCode === 'FW') {
-      styleTag = metrics.attPct >= 38
-        ? (angleIdx === 0 ? '박스 타격형 포처 (Poacher)' : angleIdx === 1 ? '라인 브레이킹 스트라이커' : '최전방 공간 사냥꾼')
-        : (angleIdx === 0 ? '연계형 폴스 나인 (False 9)' : angleIdx === 1 ? '전방위 압박형 포워드' : '하프스페이스 연결 고리');
-
-      summary = angleIdx === 0
-        ? `${qLabel} 동안 ${metrics.topZoneLabel}에서 ${metrics.secondZoneLabel}로 이어지는 공격 동선을 그리며 최전방 위협을 주도했습니다.`
-        : angleIdx === 1
-          ? `${metrics.peakSpeedTimeStr} ${metrics.peakSpeedZoneLabel}에서 시속 ${maxSpd}km/h의 최고 속도를 터뜨리며 수비 뒷공간을 날카롭게 타격했습니다.`
-          : `분당 ${metrics.meterPerMin}m의 활동 밀도와 ${sprints}회의 질주로 상대 수비 라인을 끊임없이 흔든 공격수 리포트입니다.`;
-
-      spatialAnalysis = `공격 진영 체류 비율이 ${metrics.attPct}%, 중원 내려서기 비중이 ${metrics.midPct}%로 기록되었습니다. 주로 ${metrics.topZoneLabel}을 기점으로 삼아 ${metrics.secondZoneLabel} 방향으로 움직였으며, ${dominantSide}을 활용한 공간 창출이 두드러졌습니다. 고속 질주의 ${metrics.attackSprintPct}%가 상대 골문 방향 침투에 집중되어 공격수 본연의 날카로움을 증명했습니다.`;
-      physicalAnalysis = `총 ${distKm}km(분당 ${metrics.meterPerMin}m)를 소화하며 ${metrics.peakSpeedTimeStr} ${metrics.peakSpeedZoneLabel} 부근에서 최고 ${maxSpd}km/h를 기록했습니다. ${staminaDesc}을 보였습니다.${multiQuarterNote}`;
-      improvementTip = metrics.attPct < 28
-        ? `중원(${metrics.midPct}%)까지 내려와 볼을 받는 빈도가 높아 정작 크로스 타이밍에 박스 안 진입이 늦어질 수 있습니다. 볼 전개 시에는 한 템포 빠르게 중앙 공격 구역으로 재침투해 보세요.`
-        : metrics.paceChangePct < -8
-          ? `후반부 스프린트 탄력을 유지하기 위해 수비 진영(${metrics.defPct}%)까지 깊숙이 내려오는 횟수를 줄이고, 오프사이드 라인 부근에서 체력을 비축했다가 폭발시키는 패턴을 추천합니다.`
-          : `현재의 침투 예리함을 극대화하기 위해 ${metrics.leftPct > metrics.rightPct ? '반대편 우측 하프스페이스' : '반대편 좌측 하프스페이스'}로 대각선 더미 런을 섞어주면 수비수가 마크하기 훨씬 까다로워집니다.`;
-    } else if (posCode === 'WF') {
-      styleTag = (metrics.leftPct + metrics.rightPct) >= 62
-        ? (angleIdx === 0 ? '클래식 터치라인 크랙' : angleIdx === 1 ? '측면 고속 돌파러' : '와이드 스트레처 (Wide Stretcher)')
-        : (angleIdx === 0 ? '인버티드 윙어 (Inverted Winger)' : angleIdx === 1 ? '하프스페이스 침투형 윙어' : '자유 이동형 플레이메이커');
-
-      summary = angleIdx === 0
-        ? `${dominantSide}을 중심으로 경기장 폭을 넓히며 ${metrics.topZoneLabel}→${metrics.secondZoneLabel} 구간을 장악한 측면 리포트입니다.`
-        : angleIdx === 1
-          ? `${metrics.peakSpeedTimeStr} ${metrics.peakSpeedZoneLabel}에서 ${maxSpd}km/h로 폭발하며 총 ${sprints}회(${gpsSession?.sprintDistanceM || 0}m)의 질주를 기록했습니다.`
-          : `공격 가담(${metrics.attPct}%)과 수비 지원(${metrics.defPct}%)을 오가며 측면 공수 전환의 핵심 엔진 역할을 수행했습니다.`;
-
-      spatialAnalysis = `좌측 ${metrics.leftPct}% · 중앙 ${metrics.centerPct}% · 우측 ${metrics.rightPct}%의 횡적 분포를 보이며, ${metrics.topZoneLabel}에서 볼을 잡아 ${metrics.secondZoneLabel}로 연결하는 패턴이 가장 활발했습니다. 스프린트의 ${metrics.attackSprintPct}%가 전방 돌파에, ${metrics.defenseSprintPct}%가 풀백 커버를 위한 복귀에 쓰였습니다.`;
-      physicalAnalysis = `${qLabel} 동안 총 ${distKm}km를 뛰며 구장 전체의 ${metrics.coveragePct}%를 밟았습니다. ${metrics.peakSpeedTimeStr} ${metrics.peakSpeedZoneLabel}에서 최고 ${maxSpd}km/h를 찍었으며, ${staminaDesc}이 확인됩니다.${multiQuarterNote}`;
-      improvementTip = metrics.centerPct < 20
-        ? `터치라인 부근 움직임이 매우 성실하지만, 공이 반대편 측면에 있을 때는 중앙 공격(박스) 구역(${metrics.centerPct}%)으로 좁혀 들어오면 득점 찬스를 훨씬 많이 잡을 수 있습니다.`
-        : `측면과 중앙 진입 비율이 이상적입니다. 후반부(${metrics.secondHalfAvgSpeed}km/h) 체력 소모를 줄이기 위해 수비 복귀 후에는 원터치 패스로 빠르게 볼을 방출하고 공간으로 달리는 효율적 런을 권장합니다.`;
-    } else if (posCode === 'AM') {
-      styleTag = metrics.coveragePct >= 52
-        ? (angleIdx === 0 ? '육각형 박스투박스 엔진' : angleIdx === 1 ? '전방위 프레싱 마에스트로' : '언성 히어로 올라운더')
-        : (angleIdx === 0 ? '중원 사령관 플레이메이커' : angleIdx === 1 ? '공격 연결형 미드필더' : '템포 조절형 마에스트로');
-
-      summary = angleIdx === 0
-        ? `구장 커버리지 ${metrics.coveragePct}%와 중원 체류 ${metrics.midPct}%를 기록하며 공수 밸런스의 중심축을 담당했습니다.`
-        : angleIdx === 1
-          ? `분당 ${metrics.meterPerMin}m의 왕성한 활동량으로 ${metrics.topZoneLabel}과 ${metrics.secondZoneLabel}을 쉼 없이 연결했습니다.`
-          : `${metrics.peakSpeedTimeStr} ${metrics.peakSpeedZoneLabel}에서의 ${maxSpd}km/h 질주를 포함해 공격(${metrics.attackSprintPct}%)과 수비(${metrics.defenseSprintPct}%) 전환 모두에 헌신했습니다.`;
-
-      spatialAnalysis = `수비 진영 ${metrics.defPct}% · 중원 ${metrics.midPct}% · 공격 진영 ${metrics.attPct}%의 이상적인 삼각형 분포를 그렸습니다. 핵심 핫스팟인 ${metrics.topZoneLabel}에서 시작해 ${metrics.secondZoneLabel}로 확장되는 패스 길목을 장악했으며, 좌(${metrics.leftPct}%)·중(${metrics.centerPct}%)·우(${metrics.rightPct}%) 전 구역에 고르게 발자국을 남겼습니다.`;
-      physicalAnalysis = `총 이동거리 ${distKm}km(분당 ${metrics.meterPerMin}m), 고속 질주 ${sprints}회를 소화했습니다. ${staminaDesc}을 기록하며 미드필더에게 요구되는 지속력을 입증했습니다.${multiQuarterNote}`;
-      improvementTip = metrics.paceChangePct < -8
-        ? `전반(${metrics.firstHalfAvgSpeed}km/h)부터 모든 볼에 관여하려다 후반(${metrics.secondHalfAvgSpeed}km/h)에 페이스가 다소 떨어졌습니다. 아군 센터백이 볼을 잡았을 때는 걸으며 호흡을 가다듬고 주변 시야를 확보하는 완급 조절이 필요합니다.`
-        : `중원 장악력이 훌륭합니다. 공격 진영 체류율(${metrics.attPct}%)을 5~8%만 더 높여 세컨드 볼이 떨어지는 페널티 아크 정면 타격 빈도를 늘리면 공격 포인트로 직결될 것입니다.`;
-    } else if (posCode === 'DM') {
-      styleTag = metrics.defPct + metrics.midPct >= 75
-        ? (angleIdx === 0 ? '포백 보호형 앵커맨 (Anchor)' : angleIdx === 1 ? '중원 진공청소기 홀딩' : '후방 빌드업 기점 레지스타')
-        : (angleIdx === 0 ? '전진 압박형 볼 위닝 미드필더' : angleIdx === 1 ? '기동력 중심 더블 볼란치' : '공수 전환 스위치');
-
-      summary = angleIdx === 0
-        ? `수비·중원 구역에 ${metrics.defPct + metrics.midPct}% 집중 배치되며 포백 앞 위험 지역을 든든하게 제어했습니다.`
-        : angleIdx === 1
-          ? `${metrics.topZoneLabel}을 중심으로 좌우(${metrics.leftPct}%:${metrics.rightPct}%) 커버를 수행하며 상대 역습 길목을 차단했습니다.`
-          : `수비 복귀 질주 비중 ${metrics.defenseSprintPct}%와 분당 ${metrics.meterPerMin}m의 기동력으로 팀의 안정감을 높였습니다.`;
-
-      spatialAnalysis = `주 활동 구역이 ${metrics.topZoneLabel}과 ${metrics.secondZoneLabel}에 형성되어 수비형 미드필더로서의 위치 선정 규율이 돋보였습니다. 중앙 채널 점유율 ${metrics.centerPct}%를 유지해 중원 공백을 최소화했으며, 위기 상황마다 ${metrics.defenseSprintPct}%의 수비 방향 고속 커버로 공간을 메웠습니다.`;
-      physicalAnalysis = `${qLabel} 동안 ${distKm}km를 이동하며 ${metrics.peakSpeedTimeStr} ${metrics.peakSpeedZoneLabel}에서 최고 속도 ${maxSpd}km/h를 기록했습니다. ${staminaDesc}이 돋보입니다.${multiQuarterNote}`;
-      improvementTip = metrics.attPct > 28
-        ? `공격 가담(${metrics.attPct}%) 의지가 매우 좋으나, 전진했을 때 역습을 허용하면 수비 복귀 거리 부담이 커집니다. 파트너 미드필더가 올라갈 때는 하프라인 아래(중앙 중원)에 머물러 밸런스를 잡아주세요.`
-        : `수비 보호 위치 선정이 매우 안정적입니다. 볼 탈취 직후 첫 패스를 현재 자주 밟는 ${metrics.topZoneLabel}의 반대편 측면 공간으로 빠르게 전환해주면 팀 역습 속도가 배가됩니다.`;
-    } else if (posCode === 'FB') {
-      styleTag = metrics.attPct >= 22
-        ? (angleIdx === 0 ? '오버래핑 윙백 엔진' : angleIdx === 1 ? '터치라인 지배자 풀백' : '공수 겸장 모던 풀백')
-        : (angleIdx === 0 ? '수비 안정형 클래식 풀백' : angleIdx === 1 ? '측면 대인 마크 스페셜리스트' : '빌드업 지원형 풀백');
-
-      summary = angleIdx === 0
-        ? `${dominantSide} 터치라인을 따라 수비(${metrics.defPct}%)부터 공격(${metrics.attPct}%)까지 종횡무진 왕복한 풀백 리포트입니다.`
-        : angleIdx === 1
-          ? `${metrics.peakSpeedTimeStr} ${metrics.peakSpeedZoneLabel}에서 ${maxSpd}km/h의 속도로 공수 전환을 이끌며 총 ${sprints}회 질주했습니다.`
-          : `${metrics.topZoneLabel}과 ${metrics.secondZoneLabel}을 잇는 직선 왕복 기동력으로 측면 우위를 가져왔습니다.`;
-
-      spatialAnalysis = `측면 채널(좌 ${metrics.leftPct}% · 우 ${metrics.rightPct}%) 비중이 ${metrics.leftPct + metrics.rightPct}%에 달해 풀백으로서의 라인 유지력이 확실합니다. 공격 침투 질주 ${metrics.attackSprintPct}%와 수비 복귀 질주 ${metrics.defenseSprintPct}%의 비율로 볼 때, 오버래핑 이후 배후 공간 복귀 의식도 함께 작동했습니다.`;
-      physicalAnalysis = `총 ${distKm}km(분당 ${metrics.meterPerMin}m)를 소화하며 ${metrics.peakSpeedTimeStr} ${metrics.peakSpeedZoneLabel}에서 최고 ${maxSpd}km/h를 찍었습니다. ${staminaDesc}을 보여줍니다.${multiQuarterNote}`;
-      improvementTip = metrics.attPct >= 30 && metrics.defenseSprintPct < 45
-        ? `공격 가담(${metrics.attPct}%)이 매우 날카롭지만 오버래핑 직후 뒷공간이 노출될 수 있습니다. 크로스나 패스 마무리 직후 첫 5m를 빠르게 수비 진영으로 복귀하는 습관을 들이면 완벽합니다.`
-        : `수비 라인에서의 안정감이 좋습니다. 우리 팀이 볼을 소유할 때 터치라인만 고집하기보다 중원(${metrics.midPct}%) 안쪽 하프스페이스로 한 발 들어와 패스 선택지를 늘려보세요.`;
-    } else {
-      // CB (센터백)
-      styleTag = metrics.defPct >= 50
-        ? (angleIdx === 0 ? '최후방 통곡의 벽 (Commanding CB)' : angleIdx === 1 ? '안정형 스위퍼 센터백' : '수비 라인 컨트롤러')
-        : (angleIdx === 0 ? '전진 빌드업형 볼플레잉 센터백' : angleIdx === 1 ? '하프라인 하이라인 스토퍼' : '적극적 압박형 스토퍼');
-
-      summary = angleIdx === 0
-        ? `수비 진영 체류율 ${metrics.defPct}%와 ${metrics.topZoneLabel} 장악으로 팀의 최후방 저지선을 견고하게 지켰습니다.`
-        : angleIdx === 1
-          ? `${metrics.peakSpeedTimeStr} ${metrics.peakSpeedZoneLabel}에서 ${maxSpd}km/h로 배후 침투를 커버하며 수비 방향 질주 ${metrics.defenseSprintPct}%를 기록했습니다.`
-          : `전·후반 흔들림 없는 페이스(${metrics.firstHalfAvgSpeed}→${metrics.secondHalfAvgSpeed}km/h)로 수비 간격을 조율한 리포트입니다.`;
-
-      spatialAnalysis = `수비 진영 ${metrics.defPct}% · 중원 ${metrics.midPct}% · 공격 진영 ${metrics.attPct}%로 최후방 중심이 잘 잡혀 있습니다. 특히 ${metrics.topZoneLabel}과 ${metrics.secondZoneLabel}에서 좌(${metrics.leftPct}%)·우(${metrics.rightPct}%) 풀백의 뒷공간까지 폭넓게 커버한 궤적이 확인됩니다.`;
-      physicalAnalysis = `${qLabel} 동안 ${distKm}km를 이동하며 필요할 때마다 순간 가속(최고 ${maxSpd}km/h, 스프린트 ${sprints}회)으로 상대 공격수를 제어했습니다. ${staminaDesc}이 나타났습니다.${multiQuarterNote}`;
-      improvementTip = metrics.defPct < 38
-        ? `중원(${metrics.midPct}%) 이상 전진하는 빈도가 높아 역습 시 배후 공간이 넓어질 위험이 있습니다. 전진 커팅을 시도할 때는 파트너 수비수나 수비형 미드필더의 커버 위치를 먼저 확인하세요.`
-        : `최후방 위치 선정이 매우 든든합니다. 볼을 클리어링할 때 단순 걷어내기보다 중원 좌우(${metrics.leftPct < metrics.rightPct ? '좌측 중원' : '우측 중원'}) 공간으로 연결하는 빌드업 비중을 높여보세요.`;
-    }
-
-    return {
-      positionCode: posObj.code,
-      positionLabel: posObj.label,
-      positionScore: metrics.positionScore,
-      styleTag,
-      summary,
-      spatialAnalysis,
-      physicalAnalysis,
-      improvementTip,
-      source: 'tactical-engine',
-      generatedAt: new Date().toISOString()
-    };
-  };
-
-  // Gemini AI 키 저장 (팀 공유 메모 + 로컬스토리지)
+  // Gemini AI 키 저장 (팀 공유 메모 + 로컬스토리지) 및 즉시 AI 리뷰 실행
   const saveTeamGeminiApiKey = async (e) => {
     e.preventDefault();
     const trimmed = (geminiApiKeyModal.keyInput || '').trim();
@@ -2635,140 +2472,152 @@ export default function App() {
         });
       }
       setGeminiApiKeyModal({ isOpen: false, keyInput: '' });
-      setSystemAlert({
-        isOpen: true,
-        message: trimmed
-          ? '🤖 Google Gemini AI 코치 키가 저장되었습니다! 이제 실시간 생성형 AI 심층 리뷰가 작동합니다.'
-          : '저장된 Gemini API 키가 초기화되었습니다.'
-      });
+      if (trimmed && gpsSession && currentGpsTacticalMetrics) {
+        // 키 저장 직후 바로 Gemini AI 코치 리뷰 자동 생성
+        generateGpsAiCoachReview(null, false, trimmed);
+      } else {
+        setSystemAlert({
+          isOpen: true,
+          message: trimmed
+            ? '🤖 Google Gemini API 키가 저장되었습니다!'
+            : '저장된 Gemini API 키가 초기화되었습니다.'
+        });
+      }
     } catch (err) {
       console.error(err);
       setSystemAlert({ isOpen: true, message: 'API 키 저장 중 오류가 발생했습니다.' });
     }
   };
 
-  // AI 코치 리뷰 생성 및 저장 (Gemini API 우선 호출 -> 실패/미설정 시 타임라인 전술 엔진)
-  const generateGpsAiCoachReview = async (overridePosCode = null, forceNewAngle = false) => {
+  // 방안 2: 순수 Google Gemini LLM 생성형 AI 코치 리뷰 생성 및 저장
+  const generateGpsAiCoachReview = async (overridePosCode = null, forceNewAngle = false, explicitApiKey = null) => {
     if (!gpsSession || !currentGpsTacticalMetrics || isGeneratingGpsAi) return;
     const targetPosCode = overridePosCode || gpsSelectedPosition || gpsSession.positionCode || 'AM';
     const posObj = GPS_POSITIONS.find(p => p.code === targetPosCode) || GPS_POSITIONS[2];
     const nextSeed = forceNewAngle ? (gpsAiVariantSeed + 1) : gpsAiVariantSeed;
     if (forceNewAngle) setGpsAiVariantSeed(nextSeed);
 
-    setIsGeneratingGpsAi(true);
-    try {
-      const playerName = gpsSelectedPlayerId === '__custom__'
-        ? (gpsCustomPlayerName.trim() || '선수')
-        : (currentTeamPlayers.find(p => p.id === gpsSelectedPlayerId)?.name || gpsSession.playerName || '선수');
+    const teamStoredKey = (memos['__gemini_api_key__'] || '').trim();
+    const localStoredKey = (typeof window !== 'undefined' ? (localStorage.getItem('mb_gemini_api_key') || '') : '').trim();
+    const envKey = (import.meta.env.VITE_GEMINI_API_KEY || '').trim();
+    const customApiKey = (explicitApiKey || teamStoredKey || localStoredKey || envKey).trim();
 
-      const teamStoredKey = (memos['__gemini_api_key__'] || '').trim();
-      const localStoredKey = (typeof window !== 'undefined' ? (localStorage.getItem('mb_gemini_api_key') || '') : '').trim();
-      const envKey = (import.meta.env.VITE_GEMINI_API_KEY || '').trim();
-      const customApiKey = teamStoredKey || localStoredKey || envKey;
+    const playerName = gpsSelectedPlayerId === '__custom__'
+      ? (gpsCustomPlayerName.trim() || '선수')
+      : (currentTeamPlayers.find(p => p.id === gpsSelectedPlayerId)?.name || gpsSession.playerName || '선수');
+    const qLabel = gpsQuarterLabel || gpsSession.quarterLabel || '1Q';
+    const durationMin = Math.max(1, Math.round((gpsSession.durationSec || 60) / 60));
 
-      const payload = {
-        playerName,
-        quarterLabel: gpsQuarterLabel || gpsSession.quarterLabel || '1Q',
-        positionCode: posObj.code,
-        positionLabel: posObj.label,
-        stats: {
-          durationMin: Math.max(1, Math.round((gpsSession.durationSec || 60) / 60)),
-          totalDistanceKm: gpsSession.totalDistanceKm,
-          meterPerMin: currentGpsTacticalMetrics.meterPerMin,
-          maxSpeedKmh: gpsSession.maxSpeedKmh,
-          avgSpeedKmh: gpsSession.avgSpeedKmh,
-          sprintCount: gpsSession.sprintCount,
-          sprintDistanceM: gpsSession.sprintDistanceM,
-          activityScore: gpsSession.activityScore,
-          zones: gpsSession.zones
-        },
-        tactical: currentGpsTacticalMetrics
-      };
+    // 같은 날 본인의 다른 쿼터 기록이 있으면 함께 전달하여 멀티 쿼터 비교 코칭 유도
+    const sameDayOtherRecs = savedGpsRecords.filter(r =>
+      r.id !== gpsSession.id &&
+      r.date === gpsSession.date &&
+      playerName &&
+      r.playerName === playerName
+    );
+    const sameDayContext = sameDayOtherRecs.length > 0
+      ? `\n[같은 날 이 선수의 다른 쿼터 기록 비교용]\n` +
+        sameDayOtherRecs.map(r => `- ${r.quarterLabel}: 거리 ${r.totalDistanceKm}km, 최고속도 ${r.maxSpeedKmh}km/h, 평균속도 ${r.avgSpeedKmh}km/h, 스프린트 ${r.sprintCount}회`).join('\n')
+      : '';
 
-      let finalReview = null;
+    const focusAngles = [
+      '포지션 역할 대비 공간 점유와 움직임 동선(9분할 핫스팟 및 종·횡 밸런스)을 중심으로',
+      '스프린트 폭발력, 최고속도 발생 시점·구역, 전·후반 체력 유지율을 중심으로',
+      '실전 경기 운영 완성도와 다음 쿼터 공격/수비 효율을 높이기 위한 구체적 전술 코칭을 중심으로'
+    ];
+    const angleHint = focusAngles[nextSeed % focusAngles.length];
 
-      // 1순위: 클라이언트/팀 설정 Gemini API 키가 있으면 직접 호출 (로컬/배포 모두 즉시 작동)
-      if (customApiKey) {
-        try {
-          const focusAngles = [
-            '공간 점유와 포지셔닝(공격/중원/수비 비중, 좌/중/우 채널 밸런스) 관점을 중심으로',
-            '스프린트 폭발력과 전·후반 체력 유지율(타임라인 피지컬 변화) 관점을 중심으로',
-            '실전 경기 운영과 다음 쿼터 성장을 위한 전술 코칭 관점을 중심으로'
-          ];
-          const angleHint = focusAngles[nextSeed % focusAngles.length];
-          const directPrompt = `당신은 대한민국 아마추어/세미프로 축구팀의 전술·피지컬 전문 AI 코치입니다.
-아래 선수의 GPS 트래킹 실측 데이터를 바탕으로, 매번 똑같은 상투적 표현을 피하고 이 기록만의 구체적 수치와 시간대(${currentGpsTacticalMetrics.peakSpeedTimeStr} 최고속도 발생 등)를 인용해 ${angleHint} 생생하게 코칭 리뷰를 작성하세요.
+    const directPrompt = `당신은 대한민국 축구팀의 전술·피지컬 데이터 분석을 맡고 있는 프로페셔널 AI 코치입니다.
+아래 선수의 스마트워치 GPS 실측 데이터를 분석하여, 상투적인 문장 없이 오직 이 선수의 오늘 기록과 타임라인을 기반으로 ${angleHint} 생생하고 전문적인 코칭 리포트를 작성하세요. (요청 시드: #${nextSeed + 1})
 
-[선수 및 포지션]
-- 선수: ${playerName} (${payload.quarterLabel})
-- 포지션: ${posObj.label} (${posObj.code})
+[선수 및 출전 정보]
+- 선수명: ${playerName}
+- 출전 쿼터: ${qLabel} (운동 시간 약 ${durationMin}분)
+- 선택 포지션: ${posObj.label} (${posObj.code}) — 핵심 요구 역할: ${posObj.roleDesc}
 
-[핵심 피지컬]
-- 총 거리: ${gpsSession.totalDistanceKm}km (분당 ${currentGpsTacticalMetrics.meterPerMin}m, 약 ${payload.stats.durationMin}분)
-- 최고 속도: ${gpsSession.maxSpeedKmh}km/h (${currentGpsTacticalMetrics.peakSpeedTimeStr} ${currentGpsTacticalMetrics.peakSpeedZoneLabel}에서 기록)
-- 평균 속도: ${gpsSession.avgSpeedKmh}km/h / 스프린트: ${gpsSession.sprintCount}회 (${gpsSession.sprintDistanceM}m)
+[핵심 피지컬 데이터]
+- 총 이동거리: ${gpsSession.totalDistanceKm}km (분당 이동거리 ${currentGpsTacticalMetrics.meterPerMin}m/min)
+- 최고 속도: ${gpsSession.maxSpeedKmh}km/h (발생 시점: ${currentGpsTacticalMetrics.peakSpeedTimeStr}, 발생 구역: ${currentGpsTacticalMetrics.peakSpeedZoneLabel})
+- 평균 속도: ${gpsSession.avgSpeedKmh}km/h
+- 스프린트(20km/h 이상 질주): ${gpsSession.sprintCount}회 (총 질주 거리 ${gpsSession.sprintDistanceM}m)
+- 속도 구간 비율: 걷기 ${gpsSession.zones?.walk || 0}%, 조깅 ${gpsSession.zones?.jog || 0}%, 러닝 ${gpsSession.zones?.run || 0}%, 스프린트 ${gpsSession.zones?.sprint || 0}%
 
-[전술 공간 지표]
-- 공격 ${currentGpsTacticalMetrics.attPct}% / 중원 ${currentGpsTacticalMetrics.midPct}% / 수비 ${currentGpsTacticalMetrics.defPct}%
-- 좌측 ${currentGpsTacticalMetrics.leftPct}% / 중앙 ${currentGpsTacticalMetrics.centerPct}% / 우측 ${currentGpsTacticalMetrics.rightPct}%
-- 최다 체류 핫스팟: 1위 ${currentGpsTacticalMetrics.topZoneLabel}, 2위 ${currentGpsTacticalMetrics.secondZoneLabel}
-- 스프린트 방향: 공격 침투 ${currentGpsTacticalMetrics.attackSprintPct}% vs 수비 복귀 ${currentGpsTacticalMetrics.defenseSprintPct}%
-- 전·후반 페이스: 전반 ${currentGpsTacticalMetrics.firstHalfAvgSpeed}km/h → 후반 ${currentGpsTacticalMetrics.secondHalfAvgSpeed}km/h (${currentGpsTacticalMetrics.paceChangePct >= 0 ? '+' : ''}${currentGpsTacticalMetrics.paceChangePct}%)
-- 구장 커버리지: ${currentGpsTacticalMetrics.coveragePct}%
+[전술·공간 9분할 데이터 (공격 방향 상단 기준)]
+- 종적 진영 체류 비율: 공격 진영 ${currentGpsTacticalMetrics.attPct}% / 중원 구역 ${currentGpsTacticalMetrics.midPct}% / 수비 진영 ${currentGpsTacticalMetrics.defPct}%
+- 횡적 채널 활용 비율: 좌측 채널 ${currentGpsTacticalMetrics.leftPct}% / 중앙 채널 ${currentGpsTacticalMetrics.centerPct}% / 우측 채널 ${currentGpsTacticalMetrics.rightPct}%
+- 9분할 최다 체류 핫스팟: 1순위 ${currentGpsTacticalMetrics.topZoneLabel}, 2순위 ${currentGpsTacticalMetrics.secondZoneLabel}
+- 고속/스프린트 방향성: 공격 침투 방향 질주 ${currentGpsTacticalMetrics.attackSprintPct}% vs 수비 복귀 방향 질주 ${currentGpsTacticalMetrics.defenseSprintPct}%
+- 전·후반 체력/페이스 변화: 전반부 평균 ${currentGpsTacticalMetrics.firstHalfAvgSpeed}km/h → 후반부 평균 ${currentGpsTacticalMetrics.secondHalfAvgSpeed}km/h (${currentGpsTacticalMetrics.paceChangePct >= 0 ? '+' : ''}${currentGpsTacticalMetrics.paceChangePct}%)
+- 구장 전체 커버리지: ${currentGpsTacticalMetrics.coveragePct}%${sameDayContext}
 
-반드시 아래 JSON 형식으로만 응답하세요:
+반드시 아래 JSON 스키마로만 응답하세요 (마크다운 코드블록 없이 순수 JSON 객체만 출력):
 {
-  "positionScore": ${currentGpsTacticalMetrics.positionScore},
-  "styleTag": "플레이 스타일 별명 (예: 지치지 않는 측면 엔진)",
-  "summary": "핵심 총평 1~2문장",
-  "spatialAnalysis": "포지션 대비 공간/움직임 분석 2문장",
-  "physicalAnalysis": "스프린트·체력·타임라인 분석 2문장",
-  "improvementTip": "다음 쿼터를 위한 맞춤형 전술 조언 1~2문장"
+  "positionScore": 60에서 99 사이의 포지션 수행 평점(숫자),
+  "styleTag": "오늘 플레이 스타일을 한눈에 보여주는 멋진 별명 (예: 우측면을 지배한 오버래핑 엔진)",
+  "summary": "오늘 경기 활약상 핵심 총평 1~2문장",
+  "spatialAnalysis": "선택한 포지션(${posObj.label}) 관점에서 본 공간 점유·핫스팟·채널 활용 분석 2~3문장",
+  "physicalAnalysis": "최고속도 발생 시점(${currentGpsTacticalMetrics.peakSpeedTimeStr})·스프린트 방향성·전후반 체력 유지율 분석 2~3문장",
+  "improvementTip": "다음 쿼터에 더 완벽한 플레이를 하기 위한 구체적인 맞춤형 전술 조언 1~2문장"
 }`;
 
-          const geminiRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(customApiKey)}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [{ role: 'user', parts: [{ text: directPrompt }] }],
-                generationConfig: {
-                  temperature: 0.85,
-                  maxOutputTokens: 700,
-                  responseMimeType: 'application/json'
-                }
-              })
+    setIsGeneratingGpsAi(true);
+    try {
+      let finalReview = null;
+      let lastErrorMsg = '';
+
+      // 1) 클라이언트/팀에 등록된 Gemini API 키로 직접 호출 (gemini-2.5-flash -> 실패 시 gemini-2.0-flash 폴백)
+      if (customApiKey) {
+        const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+        for (const modelName of modelsToTry) {
+          try {
+            const geminiRes = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(customApiKey)}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ role: 'user', parts: [{ text: directPrompt }] }],
+                  generationConfig: {
+                    temperature: 0.9,
+                    maxOutputTokens: 900,
+                    responseMimeType: 'application/json'
+                  }
+                })
+              }
+            );
+            if (geminiRes.ok) {
+              const geminiData = await geminiRes.json();
+              const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+              const cleaned = rawText.replace(/```json|```/g, '').trim();
+              const parsed = JSON.parse(cleaned);
+              if (parsed && parsed.summary) {
+                finalReview = {
+                  ...parsed,
+                  positionCode: posObj.code,
+                  positionLabel: posObj.label,
+                  positionScore: Number(parsed.positionScore) || currentGpsTacticalMetrics.positionScore,
+                  source: 'gemini-ai',
+                  generatedAt: new Date().toISOString()
+                };
+                break;
+              }
+            } else {
+              const errJson = await geminiRes.json().catch(() => ({}));
+              lastErrorMsg = errJson?.error?.message || `HTTP ${geminiRes.status}`;
             }
-          );
-          if (geminiRes.ok) {
-            const geminiData = await geminiRes.json();
-            const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            const cleaned = rawText.replace(/```json|```/g, '').trim();
-            const parsed = JSON.parse(cleaned);
-            if (parsed && parsed.summary) {
-              finalReview = {
-                ...parsed,
-                positionCode: posObj.code,
-                positionLabel: posObj.label,
-                positionScore: Number(parsed.positionScore) || currentGpsTacticalMetrics.positionScore,
-                source: 'gemini-ai',
-                generatedAt: new Date().toISOString()
-              };
-            }
+          } catch (directErr) {
+            lastErrorMsg = String(directErr?.message || directErr);
           }
-        } catch (directErr) {
-          console.warn('Direct Gemini API fallback:', directErr);
         }
       }
 
-      // 2순위: 서버리스 엔드포인트 (/api/gps-ai-review) 시도
-      if (!finalReview) {
+      // 2) 서버리스 엔드포인트 (/api/gps-ai-review) 호출 시도 (Vercel 환경변수 GEMINI_API_KEY 설정 시)
+      if (!finalReview && !customApiKey) {
         try {
           const apiRes = await fetch('/api/gps-ai-review', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify({ prompt: directPrompt })
           });
           if (apiRes.ok) {
             const apiData = await apiRes.json();
@@ -2784,14 +2633,21 @@ export default function App() {
             }
           }
         } catch {
-          // 서버리스 미설정 시 타임라인 전술 엔진으로 자연스럽게 전환
+          // 로컬 개발 환경이거나 서버 키 미설정 상태
         }
       }
 
-      // 3순위: 타임라인 이벤트 & 다각도 문맥 기반 전술 내러티브 생성
+      // 3) API 키가 아직 등록되지 않았거나 유효하지 않은 경우 키 설정 모달 안내
       if (!finalReview) {
-        await new Promise(r => setTimeout(r, 380));
-        finalReview = buildContextualAiReviewFallback(posObj.code, currentGpsTacticalMetrics, nextSeed);
+        if (!customApiKey) {
+          setGeminiApiKeyModal({ isOpen: true, keyInput: '' });
+        } else {
+          setSystemAlert({
+            isOpen: true,
+            message: `Google Gemini AI 호출에 실패했습니다. API 키를 확인해 주세요.\n(${lastErrorMsg || '응답 파싱 오류'})`
+          });
+        }
+        return;
       }
 
       const updatedSession = {
@@ -6911,14 +6767,19 @@ const renderGoalFlowModal = () => {
             </div>
 
             <form onSubmit={saveTeamGeminiApiKey} className="space-y-3.5 text-xs">
-              <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3 space-y-1.5 text-slate-300 leading-relaxed break-keep">
-                <div className="font-black text-indigo-300">💡 무료 Gemini API 키를 등록하면?</div>
+              <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3 space-y-2 text-slate-300 leading-relaxed break-keep">
+                <div className="font-black text-indigo-300">💡 Google Gemini AI 코치 (무료 API 키)</div>
                 <p className="text-[11px] text-slate-400">
-                  Google AI Studio에서 무료로 발급받는 <strong className="text-white">Gemini 2.5 Flash 키</strong>를 한 번만 입력해 두면, 우리 팀원 누구나 매 경기 완전히 새로운 문장의 생성형 AI 전술 코칭을 무제한(무료 등급 하루 1,500회) 받아볼 수 있습니다.
+                  Google AI Studio에서 무료로 발급받는 <strong className="text-white">Gemini API 키</strong>를 한 번만 등록해 두면, 우리 팀원 누구나 매 경기 완전히 새로운 문장의 생성형 AI 전술 코칭을 무제한(무료 등급 하루 1,500회) 이용할 수 있습니다.
                 </p>
-                <p className="text-[10px] text-emerald-400 font-bold">
-                  ※ 키를 입력하지 않아도 타임라인·공간 실측 기반의 다각도 전술 내러티브 엔진이 기본 작동합니다.
-                </p>
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 text-[11px] font-black transition"
+                >
+                  🔗 Google AI Studio에서 무료 키 발급받기 &gt;
+                </a>
               </div>
 
               <div>
@@ -6927,8 +6788,9 @@ const renderGoalFlowModal = () => {
                   type="password"
                   value={geminiApiKeyModal.keyInput}
                   onChange={(e) => setGeminiApiKeyModal(prev => ({ ...prev, keyInput: e.target.value }))}
-                  placeholder="AIzaSy... (비워두고 저장 시 초기화)"
+                  placeholder="AIzaSy... 키 붙여넣기"
                   className="w-full bg-slate-900 border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
+                  autoFocus
                 />
               </div>
 
@@ -6944,7 +6806,7 @@ const renderGoalFlowModal = () => {
                   type="submit"
                   className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl transition shadow"
                 >
-                  💾 팀 AI 키 저장
+                  💾 저장 후 AI 분석 시작
                 </button>
               </div>
             </form>

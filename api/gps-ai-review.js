@@ -44,7 +44,8 @@ export default async function handler(req, res) {
 
     const data = await response.json();
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const parsed = JSON.parse(rawText);
+    const cleaned = rawText.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
     return res.status(200).json({ ok: true, review: parsed });
   } catch (err) {
     return res.status(500).json({ error: String(err?.message || err) });
