@@ -1,11 +1,20 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, deleteDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { Calendar, Users, BarChart2, Plus, MapPin, Trophy, Shield, ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings, Target, Undo, Redo, MousePointer, ArrowUpRight, TrendingUp, Square, XCircle, Video, PlayCircle, RotateCcw } from 'lucide-react';
 
 const firebaseConfig = { apiKey: "AIzaSyCO99Km34_p0paqFM8wbWD0odUU8UJ9ph4", authDomain: "matchboard-d010e.firebaseapp.com", projectId: "matchboard-d010e", storageBucket: "matchboard-d010e.appspot.com", messagingSenderId: "693534026774", appId: "1:693534026774:web:a61dd8607c492e5e7c1937", measurementId: "G-VVB38BS06J" };
-const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+let db;
+try {
+  db = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+  });
+} catch {
+  db = getFirestore(app);
+}
 
 const TEAM_LETTERS = ['A', 'B', 'C', 'D'];
 const TEAM_COLORS = { 'A': 'text-red-400 bg-red-500/10 border-red-500/30', 'B': 'text-blue-400 bg-blue-500/10 border-blue-500/30', 'C': 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30', 'D': 'text-green-400 bg-green-500/10 border-green-500/30' };
@@ -177,9 +186,12 @@ const getInitialTacticsTokens = (pitchType) => {
 };
 
 const SESSION_STORAGE_KEY = 'matchboard_session_v1';
+const TEAMS_CACHE_KEY = 'matchboard_teams_cache_v1';
+const getTeamDataCacheKey = (teamId) => `matchboard_team_data_${teamId}_v1`;
+
 const loadSavedSession = () => {
   try {
-    // 영구 저장소(localStorage)에 남아있던 이전 데이터는 제거하고,
+    // 영구 저장소(localStorage)에 남아있던 이전 세션은 제거하고,
     // 앱 프로세스/세션이 살아있는 동안만 유지되는 sessionStorage를 사용 (백그라운드 완전 종료 시 자동 초기화)
     localStorage.removeItem(SESSION_STORAGE_KEY);
     const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
@@ -190,8 +202,33 @@ const loadSavedSession = () => {
   }
 };
 
+const loadCachedTeams = () => {
+  try {
+    const raw = localStorage.getItem(TEAMS_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const loadCachedTeamData = (teamId) => {
+  if (!teamId) return null;
+  try {
+    const raw = localStorage.getItem(getTeamDataCacheKey(teamId));
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
 export default function App() {
   const savedSession = useMemo(() => loadSavedSession(), []);
+  const initialCachedTeams = useMemo(() => loadCachedTeams(), []);
+  const initialCachedTeamData = useMemo(() => loadCachedTeamData(savedSession?.activeTeamId), [savedSession?.activeTeamId]);
+
   const [user, setUser] = useState(null);
   const [appState, setAppState] = useState(() => (savedSession?.activeTeamId ? (savedSession.appState || 'main') : 'login')); 
   const [activeTab, setActiveTab] = useState(() => savedSession?.activeTab || 'matches'); 
@@ -201,14 +238,14 @@ export default function App() {
   const [chemistryMode, setChemistryMode] = useState('duo'); // 'duo' | 'route'
   const [isAdmin, setIsAdmin] = useState(() => !!savedSession?.isAdmin); 
   const [adminPassword, setAdminPassword] = useState('admin');
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(() => initialCachedTeams.length > 0);
   const [isProcessing, setIsProcessing] = useState(false); 
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const [teams, setTeams] = useState([]);
+  const [teams, setTeams] = useState(() => initialCachedTeams);
   const [activeTeamId, setActiveTeamId] = useState(() => savedSession?.activeTeamId || null);
-  const [players, setPlayers] = useState([]);
-  const [matches, setMatches] = useState([]);
+  const [players, setPlayers] = useState(() => initialCachedTeamData?.players || []);
+  const [matches, setMatches] = useState(() => initialCachedTeamData?.matches || []);
   const [memos, setMemos] = useState({});
 
   const [viewDate, setViewDate] = useState(new Date());
@@ -376,13 +413,22 @@ export default function App() {
 
   const viewYearMonth = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
   const viewYear = `${viewDate.getFullYear()}`;
-  const monthlyMatches = useMemo(() => currentTeamMatches.filter(m => m.date.startsWith(viewYearMonth)), [currentTeamMatches, viewYearMonth]);
-  const yearlyMatches = useMemo(() => currentTeamMatches.filter(m => m.date.startsWith(viewYear)), [currentTeamMatches, viewYear]);
+  const monthlyMatches = useMemo(() => (appState === 'login' ? [] : currentTeamMatches.filter(m => m.date.startsWith(viewYearMonth))), [appState, currentTeamMatches, viewYearMonth]);
+  const yearlyMatches = useMemo(() => (appState === 'login' ? [] : currentTeamMatches.filter(m => m.date.startsWith(viewYear))), [appState, currentTeamMatches, viewYear]);
   const scheduledThisMonth = useMemo(() => monthlyMatches.filter(m => m.status === 'scheduled').sort((a,b) => a.date.localeCompare(b.date)), [monthlyMatches]);
-  const completedThisMonthWithStandings = useMemo(() => { return monthlyMatches.filter(m => m.status === 'completed').sort((a,b) => b.date.localeCompare(a.date)).map(m => ({ ...m, standings: calculateStandings(m) })); }, [monthlyMatches]);
-  const matchesByDate = useMemo(() => { const map = {}; monthlyMatches.forEach(m => { if (!map[m.date]) map[m.date] = []; map[m.date].push(m); }); return map; }, [monthlyMatches]);
+  const completedThisMonthWithStandings = useMemo(() => {
+    if (appState === 'login' || (appState === 'main' && activeTab !== 'matches')) return [];
+    return monthlyMatches.filter(m => m.status === 'completed').sort((a,b) => b.date.localeCompare(a.date)).map(m => ({ ...m, standings: calculateStandings(m) }));
+  }, [appState, activeTab, monthlyMatches]);
+  const matchesByDate = useMemo(() => {
+    if (appState === 'login' || (appState === 'main' && activeTab !== 'schedule')) return {};
+    const map = {};
+    monthlyMatches.forEach(m => { if (!map[m.date]) map[m.date] = []; map[m.date].push(m); });
+    return map;
+  }, [appState, activeTab, monthlyMatches]);
 
   const calculatedPlayersList = useMemo(() => {
+    if (appState === 'login' || (appState === 'main' && activeTab !== 'roster')) return [];
     const stats = {}; currentTeamPlayers.forEach(p => { stats[p.id] = { ...p, trueCaps: 0, trueGoals: 0, trueAssists: 0, trueGkQuarters: 0, trueGoalsConceded: 0, trueCleanSheets: 0 }; });
     const completedMatches = currentTeamMatches.filter(m => m.status === 'completed' && m.matchType !== 'futsal');
     completedMatches.forEach(m => {
@@ -402,9 +448,10 @@ export default function App() {
       });
     });
     return Object.values(stats).sort((a,b) => b.trueCaps !== a.trueCaps ? b.trueCaps - a.trueCaps : b.trueGoals - a.trueGoals);
-  }, [currentTeamPlayers, currentTeamMatches]);
+  }, [appState, activeTab, currentTeamPlayers, currentTeamMatches]);
 
   const filteredStats = useMemo(() => {
+    if (appState !== 'main' || activeTab !== 'stats') return [];
     const statsMap = {}; currentTeamPlayers.forEach(p => { statsMap[p.id] = { id: p.id, name: p.name, caps: 0, goals: 0, assists: 0, gkQuarters: 0, goalsConceded: 0, cleanSheets: 0 }; });
     let targetMatches = currentTeamMatches.filter(m => m.status === 'completed');
     if (statsPeriod === 'month') targetMatches = targetMatches.filter(m => m.date.startsWith(viewYearMonth)); else if (statsPeriod === 'year') targetMatches = targetMatches.filter(m => m.date.startsWith(viewYear));
@@ -430,15 +477,17 @@ export default function App() {
       gaRate: s.gkQuarters > 0 ? s.goalsConceded / s.gkQuarters : null,
       cleanSheetRate: s.gkQuarters > 0 ? Math.round((s.cleanSheets / s.gkQuarters) * 100) : 0
     })).sort((a, b) => b.goals !== a.goals ? b.goals - a.goals : (b.assists !== a.assists ? b.assists - a.assists : b.caps - a.caps));
-  }, [currentTeamMatches, currentTeamPlayers, statsPeriod, viewYearMonth, viewYear, statsType]);
+  }, [appState, activeTab, currentTeamMatches, currentTeamPlayers, statsPeriod, viewYearMonth, viewYear, statsType]);
 
   const gkStatsList = useMemo(() => {
+    if (appState !== 'main' || activeTab !== 'stats') return [];
     return filteredStats
       .filter(s => s.gkQuarters > 0)
       .sort((a, b) => a.gaRate !== b.gaRate ? a.gaRate - b.gaRate : (b.cleanSheets !== a.cleanSheets ? b.cleanSheets - a.cleanSheets : b.gkQuarters - a.gkQuarters));
-  }, [filteredStats]);
+  }, [appState, activeTab, filteredStats]);
 
   const chemistryStats = useMemo(() => {
+    if (appState !== 'main' || activeTab !== 'stats') return { duoList: [], routeList: [] };
     let targetMatches = currentTeamMatches.filter(m => m.status === 'completed');
     if (statsPeriod === 'month') targetMatches = targetMatches.filter(m => m.date.startsWith(viewYearMonth));
     else if (statsPeriod === 'year') targetMatches = targetMatches.filter(m => m.date.startsWith(viewYear));
@@ -506,7 +555,7 @@ export default function App() {
     const duoList = Object.values(duoMap).sort((a, b) => b.total - a.total || a.p1Name.localeCompare(b.p1Name, 'ko'));
     const routeList = Object.values(routeMap).sort((a, b) => b.count - a.count || a.assisterName.localeCompare(b.assisterName, 'ko'));
     return { duoList, routeList };
-  }, [currentTeamMatches, currentTeamPlayers, statsPeriod, viewYearMonth, viewYear, statsType]);
+  }, [appState, activeTab, currentTeamMatches, currentTeamPlayers, statsPeriod, viewYearMonth, viewYear, statsType]);
 
   const titlePrefix = statsPeriod === 'month' ? '이달의' : '올해의';
   const maxGoals = filteredStats.length > 0 ? Math.max(...filteredStats.map(s => s.goals)) : 0; const topScorers = filteredStats.filter(s => s.goals === maxGoals && maxGoals > 0);
@@ -515,7 +564,7 @@ export default function App() {
   const minGaRate = gkStatsList.length > 0 ? Math.min(...gkStatsList.map(s => s.gaRate)) : null;
   const topGks = minGaRate !== null ? gkStatsList.filter(s => Math.abs(s.gaRate - minGaRate) < 1e-6) : [];
 
-  const globalStyles = ( <style>{` html, body { overscroll-behavior: none !important; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; } *::-webkit-scrollbar { display: none !important; width: 0 !important; } * { -ms-overflow-style: none !important; scrollbar-width: none !important; -webkit-tap-highlight-color: transparent; } input, textarea { font-size: 16px; } input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; } input[type="number"] { -moz-appearance: textfield; } .will-change-transform { will-change: transform, left, top; } `}</style> );
+  const globalStyles = ( <style>{` html, body { overscroll-behavior: none !important; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; scrollbar-width: none; -ms-overflow-style: none; } html::-webkit-scrollbar, body::-webkit-scrollbar, .hide-scrollbar::-webkit-scrollbar { display: none !important; width: 0 !important; } .hide-scrollbar { -ms-overflow-style: none !important; scrollbar-width: none !important; } input, textarea { font-size: 16px; } input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; } input[type="number"] { -moz-appearance: textfield; } .will-change-transform { will-change: transform, left, top; } `}</style> );
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e) => {
@@ -526,21 +575,102 @@ export default function App() {
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
 
+  // 1) Firebase 익명 인증 및 전체 팀 목록 구독 (앱 실행 시 1회만 연결하여 팀 변경 시 재연결 오버헤드 제거)
   useEffect(() => {
-    let unsubTeams = () => {}; let unsubPlayers = () => {}; let unsubMatches = () => {}; let unsubMemos = () => {};
+    let unsubTeams = () => {};
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-         setUser(currentUser);
-         unsubTeams = onSnapshot(collection(db, 'teams'), snap => { setTeams(snap.docs.map(d => d.data())); setIsLoaded(true); }, error => { console.error("Teams fetch error:", error); setSystemAlert({ isOpen: true, message: `데이터베이스 접근 권한이 없습니다.\nFirebase Firestore 규칙을 확인해주세요.` }); setIsLoaded(true); });
-         if (activeTeamId) {
-            unsubPlayers = onSnapshot(query(collection(db, 'players'), where('teamId', '==', activeTeamId)), snap => setPlayers(snap.docs.map(d => d.data())));
-            unsubMatches = onSnapshot(query(collection(db, 'matches'), where('teamId', '==', activeTeamId)), snap => setMatches(snap.docs.map(d => d.data())));
-            unsubMemos = onSnapshot(query(collection(db, 'memos'), where('teamId', '==', activeTeamId)), snap => { const memoMap = {}; snap.docs.forEach(d => { memoMap[d.data().date] = d.data().content; }); setMemos(memoMap); });
-         }
-      } else { signInAnonymously(auth).catch(console.error); }
+        setUser(currentUser);
+        unsubTeams = onSnapshot(
+          collection(db, 'teams'),
+          (snap) => {
+            const loadedTeams = snap.docs.map((d) => d.data());
+            setTeams(loadedTeams);
+            setIsLoaded(true);
+            try {
+              localStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify(loadedTeams));
+            } catch {}
+          },
+          (error) => {
+            console.error('Teams fetch error:', error);
+            setSystemAlert({ isOpen: true, message: `데이터베이스 접근 권한이 없습니다.\nFirebase Firestore 규칙을 확인해주세요.` });
+            setIsLoaded(true);
+          }
+        );
+      } else {
+        signInAnonymously(auth).catch(console.error);
+      }
     });
-    return () => { unsubscribeAuth(); unsubTeams(); unsubPlayers(); unsubMatches(); unsubMemos(); };
+    return () => {
+      unsubscribeAuth();
+      unsubTeams();
+    };
+  }, []);
+
+  // 2) 팀 선택 시 로컬 캐시에서 즉시(0ms) 화면 먼저 렌더링 후 실시간 Firestore 동기화
+  useEffect(() => {
+    if (!activeTeamId) return;
+    const cached = loadCachedTeamData(activeTeamId);
+    if (cached) {
+      if (Array.isArray(cached.players)) setPlayers(cached.players);
+      if (Array.isArray(cached.matches)) setMatches(cached.matches);
+    }
   }, [activeTeamId]);
+
+  useEffect(() => {
+    if (!user || !activeTeamId) return;
+    let latestPlayers = null;
+    let latestMatches = null;
+    const persistTeamCache = () => {
+      try {
+        const prev = loadCachedTeamData(activeTeamId) || {};
+        // 용량이 큰 사진 base64 등은 제외하고 핵심 목록만 가볍게 캐싱
+        const slimMatches = (latestMatches || prev.matches || []).map((m) => {
+          const { photos, ...rest } = m;
+          return photos ? { ...rest, photos: photos.slice(0, 12) } : rest;
+        });
+        localStorage.setItem(
+          getTeamDataCacheKey(activeTeamId),
+          JSON.stringify({
+            players: latestPlayers || prev.players || [],
+            matches: slimMatches
+          })
+        );
+      } catch {}
+    };
+
+    const unsubPlayers = onSnapshot(
+      query(collection(db, 'players'), where('teamId', '==', activeTeamId)),
+      (snap) => {
+        latestPlayers = snap.docs.map((d) => d.data());
+        setPlayers(latestPlayers);
+        persistTeamCache();
+      }
+    );
+    const unsubMatches = onSnapshot(
+      query(collection(db, 'matches'), where('teamId', '==', activeTeamId)),
+      (snap) => {
+        latestMatches = snap.docs.map((d) => d.data());
+        setMatches(latestMatches);
+        persistTeamCache();
+      }
+    );
+    const unsubMemos = onSnapshot(
+      query(collection(db, 'memos'), where('teamId', '==', activeTeamId)),
+      (snap) => {
+        const memoMap = {};
+        snap.docs.forEach((d) => {
+          memoMap[d.data().date] = d.data().content;
+        });
+        setMemos(memoMap);
+      }
+    );
+    return () => {
+      unsubPlayers();
+      unsubMatches();
+      unsubMemos();
+    };
+  }, [user, activeTeamId]);
 
   useEffect(() => { return () => { if (playbackRef.current) cancelAnimationFrame(playbackRef.current); }; }, []);
 
@@ -1177,27 +1307,27 @@ export default function App() {
   };
 
   // ================= GPS 분석 및 스마트워치 히트맵 엔진 =================
+  const rawGpsRecordsMemo = memos?.['__gps_records__'];
   const savedGpsRecords = useMemo(() => {
-    const raw = memos?.['__gps_records__'];
-    if (!raw) return [];
+    if (!rawGpsRecordsMemo || (appState === 'main' && activeTab !== 'gps')) return [];
     try {
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      const parsed = typeof rawGpsRecordsMemo === 'string' ? JSON.parse(rawGpsRecordsMemo) : rawGpsRecordsMemo;
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
-  }, [memos]);
+  }, [rawGpsRecordsMemo, appState, activeTab]);
 
+  const rawGpsPitchesMemo = memos?.['__gps_pitches__'];
   const savedGpsPitches = useMemo(() => {
-    const raw = memos?.['__gps_pitches__'];
-    if (!raw) return [];
+    if (!rawGpsPitchesMemo || (appState === 'main' && activeTab !== 'gps')) return [];
     try {
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      const parsed = typeof rawGpsPitchesMemo === 'string' ? JSON.parse(rawGpsPitchesMemo) : rawGpsPitchesMemo;
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
-  }, [memos]);
+  }, [rawGpsPitchesMemo, appState, activeTab]);
 
   const defaultSamplePitch = useMemo(() => ({
     id: 'preset_worldcup',
@@ -1216,6 +1346,7 @@ export default function App() {
 
   // 실제 진행된 팀 경기 일정 + 저장된 GPS 기록을 일정 단위로 매칭/그룹화
   const gpsScheduleGroups = useMemo(() => {
+    if (appState !== 'main' || activeTab !== 'gps') return [];
     const quarterOrder = { '1Q': 1, '2Q': 2, '3Q': 3, '4Q': 4, '5Q': 5, '6Q': 6, '전체': 9 };
     const sortRecords = (list) =>
       [...list].sort((a, b) => {
@@ -1296,7 +1427,7 @@ export default function App() {
     });
 
     return groups.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  }, [currentTeamMatches, savedGpsRecords]);
+  }, [appState, activeTab, currentTeamMatches, savedGpsRecords]);
 
   const createDefaultCornersAround = (centerLat, centerLon, lengthM = 96, widthM = 62) => {
     const cosLat = Math.cos((centerLat * Math.PI) / 180);
@@ -3945,11 +4076,11 @@ const renderGoalFlowModal = () => {
           </button>
           {!isLoginAdminMode ? ( <button onClick={() => setAuthModal({ isOpen: true, type: 'loginAdminAuth' })} className="text-xs text-slate-400 border border-slate-700 bg-slate-800 px-3 py-1.5 rounded-lg hover:text-white transition flex items-center gap-1"><Shield size={14}/> 관리자 설정</button> ) : ( <button onClick={() => setIsLoginAdminMode(false)} className="text-xs text-red-400 border border-red-500/30 bg-red-500/10 px-3 py-1.5 rounded-lg hover:bg-red-500/20 transition flex items-center gap-1"><LogOut size={14}/> 관리자 종료</button> )}
         </div>
-        <div className="text-center mb-10 mt-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-          <div className="flex justify-center mb-5"><div className="relative"><div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 rounded-full animate-pulse"></div><div className="w-16 h-16 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-2xl flex items-center justify-center shadow-lg relative z-10"><Activity size={32} className="text-blue-500" /></div></div></div>
+        <div className="text-center mb-10 mt-8 animate-in fade-in duration-200">
+          <div className="flex justify-center mb-5"><div className="relative"><div className="w-16 h-16 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-2xl flex items-center justify-center shadow-lg relative z-10"><Activity size={32} className="text-blue-500" /></div></div></div>
           <h1 className="text-4xl font-black tracking-tighter mb-3 bg-gradient-to-r from-white via-blue-100 to-slate-400 text-transparent bg-clip-text">MATCHBOARD</h1>
           <p className="text-slate-400 text-sm font-medium tracking-wide">승리를 기록하는 가장 스마트한 방법</p>
-          {isLoginAdminMode && <div className="mt-5 bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs py-2 px-4 rounded-xl font-bold inline-block animate-pulse">시스템 관리자 모드 활성화됨</div>}
+          {isLoginAdminMode && <div className="mt-5 bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs py-2 px-4 rounded-xl font-bold inline-block">시스템 관리자 모드 활성화됨</div>}
         </div>
         <div className="space-y-4 mb-6">
           <h2 className="text-sm font-bold text-slate-500 px-2">{isLoginAdminMode ? '등록된 팀 관리' : '내 팀 선택하기'}</h2>

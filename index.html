@@ -14,9 +14,11 @@
     <meta name="theme-color" content="#0F172A" />
     
     <title>MATCHBOARD</title>
+    <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin />
     
-    <!-- 에러가 나던 카카오 스크립트 수정 (integrity와 crossorigin 속성 삭제) -->
-    <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.6.0/kakao.min.js"></script>
+    <!-- 카카오 SDK 비동기(defer) 로드로 초기 앱 실행 블로킹 방지 -->
+    <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.6.0/kakao.min.js" defer></script>
   </head>
   <body>
     <div id="root"></div>
