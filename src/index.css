@@ -1,3 +1,29 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  select,
+  input,
+  button {
+    max-width: 100%;
+    min-width: 0;
+    font-family: inherit;
+  }
+
+  /* iOS Safari에서 긴 option 텍스트로 인해 select 박스가 부모 너비를 뚫고 나가는 현상 방지 */
+  select {
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+}
+
