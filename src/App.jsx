@@ -169,6 +169,13 @@ const formatTimeAmPm = (timeStr) => {
 
 const getTodayString = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
+const formatBirthYear = (by) => {
+  if (by === undefined || by === null || by === '') return '';
+  const num = parseInt(String(by).trim(), 10);
+  if (Number.isNaN(num)) return String(by);
+  return String(((num % 100) + 100) % 100).padStart(2, '0');
+};
+
 const getInitialTacticsTokens = (pitchType) => {
   const tokens = [];
   if (pitchType === 'full') {
@@ -925,7 +932,7 @@ export default function App() {
     e.preventDefault(); if(isProcessing) return; setIsProcessing(true);
     try {
       const fd = new FormData(e.target); const playerId = rosterModal.player?.id || 'p' + Date.now();
-      const newPlayer = { ...rosterModal.player, id: playerId, teamId: activeTeamId, name: fd.get('name'), birthYear: parseInt(fd.get('birthYear')), goals: rosterModal.player?.goals || 0, assists: rosterModal.player?.assists || 0, caps: rosterModal.player?.caps || 0 };
+      const newPlayer = { ...rosterModal.player, id: playerId, teamId: activeTeamId, name: fd.get('name'), birthYear: formatBirthYear(fd.get('birthYear')), goals: rosterModal.player?.goals || 0, assists: rosterModal.player?.assists || 0, caps: rosterModal.player?.caps || 0 };
       await setDoc(doc(db, 'players', playerId), newPlayer); setRosterModal({ isOpen: false, player: null });
     } finally { setIsProcessing(false); }
   };
@@ -3859,7 +3866,7 @@ export default function App() {
               const currentTeam = (assignmentModal.match.teamAssignments || {})[p.id] || null;
               return (
                 <div key={p.id} className="bg-slate-900 p-3 rounded-xl flex justify-between items-center border border-slate-700">
-                  <div className="font-bold text-white">{p.name} <span className="text-xs text-slate-500 ml-1">{p.birthYear}</span></div>
+                  <div className="font-bold text-white">{p.name} <span className="text-xs text-slate-500 ml-1">{formatBirthYear(p.birthYear)}</span></div>
                   <div className="flex bg-slate-800 rounded-lg p-1 gap-1">{TEAM_LETTERS.slice(0, maxTeams).map(t => ( <button key={t} onClick={() => assignTeam(p.id, t)} className={`w-8 h-8 flex items-center justify-center text-xs font-black rounded-md transition ${currentTeam === t ? TEAM_COLORS[t] + ' shadow' : 'bg-slate-700 text-slate-400 hover:text-white'}`}>{t}</button> ))}</div>
                 </div>
               );
@@ -4164,7 +4171,7 @@ const renderGoalFlowModal = () => {
           <h2 className="text-xl font-bold text-white mb-6 text-center">{rosterModal.player ? '명단 수정' : '새 선수 등록'}</h2>
           <form onSubmit={saveRoster} className="space-y-4">
             <div><label className="block text-xs font-bold text-slate-400 mb-1">이름</label><input type="text" name="name" required defaultValue={rosterModal.player?.name || ""} placeholder="선수 이름" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" /></div>
-            <div><label className="block text-xs font-bold text-slate-400 mb-1">출생 연도 (2자리)</label><input type="number" name="birthYear" required defaultValue={rosterModal.player?.birthYear || ""} placeholder="예: 96" min="0" max="99" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" /></div>
+            <div><label className="block text-xs font-bold text-slate-400 mb-1">출생 연도 (2자리)</label><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={4} name="birthYear" required defaultValue={formatBirthYear(rosterModal.player?.birthYear)} placeholder="예: 96, 01" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" /></div>
             <div className="flex gap-3 pt-4 border-t border-slate-700"><button type="button" onClick={() => setRosterModal({isOpen: false, player: null})} className="flex-1 py-3 bg-slate-700 text-white rounded-xl font-bold transition hover:bg-slate-600">취소</button><button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold transition hover:bg-blue-400 shadow-lg">저장하기</button></div>
           </form>
         </div>
@@ -5538,7 +5545,7 @@ const renderGoalFlowModal = () => {
                         >
                           <option value="">👤 선수 선택 (팀 명단)</option>
                           {currentTeamPlayers.map(p => (
-                            <option key={p.id} value={p.id}>{p.name} ({p.birthYear})</option>
+                            <option key={p.id} value={p.id}>{p.name} ({formatBirthYear(p.birthYear)})</option>
                           ))}
                           <option value="__custom__">✍️ 이름 직접 입력...</option>
                         </select>
@@ -6230,7 +6237,7 @@ const renderGoalFlowModal = () => {
                 {calculatedPlayersList.map(p => (
                   <div key={p.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex justify-between items-center group shadow-sm">
                     <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-600 flex items-center justify-center font-black text-slate-400 shrink-0">{p.birthYear}</div>
+                      <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-600 flex items-center justify-center font-black text-slate-400 shrink-0">{formatBirthYear(p.birthYear)}</div>
                       <div>
                         <div className="font-bold text-white text-lg">{p.name}</div>
                         <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -6648,7 +6655,7 @@ const renderGoalFlowModal = () => {
                 >
                   <option value="">미지정 선수</option>
                   {currentTeamPlayers.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.birthYear})</option>
+                    <option key={p.id} value={p.id}>{p.name} ({formatBirthYear(p.birthYear)})</option>
                   ))}
                   <option value="__custom__">✍️ 직접 이름 입력...</option>
                 </select>
