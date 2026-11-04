@@ -365,6 +365,49 @@ export default function App() {
   const pitchMapPolygonRef = useRef(null);
   const pitchMapMidLineRef = useRef(null);
 
+  // 기록 탭 상단 서브탭 ('gps' | 'shoot') 및 슈팅 속도 측정(가상 레이저 트랩 스피드건) 상태
+  const [recordSubTab, setRecordSubTab] = useState('gps'); // 'gps' | 'shoot'
+  const [shootGuideModal, setShootGuideModal] = useState(false);
+  const [isShootCameraActive, setIsShootCameraActive] = useState(false);
+  const [shootFacingMode, setShootFacingMode] = useState('environment'); // 'environment' | 'user'
+  const [shootGateDistanceM, setShootGateDistanceM] = useState(3.0); // 1.5 ~ 8.0m
+  const [shootSensitivity, setShootSensitivity] = useState('normal'); // 'high' | 'normal' | 'low'
+  const [shootDirectionMode, setShootDirectionMode] = useState('auto'); // 'auto' | 'ltr' | 'rtl'
+  const [shootSelectedPlayerId, setShootSelectedPlayerId] = useState('');
+  const [shootCustomPlayerName, setShootCustomPlayerName] = useState('');
+  const [shootFootType, setShootFootType] = useState('오른발'); // '오른발' | '왼발' | '발리/논스톱' | '프리킥'
+  const [shootAutoSave, setShootAutoSave] = useState(true);
+  const [shootSoundEnabled, setShootSoundEnabled] = useState(true);
+  const [shootTrapStatus, setShootTrapStatus] = useState('idle'); // 'idle' | 'ready' | 'armed_gate1' | 'measured' | 'shake_warn'
+  const [shootLastResult, setShootLastResult] = useState(null);
+  const [shootEditModal, setShootEditModal] = useState({ isOpen: false, record: null, playerId: '', customPlayerName: '', footType: '오른발' });
+  const [shootManualModal, setShootManualModal] = useState({ isOpen: false, speedKmh: '', playerId: '', customPlayerName: '', footType: '오른발' });
+  const shootVideoRef = useRef(null);
+  const shootOverlayCanvasRef = useRef(null);
+  const shootProcCanvasRef = useRef(null);
+  const shootStreamRef = useRef(null);
+  const shootRafRef = useRef(null);
+  const shootAudioCtxRef = useRef(null);
+  const shootTrapRuntimeRef = useRef({
+    prevFrameData: null,
+    state: 'ready', // 'ready' | 'armed_gate1' | 'cooldown'
+    startGate: null, // 'A' | 'B'
+    startTimeMs: 0,
+    startY: 0.5,
+    lastShotEndY: 0.5,
+    lastShotStartY: 0.5,
+    lastShotDir: 'ltr',
+    lastShotSpeed: 0,
+    lastShotAtMs: 0,
+    cooldownUntilMs: 0,
+    scoreA: 0,
+    scoreB: 0,
+    prevScoreA: 0,
+    prevScoreB: 0,
+    prevFrameTs: 0,
+    shakeWarnUntilMs: 0
+  });
+
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
@@ -826,7 +869,7 @@ export default function App() {
   backStateRef.current = {
     appState, activeTab, goalFlow, logEditModal, quarterEditModal, detailModal,
     assignmentModal, matchModal, rosterModal, dateMemoModal, galleryModal,
-    shareModal, tacticsTutorialModal, gpsGuideModal, pitchManagerModal, gpsRecordEditModal, geminiApiKeyModal, installGuideModal, teamSettingsModal, authModal
+    shareModal, tacticsTutorialModal, gpsGuideModal, shootGuideModal, shootEditModal, shootManualModal, pitchManagerModal, gpsRecordEditModal, geminiApiKeyModal, installGuideModal, teamSettingsModal, authModal
   };
 
   useEffect(() => {
@@ -834,6 +877,9 @@ export default function App() {
     window.history.pushState({ matchboardGuard: true }, '');
     const handlePopState = () => {
       const st = backStateRef.current;
+      if (st.shootEditModal?.isOpen) { setShootEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', footType: '오른발' }); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.shootManualModal?.isOpen) { setShootManualModal({ isOpen: false, speedKmh: '', playerId: '', customPlayerName: '', footType: '오른발' }); window.history.pushState({ matchboardGuard: true }, ''); return; }
+      if (st.shootGuideModal) { setShootGuideModal(false); window.history.pushState({ matchboardGuard: true }, ''); return; }
       if (st.geminiApiKeyModal?.isOpen) { setGeminiApiKeyModal({ isOpen: false, keyInput: '' }); window.history.pushState({ matchboardGuard: true }, ''); return; }
       if (st.gpsRecordEditModal?.isOpen) { setGpsRecordEditModal(prev => ({ ...prev, isOpen: false, record: null })); window.history.pushState({ matchboardGuard: true }, ''); return; }
       if (st.pitchManagerModal) { setPitchManagerModal(false); window.history.pushState({ matchboardGuard: true }, ''); return; }
@@ -2064,7 +2110,7 @@ export default function App() {
 
   // 2D 축구장 히트맵 / 스프린트 / 리플레이 캔버스 렌더링
   useEffect(() => {
-    if (activeTab !== 'gps' || !gpsSession || !gpsCanvasRef.current) return;
+    if (activeTab !== 'gps' || recordSubTab !== 'gps' || !gpsSession || !gpsCanvasRef.current) return;
     const canvas = gpsCanvasRef.current;
     const ctx = canvas.getContext('2d');
     const W = canvas.width;
@@ -2278,7 +2324,7 @@ export default function App() {
       ctx.textBaseline = 'middle';
       ctx.fillText(label, bx + tw / 2, by + 9);
     }
-  }, [activeTab, gpsSession, gpsViewMode, gpsFlipVertical, gpsRotate90, gpsReplayProgress, gpsSelectedPitchId, allGpsPitches]);
+  }, [activeTab, recordSubTab, gpsSession, gpsViewMode, gpsFlipVertical, gpsRotate90, gpsReplayProgress, gpsSelectedPitchId, allGpsPitches]);
 
   // 2D 동선 리플레이 애니메이션 루프
   useEffect(() => {
@@ -2888,6 +2934,837 @@ export default function App() {
         setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
       }
     }, 300);
+  };
+
+  // ================= 슈팅 속도 측정 (가상 레이저 트랩 스피드건) 엔진 =================
+  const rawShootRecordsMemo = memos?.['__shoot_records__'];
+  const savedShootRecords = useMemo(() => {
+    if (!rawShootRecordsMemo || (appState === 'main' && activeTab !== 'gps')) return [];
+    try {
+      const parsed = typeof rawShootRecordsMemo === 'string' ? JSON.parse(rawShootRecordsMemo) : rawShootRecordsMemo;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [rawShootRecordsMemo, appState, activeTab]);
+
+  // 선수별 최고 구속 기준 실시간 랭킹 산출
+  const shootLeaderboard = useMemo(() => {
+    if (appState === 'main' && activeTab !== 'gps') return [];
+    const map = {};
+    savedShootRecords.forEach((rec) => {
+      const spd = Number(rec.speedKmh);
+      if (!Number.isFinite(spd) || spd <= 0) return;
+      const matchedRosterPlayer = rec.playerId
+        ? currentTeamPlayers.find(p => p.id === rec.playerId)
+        : currentTeamPlayers.find(p => p.name === rec.playerName);
+      const key = matchedRosterPlayer ? `id_${matchedRosterPlayer.id}` : `name_${(rec.playerName || '미지정 선수').trim()}`;
+      const displayName = matchedRosterPlayer ? matchedRosterPlayer.name : (rec.playerName || '미지정 선수');
+      const displayBirthYear = matchedRosterPlayer
+        ? formatBirthYear(matchedRosterPlayer.birthYear)
+        : (rec.birthYear ? formatBirthYear(rec.birthYear) : '');
+
+      if (!map[key]) {
+        map[key] = {
+          key,
+          playerId: matchedRosterPlayer?.id || rec.playerId || null,
+          playerName: displayName,
+          birthYear: displayBirthYear,
+          bestSpeedKmh: spd,
+          bestFootType: rec.footType || '오른발',
+          bestDate: rec.date || '',
+          bestRecordId: rec.id,
+          sumSpeed: spd,
+          count: 1
+        };
+      } else {
+        map[key].sumSpeed += spd;
+        map[key].count += 1;
+        if (spd > map[key].bestSpeedKmh) {
+          map[key].bestSpeedKmh = spd;
+          map[key].bestFootType = rec.footType || '오른발';
+          map[key].bestDate = rec.date || '';
+          map[key].bestRecordId = rec.id;
+        }
+      }
+    });
+
+    return Object.values(map)
+      .map(item => ({
+        ...item,
+        bestSpeedKmh: Number(item.bestSpeedKmh.toFixed(1)),
+        avgSpeedKmh: Number((item.sumSpeed / item.count).toFixed(1))
+      }))
+      .sort((a, b) => (b.bestSpeedKmh - a.bestSpeedKmh) || (b.avgSpeedKmh - a.avgSpeedKmh) || (b.count - a.count))
+      .map((item, idx) => ({ ...item, rank: idx + 1 }));
+  }, [savedShootRecords, currentTeamPlayers, appState, activeTab]);
+
+  const getShootPowerBadge = (speedKmh) => {
+    const s = Number(speedKmh) || 0;
+    if (s >= 110) return { label: '🚀 초음속 캐논슈터', tier: 'S+', className: 'bg-rose-500/20 text-rose-300 border-rose-500/40' };
+    if (s >= 95) return { label: '🔥 폭격기 파워슈터', tier: 'S', className: 'bg-amber-500/20 text-amber-300 border-amber-500/40' };
+    if (s >= 80) return { label: '⚡ 강력 임팩트 슈터', tier: 'A', className: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' };
+    if (s >= 65) return { label: '🎯 밸런스 슈터', tier: 'B', className: 'bg-sky-500/20 text-sky-300 border-sky-500/40' };
+    return { label: '⚽ 컨트롤 슈팅', tier: 'C', className: 'bg-slate-700/60 text-slate-300 border-slate-600' };
+  };
+
+  const playShootRadarBeep = (type = 'measured') => {
+    if (!shootSoundEnabled) return;
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!shootAudioCtxRef.current) {
+        shootAudioCtxRef.current = new AudioCtx();
+      }
+      const ctx = shootAudioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+      const now = ctx.currentTime;
+      if (type === 'gate1') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1180, now);
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.065);
+      } else if (type === 'measured') {
+        [880, 1320, 1760].forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          const startAt = now + idx * 0.065;
+          osc.frequency.setValueAtTime(freq, startAt);
+          gain.gain.setValueAtTime(0.22, startAt);
+          gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.11);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(startAt);
+          osc.stop(startAt + 0.12);
+        });
+        if (navigator.vibrate) {
+          navigator.vibrate([70, 40, 120]);
+        }
+      }
+    } catch {}
+  };
+
+  const persistShootRecordList = async (updatedList) => {
+    if (!activeTeamId) return;
+    await setDoc(doc(db, 'memos', `${activeTeamId}___shoot_records__`), {
+      teamId: activeTeamId,
+      date: '__shoot_records__',
+      content: JSON.stringify(updatedList.slice(0, 150))
+    });
+  };
+
+  const handleShotMeasuredRef = useRef(null);
+  handleShotMeasuredRef.current = async ({ speedKmh, elapsedMs, distanceM, direction, mode = 'laser' }) => {
+    const cleanSpeed = Number(Math.max(15, Math.min(165, Number(speedKmh) || 0)).toFixed(1));
+    const isCustom = shootSelectedPlayerId === '__custom__';
+    const playerObj = !isCustom ? currentTeamPlayers.find(p => p.id === shootSelectedPlayerId) : null;
+    const finalPlayerId = playerObj ? playerObj.id : null;
+    const finalPlayerName = isCustom
+      ? (shootCustomPlayerName.trim() || '미지정 선수')
+      : (playerObj ? playerObj.name : '미지정 선수');
+    const finalBirthYear = playerObj ? formatBirthYear(playerObj.birthYear) : null;
+
+    // 이전 기록과 비교하여 개인 최고기록 경신 및 예상 랭킹 계산
+    const prevPlayerRecords = savedShootRecords.filter(r =>
+      (finalPlayerId && r.playerId === finalPlayerId) || (!finalPlayerId && r.playerName === finalPlayerName)
+    );
+    const prevBestSpeed = prevPlayerRecords.length > 0
+      ? Math.max(...prevPlayerRecords.map(r => Number(r.speedKmh) || 0))
+      : 0;
+    const isPersonalBest = cleanSpeed > prevBestSpeed;
+
+    const newRecord = {
+      id: `shot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      teamId: activeTeamId,
+      playerId: finalPlayerId,
+      playerName: finalPlayerName,
+      birthYear: finalBirthYear,
+      speedKmh: cleanSpeed,
+      distanceM: Number(distanceM || shootGateDistanceM),
+      elapsedMs: Math.round(elapsedMs || ((distanceM / (cleanSpeed / 3.6)) * 1000)),
+      direction: direction || 'ltr',
+      footType: shootFootType || '오른발',
+      mode,
+      date: getTodayString(),
+      createdAt: new Date().toISOString()
+    };
+
+    // 새 기록을 포함한 예상 순위 계산
+    const simulatedRecords = [newRecord, ...savedShootRecords];
+    const bestByPlayer = {};
+    simulatedRecords.forEach(r => {
+      const k = r.playerId ? `id_${r.playerId}` : `name_${r.playerName}`;
+      const s = Number(r.speedKmh) || 0;
+      if (!bestByPlayer[k] || s > bestByPlayer[k]) bestByPlayer[k] = s;
+    });
+    const myKey = finalPlayerId ? `id_${finalPlayerId}` : `name_${finalPlayerName}`;
+    const sortedBest = Object.entries(bestByPlayer).sort((a, b) => b[1] - a[1]);
+    const computedRank = sortedBest.findIndex(([k]) => k === myKey) + 1;
+
+    const enrichedResult = {
+      ...newRecord,
+      rank: computedRank > 0 ? computedRank : 1,
+      isPersonalBest,
+      prevBestSpeed: prevBestSpeed > 0 ? Number(prevBestSpeed.toFixed(1)) : null,
+      saved: !!shootAutoSave
+    };
+
+    playShootRadarBeep('measured');
+    setShootLastResult(enrichedResult);
+    setShootTrapStatus('measured');
+
+    if (shootAutoSave && activeTeamId) {
+      try {
+        await persistShootRecordList(simulatedRecords);
+      } catch (err) {
+        console.error('Auto-save shoot record error:', err);
+      }
+    }
+  };
+
+  const stopShootCamera = () => {
+    if (shootRafRef.current) {
+      cancelAnimationFrame(shootRafRef.current);
+      shootRafRef.current = null;
+    }
+    if (shootStreamRef.current) {
+      shootStreamRef.current.getTracks().forEach(t => {
+        try { t.stop(); } catch {}
+      });
+      shootStreamRef.current = null;
+    }
+    if (shootVideoRef.current) {
+      try {
+        shootVideoRef.current.srcObject = null;
+      } catch {}
+    }
+    if (wakeLockRef.current && !isLiveGpsTracking) {
+      wakeLockRef.current.release().catch(() => {});
+      wakeLockRef.current = null;
+    }
+    setIsShootCameraActive(false);
+    setShootTrapStatus('idle');
+    shootTrapRuntimeRef.current.prevFrameData = null;
+    shootTrapRuntimeRef.current.state = 'ready';
+    shootTrapRuntimeRef.current.scoreA = 0;
+    shootTrapRuntimeRef.current.scoreB = 0;
+  };
+
+  const startShootCamera = async (overrideFacingMode = null) => {
+    const targetFacing = overrideFacingMode || shootFacingMode;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setSystemAlert({
+        isOpen: true,
+        message: '이 브라우저에서는 카메라 접근을 지원하지 않습니다.\nHTTPS 보안 연결 또는 기본 브라우저(Safari/Chrome)에서 실행해주세요.'
+      });
+      return;
+    }
+
+    // 기존 스트림 정리
+    if (shootStreamRef.current) {
+      shootStreamRef.current.getTracks().forEach(t => {
+        try { t.stop(); } catch {}
+      });
+      shootStreamRef.current = null;
+    }
+
+    try {
+      let stream = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: targetFacing },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 60, min: 30 }
+          },
+          audio: false
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: targetFacing },
+          audio: false
+        });
+      }
+
+      shootStreamRef.current = stream;
+      if (shootVideoRef.current) {
+        shootVideoRef.current.srcObject = stream;
+        shootVideoRef.current.setAttribute('playsinline', 'true');
+        await shootVideoRef.current.play().catch(() => {});
+      }
+
+      try {
+        if ('wakeLock' in navigator && !wakeLockRef.current) {
+          wakeLockRef.current = await navigator.wakeLock.request('screen');
+        }
+      } catch {}
+
+      shootTrapRuntimeRef.current = {
+        prevFrameData: null,
+        state: 'ready',
+        startGate: null,
+        startTimeMs: 0,
+        startY: 0.5,
+        lastShotEndY: 0.5,
+        lastShotStartY: 0.5,
+        lastShotDir: 'ltr',
+        lastShotSpeed: 0,
+        lastShotAtMs: 0,
+        cooldownUntilMs: performance.now() + 500,
+        scoreA: 0,
+        scoreB: 0,
+        prevScoreA: 0,
+        prevScoreB: 0,
+        prevFrameTs: performance.now(),
+        shakeWarnUntilMs: 0
+      };
+      setIsShootCameraActive(true);
+      setShootTrapStatus('ready');
+    } catch (err) {
+      console.error('Camera error:', err);
+      setSystemAlert({
+        isOpen: true,
+        message: '카메라 권한이 거부되었거나 카메라를 열 수 없습니다.\n브라우저 주소창 왼쪽의 권한 설정에서 [카메라 허용]을 켜주세요.'
+      });
+    }
+  };
+
+  const toggleShootFacingMode = () => {
+    const nextMode = shootFacingMode === 'environment' ? 'user' : 'environment';
+    setShootFacingMode(nextMode);
+    if (isShootCameraActive) {
+      startShootCamera(nextMode);
+    }
+  };
+
+  // 실내·거치 전 레이저 트랩 동작 및 자동 랭킹 기록을 즉시 체험/검증할 수 있는 시뮬레이션 트리거
+  const triggerSimulatedLaserShot = () => {
+    const rt = shootTrapRuntimeRef.current;
+    const now = performance.now();
+    // 72.0 ~ 116.5 km/h 사이의 현실적인 슈팅 구속 생성
+    const randomBase = 74 + Math.random() * 38 + (Math.random() > 0.72 ? Math.random() * 10 : 0);
+    const simSpeedKmh = Number(randomBase.toFixed(1));
+    const simElapsedMs = Math.round((shootGateDistanceM / (simSpeedKmh / 3.6)) * 1000);
+    const dir = shootDirectionMode === 'rtl' ? 'rtl' : 'ltr';
+
+    rt.startGate = dir === 'ltr' ? 'A' : 'B';
+    rt.state = 'armed_gate1';
+    rt.scoreA = dir === 'ltr' ? 92 : 12;
+    rt.scoreB = dir === 'rtl' ? 92 : 12;
+    setShootTrapStatus('armed_gate1');
+    playShootRadarBeep('gate1');
+
+    setTimeout(() => {
+      const doneNow = performance.now();
+      rt.scoreA = dir === 'ltr' ? 25 : 96;
+      rt.scoreB = dir === 'ltr' ? 96 : 25;
+      rt.lastShotStartY = 0.56 + (Math.random() - 0.5) * 0.16;
+      rt.lastShotEndY = 0.42 + (Math.random() - 0.5) * 0.18;
+      rt.lastShotDir = dir;
+      rt.lastShotSpeed = simSpeedKmh;
+      rt.lastShotAtMs = doneNow;
+      rt.cooldownUntilMs = doneNow + 1400;
+      rt.state = 'cooldown';
+      if (handleShotMeasuredRef.current) {
+        handleShotMeasuredRef.current({
+          speedKmh: simSpeedKmh,
+          elapsedMs: simElapsedMs,
+          distanceM: shootGateDistanceM,
+          direction: dir,
+          mode: 'sim'
+        });
+      }
+      setTimeout(() => {
+        rt.scoreA = 0;
+        rt.scoreB = 0;
+        rt.state = 'ready';
+        setShootTrapStatus(prev => (prev === 'measured' ? (isShootCameraActive ? 'ready' : 'idle') : prev));
+      }, 1400);
+    }, Math.min(260, Math.max(95, simElapsedMs)));
+  };
+
+  // 탭 전환 시 카메라 자동 종료 보호
+  useEffect(() => {
+    if (appState !== 'main' || activeTab !== 'gps' || recordSubTab !== 'shoot') {
+      if (isShootCameraActive || shootStreamRef.current) {
+        stopShootCamera();
+      }
+    }
+  }, [appState, activeTab, recordSubTab]);
+
+  // 가상 레이저 트랩 실시간 픽셀 변화 감지 & HUD 렌더링 루프
+  useEffect(() => {
+    if (appState !== 'main' || activeTab !== 'gps' || recordSubTab !== 'shoot') return;
+
+    let isCancelled = false;
+    const procW = 160;
+    const procH = 90;
+    if (!shootProcCanvasRef.current) {
+      const c = document.createElement('canvas');
+      c.width = procW;
+      c.height = procH;
+      shootProcCanvasRef.current = c;
+    }
+    const procCanvas = shootProcCanvasRef.current;
+    const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
+
+    const gateAXFrac = 0.26;
+    const gateBXFrac = 0.74;
+    const yMinFrac = 0.16;
+    const yMaxFrac = 0.86;
+
+    const loop = (nowMs) => {
+      if (isCancelled) return;
+      const rt = shootTrapRuntimeRef.current;
+
+      // 1) 카메라 활성화 상태일 때 실시간 픽셀 변화량(광학 레이저 트랩) 분석
+      const videoEl = shootVideoRef.current;
+      if (isShootCameraActive && videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+        try {
+          procCtx.drawImage(videoEl, 0, 0, procW, procH);
+          const frameData = procCtx.getImageData(0, 0, procW, procH).data;
+          const prevData = rt.prevFrameData;
+
+          const pixelDiffThreshold = shootSensitivity === 'high' ? 22 : shootSensitivity === 'low' ? 36 : 28;
+          const gateTriggerScore = shootSensitivity === 'high' ? 14 : shootSensitivity === 'low' ? 27 : 19;
+
+          if (prevData && prevData.length === frameData.length) {
+            // 전체 화면 흔들림(카메라 이동) 체크용 배경 샘플링
+            let globalDiffSum = 0;
+            let globalSamples = 0;
+            for (let gy = 10; gy < procH - 10; gy += 16) {
+              for (let gx = 12; gx < procW - 12; gx += 20) {
+                const idx = (gy * procW + gx) * 4;
+                const d = (
+                  Math.abs(frameData[idx] - prevData[idx]) +
+                  Math.abs(frameData[idx + 1] - prevData[idx + 1]) +
+                  Math.abs(frameData[idx + 2] - prevData[idx + 2])
+                ) / 3;
+                globalDiffSum += d;
+                globalSamples++;
+              }
+            }
+            const globalMotionAvg = globalSamples > 0 ? globalDiffSum / globalSamples : 0;
+
+            const measureGateStrip = (centerXFrac) => {
+              const cx = Math.round(procW * centerXFrac);
+              const yStart = Math.round(procH * yMinFrac);
+              const yEnd = Math.round(procH * yMaxFrac);
+              let activePixels = 0;
+              let weightedYSum = 0;
+              let weightSum = 0;
+              let totalStripPixels = 0;
+
+              for (let y = yStart; y <= yEnd; y++) {
+                for (let dx = -2; dx <= 2; dx++) {
+                  const x = cx + dx;
+                  const idx = (y * procW + x) * 4;
+                  const diff = (
+                    Math.abs(frameData[idx] - prevData[idx]) +
+                    Math.abs(frameData[idx + 1] - prevData[idx + 1]) +
+                    Math.abs(frameData[idx + 2] - prevData[idx + 2])
+                  ) / 3;
+                  totalStripPixels++;
+                  if (diff >= pixelDiffThreshold) {
+                    activePixels++;
+                    weightedYSum += (y / procH) * diff;
+                    weightSum += diff;
+                  }
+                }
+              }
+
+              // 유효 축구공 크기 비율을 0~100 감도 점수로 환산
+              const ratio = totalStripPixels > 0 ? activePixels / totalStripPixels : 0;
+              const score = Math.min(100, Math.round(ratio * 420));
+              const centerY = weightSum > 0 ? (weightedYSum / weightSum) : 0.5;
+              return { score, centerY };
+            };
+
+            const resA = measureGateStrip(gateAXFrac);
+            const resB = measureGateStrip(gateBXFrac);
+
+            rt.prevScoreA = rt.scoreA;
+            rt.prevScoreB = rt.scoreB;
+            rt.scoreA = resA.score;
+            rt.scoreB = resB.score;
+
+            // 카메라 전체 흔들림 방지 필터
+            if (globalMotionAvg > 36 && resA.score > gateTriggerScore && resB.score > gateTriggerScore) {
+              rt.shakeWarnUntilMs = nowMs + 900;
+              rt.state = 'ready';
+              rt.startGate = null;
+              setShootTrapStatus('shake_warn');
+            } else if (nowMs < rt.cooldownUntilMs) {
+              // 측정 직후 쿨다운 구간
+            } else {
+              if (rt.state === 'cooldown') {
+                rt.state = 'ready';
+                setShootTrapStatus('ready');
+              }
+
+              // 최소/최대 유효 통과 시간 (20km/h ~ 160km/h)
+              const minValidMs = Math.max(22, (shootGateDistanceM / (160 / 3.6)) * 1000);
+              const maxValidMs = (shootGateDistanceM / (20 / 3.6)) * 1000;
+
+              if (rt.state === 'ready') {
+                const canTriggerA = (shootDirectionMode === 'auto' || shootDirectionMode === 'ltr') &&
+                  resA.score >= gateTriggerScore && resB.score < gateTriggerScore * 0.65;
+                const canTriggerB = (shootDirectionMode === 'auto' || shootDirectionMode === 'rtl') &&
+                  resB.score >= gateTriggerScore && resA.score < gateTriggerScore * 0.65;
+
+                if (canTriggerA || canTriggerB) {
+                  const chosenGate = canTriggerA ? 'A' : 'B';
+                  const curScore = chosenGate === 'A' ? resA.score : resB.score;
+                  const prevScore = chosenGate === 'A' ? rt.prevScoreA : rt.prevScoreB;
+                  const frameDt = Math.max(4, Math.min(50, nowMs - (rt.prevFrameTs || (nowMs - 16))));
+                  // 서브프레임 보간으로 정밀 통과 시각 추정
+                  const frac = curScore > prevScore
+                    ? Math.max(0, Math.min(1, (gateTriggerScore - prevScore) / Math.max(1, curScore - prevScore)))
+                    : 0.5;
+                  rt.startGate = chosenGate;
+                  rt.startTimeMs = (nowMs - frameDt) + frac * frameDt;
+                  rt.startY = chosenGate === 'A' ? resA.centerY : resB.centerY;
+                  rt.state = 'armed_gate1';
+                  setShootTrapStatus('armed_gate1');
+                  playShootRadarBeep('gate1');
+                }
+              } else if (rt.state === 'armed_gate1') {
+                const elapsedFromStart = nowMs - rt.startTimeMs;
+                if (elapsedFromStart > maxValidMs) {
+                  // 너무 느린 물체(사람 보행 등)는 자동 리셋하여 대기 상태 유지
+                  rt.state = 'ready';
+                  rt.startGate = null;
+                  setShootTrapStatus('ready');
+                } else {
+                  const targetIsB = rt.startGate === 'A';
+                  const targetScore = targetIsB ? resB.score : resA.score;
+                  const prevTargetScore = targetIsB ? rt.prevScoreB : rt.prevScoreA;
+                  const targetCenterY = targetIsB ? resB.centerY : resA.centerY;
+
+                  if (targetScore >= gateTriggerScore && elapsedFromStart >= minValidMs) {
+                    const frameDt = Math.max(4, Math.min(50, nowMs - (rt.prevFrameTs || (nowMs - 16))));
+                    const frac = targetScore > prevTargetScore
+                      ? Math.max(0, Math.min(1, (gateTriggerScore - prevTargetScore) / Math.max(1, targetScore - prevTargetScore)))
+                      : 0.5;
+                    const exactEndTimeMs = (nowMs - frameDt) + frac * frameDt;
+                    const exactElapsedMs = Math.max(minValidMs, exactEndTimeMs - rt.startTimeMs);
+                    const calcSpeedKmh = (shootGateDistanceM / (exactElapsedMs / 1000)) * 3.6;
+
+                    if (calcSpeedKmh >= 20 && calcSpeedKmh <= 160) {
+                      rt.lastShotStartY = rt.startY;
+                      rt.lastShotEndY = targetCenterY;
+                      rt.lastShotDir = targetIsB ? 'ltr' : 'rtl';
+                      rt.lastShotSpeed = Number(calcSpeedKmh.toFixed(1));
+                      rt.lastShotAtMs = nowMs;
+                      rt.cooldownUntilMs = nowMs + 1400;
+                      rt.state = 'cooldown';
+                      rt.startGate = null;
+
+                      if (handleShotMeasuredRef.current) {
+                        handleShotMeasuredRef.current({
+                          speedKmh: Number(calcSpeedKmh.toFixed(1)),
+                          elapsedMs: Math.round(exactElapsedMs),
+                          distanceM: shootGateDistanceM,
+                          direction: targetIsB ? 'ltr' : 'rtl',
+                          mode: 'laser'
+                        });
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          rt.prevFrameData = new Uint8ClampedArray(frameData);
+          rt.prevFrameTs = nowMs;
+        } catch {}
+      }
+
+      // 2) 오버레이 캔버스에 가상 레이저 트랩 & 스피드건 HUD 렌더링
+      const overlay = shootOverlayCanvasRef.current;
+      if (overlay) {
+        const ctx = overlay.getContext('2d');
+        const W = overlay.width;
+        const H = overlay.height;
+        ctx.clearRect(0, 0, W, H);
+
+        // 카메라가 꺼져 있을 때 레이더 그리드 배경 표시
+        if (!isShootCameraActive) {
+          const grad = ctx.createLinearGradient(0, 0, 0, H);
+          grad.addColorStop(0, '#091326');
+          grad.addColorStop(0.65, '#06202B');
+          grad.addColorStop(1, '#052E2B');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, W, H);
+
+          ctx.strokeStyle = 'rgba(16, 185, 129, 0.12)';
+          ctx.lineWidth = 1;
+          for (let gx = 0; gx < W; gx += 32) {
+            ctx.beginPath();
+            ctx.moveTo(gx, 0);
+            ctx.lineTo(gx, H);
+            ctx.stroke();
+          }
+          for (let gy = 0; gy < H; gy += 32) {
+            ctx.beginPath();
+            ctx.moveTo(0, gy);
+            ctx.lineTo(W, gy);
+            ctx.stroke();
+          }
+        }
+
+        const xA = Math.round(W * gateAXFrac);
+        const xB = Math.round(W * gateBXFrac);
+        const yTop = Math.round(H * yMinFrac);
+        const yBot = Math.round(H * yMaxFrac);
+
+        // 슈팅 통과 유도 터널 가이드 박스
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.18)';
+        ctx.fillRect(xA, yTop, xB - xA, yBot - yTop);
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+        ctx.setLineDash([6, 6]);
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(xA, yTop, xB - xA, yBot - yTop);
+        ctx.setLineDash([]);
+
+        // 중앙 수평 조준선 + 방향 화살표
+        const midY = Math.round((yTop + yBot) / 2);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(xA + 12, midY);
+        ctx.lineTo(xB - 12, midY);
+        ctx.stroke();
+
+        // 설정된 게이트 간 실제 거리 배지
+        const dirText = shootDirectionMode === 'ltr' ? '좌 ➔ 우' : shootDirectionMode === 'rtl' ? '우 ➔ 좌' : '양방향 자동';
+        const distLabel = `◄ 트랩 간격 ${shootGateDistanceM.toFixed(1)}m (${dirText}) ►`;
+        ctx.font = 'bold 11px sans-serif';
+        const dtw = ctx.measureText(distLabel).width + 16;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
+        ctx.fillRect((W - dtw) / 2, yTop - 22, dtw, 18);
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
+        ctx.strokeRect((W - dtw) / 2, yTop - 22, dtw, 18);
+        ctx.fillStyle = '#38BDF8';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(distLabel, W / 2, yTop - 13);
+
+        // 레이저 게이트 A / B 그리기 함수
+        const drawLaserGate = (xPos, label, score, isArmedStart) => {
+          const isTriggered = score >= 18 || isArmedStart;
+          const mainColor = isArmedStart ? '#FACC15' : isTriggered ? '#F43F5E' : '#10B981';
+          const glowColor = isArmedStart ? 'rgba(250, 204, 21, 0.35)' : isTriggered ? 'rgba(244, 63, 94, 0.35)' : 'rgba(16, 185, 129, 0.25)';
+
+          // 레이저 광선 외곽 글로우
+          ctx.strokeStyle = glowColor;
+          ctx.lineWidth = 10;
+          ctx.beginPath();
+          ctx.moveTo(xPos, yTop);
+          ctx.lineTo(xPos, yBot);
+          ctx.stroke();
+
+          // 레이저 코어 라인
+          ctx.strokeStyle = mainColor;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(xPos, yTop);
+          ctx.lineTo(xPos, yBot);
+          ctx.stroke();
+
+          // 상/하단 에미터 캡
+          ctx.fillStyle = mainColor;
+          ctx.fillRect(xPos - 10, yTop - 3, 20, 6);
+          ctx.fillRect(xPos - 10, yBot - 3, 20, 6);
+
+          // 게이트 라벨
+          ctx.font = 'bold 10px sans-serif';
+          const lw = ctx.measureText(label).width + 12;
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+          ctx.fillRect(xPos - lw / 2, yBot + 6, lw, 16);
+          ctx.strokeStyle = mainColor;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(xPos - lw / 2, yBot + 6, lw, 16);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, xPos, yBot + 14);
+
+          // 실시간 픽셀 변화 감도 게이지 바
+          const barW = 44;
+          const barH = 5;
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+          ctx.fillRect(xPos - barW / 2, yBot + 24, barW, barH);
+          const fillW = Math.min(barW, Math.round((score / 100) * barW));
+          if (fillW > 0) {
+            ctx.fillStyle = score >= 19 ? '#F43F5E' : '#34D399';
+            ctx.fillRect(xPos - barW / 2, yBot + 24, fillW, barH);
+          }
+        };
+
+        drawLaserGate(xA, 'GATE 1', rt.scoreA, rt.state === 'armed_gate1' && rt.startGate === 'A');
+        drawLaserGate(xB, 'GATE 2', rt.scoreB, rt.state === 'armed_gate1' && rt.startGate === 'B');
+
+        // 최근 슈팅 통과 궤적 잔상 효과 (측정 후 2.5초간 표시)
+        if (rt.lastShotAtMs && nowMs - rt.lastShotAtMs < 2500) {
+          const fade = Math.max(0, 1 - (nowMs - rt.lastShotAtMs) / 2500);
+          const sy = Math.round(H * (rt.lastShotStartY || 0.5));
+          const ey = Math.round(H * (rt.lastShotEndY || 0.5));
+          const startX = rt.lastShotDir === 'rtl' ? xB : xA;
+          const endX = rt.lastShotDir === 'rtl' ? xA : xB;
+
+          ctx.strokeStyle = `rgba(250, 204, 21, ${fade * 0.9})`;
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(startX, sy);
+          ctx.lineTo(endX, ey);
+          ctx.stroke();
+
+          ctx.fillStyle = `rgba(244, 63, 94, ${fade})`;
+          ctx.beginPath();
+          ctx.arc(startX, sy, 6, 0, Math.PI * 2);
+          ctx.arc(endX, ey, 7, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      shootRafRef.current = requestAnimationFrame(loop);
+    };
+
+    shootRafRef.current = requestAnimationFrame(loop);
+    return () => {
+      isCancelled = true;
+      if (shootRafRef.current) cancelAnimationFrame(shootRafRef.current);
+    };
+  }, [appState, activeTab, recordSubTab, isShootCameraActive, shootGateDistanceM, shootSensitivity, shootDirectionMode]);
+
+  const saveLastShotManually = async () => {
+    if (!shootLastResult || shootLastResult.saved || !activeTeamId || isProcessing) return;
+    setIsProcessing(true);
+    try {
+      const updated = [shootLastResult, ...savedShootRecords];
+      await persistShootRecordList(updated);
+      setShootLastResult(prev => (prev ? { ...prev, saved: true } : null));
+      setSystemAlert({ isOpen: true, message: `${shootLastResult.playerName} 선수의 ${shootLastResult.speedKmh}km/h 슈팅 기록이 저장되었습니다!` });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const openShootEditModal = (rec) => {
+    if (!rec) return;
+    const matchedPlayer = currentTeamPlayers.find(p => p.id === rec.playerId) || currentTeamPlayers.find(p => p.name === rec.playerName);
+    const hasCustomName = !matchedPlayer && rec.playerName && rec.playerName !== '미지정 선수';
+    setShootEditModal({
+      isOpen: true,
+      record: rec,
+      playerId: matchedPlayer ? matchedPlayer.id : (hasCustomName ? '__custom__' : ''),
+      customPlayerName: hasCustomName ? rec.playerName : '',
+      footType: rec.footType || '오른발'
+    });
+  };
+
+  const saveEditedShootRecord = async (e) => {
+    e.preventDefault();
+    const rec = shootEditModal.record;
+    if (!rec || !activeTeamId || isProcessing) return;
+    const isCustom = shootEditModal.playerId === '__custom__';
+    const playerObj = !isCustom ? currentTeamPlayers.find(p => p.id === shootEditModal.playerId) : null;
+    const finalPlayerId = playerObj ? playerObj.id : null;
+    const finalPlayerName = isCustom
+      ? (shootEditModal.customPlayerName.trim() || '미지정 선수')
+      : (playerObj ? playerObj.name : '미지정 선수');
+    const finalBirthYear = playerObj ? formatBirthYear(playerObj.birthYear) : null;
+
+    const updatedRec = {
+      ...rec,
+      playerId: finalPlayerId,
+      playerName: finalPlayerName,
+      birthYear: finalBirthYear,
+      footType: shootEditModal.footType || '오른발'
+    };
+
+    setIsProcessing(true);
+    try {
+      const updatedList = savedShootRecords.map(r => (r.id === rec.id ? updatedRec : r));
+      await persistShootRecordList(updatedList);
+      if (shootLastResult?.id === rec.id) {
+        setShootLastResult(prev => (prev ? { ...prev, ...updatedRec } : null));
+      }
+      setShootEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', footType: '오른발' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const requestDeleteShootRecord = (recordId) => {
+    setSystemConfirm({
+      isOpen: true,
+      message: '이 슈팅 속도 기록을 삭제하시겠습니까?\n삭제 시 랭킹이 자동으로 재계산됩니다.',
+      onConfirm: async () => {
+        if (!activeTeamId || isProcessing) return;
+        setIsProcessing(true);
+        try {
+          const updated = savedShootRecords.filter(r => r.id !== recordId);
+          await persistShootRecordList(updated);
+          if (shootLastResult?.id === recordId) setShootLastResult(null);
+        } finally {
+          setIsProcessing(false);
+        }
+      }
+    });
+  };
+
+  const saveManualShootRecord = async (e) => {
+    e.preventDefault();
+    if (!activeTeamId || isProcessing) return;
+    const spd = parseFloat(shootManualModal.speedKmh);
+    if (!Number.isFinite(spd) || spd < 10 || spd > 200) {
+      setSystemAlert({ isOpen: true, message: '유효한 슈팅 속도(10 ~ 200 km/h)를 입력해주세요.' });
+      return;
+    }
+    const isCustom = shootManualModal.playerId === '__custom__';
+    const playerObj = !isCustom ? currentTeamPlayers.find(p => p.id === shootManualModal.playerId) : null;
+    const finalPlayerId = playerObj ? playerObj.id : null;
+    const finalPlayerName = isCustom
+      ? (shootManualModal.customPlayerName.trim() || '미지정 선수')
+      : (playerObj ? playerObj.name : '미지정 선수');
+    const finalBirthYear = playerObj ? formatBirthYear(playerObj.birthYear) : null;
+
+    const newRec = {
+      id: `shot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      teamId: activeTeamId,
+      playerId: finalPlayerId,
+      playerName: finalPlayerName,
+      birthYear: finalBirthYear,
+      speedKmh: Number(spd.toFixed(1)),
+      distanceM: shootGateDistanceM,
+      elapsedMs: Math.round((shootGateDistanceM / (spd / 3.6)) * 1000),
+      direction: 'ltr',
+      footType: shootManualModal.footType || '오른발',
+      mode: 'manual',
+      date: getTodayString(),
+      createdAt: new Date().toISOString()
+    };
+
+    setIsProcessing(true);
+    try {
+      await persistShootRecordList([newRec, ...savedShootRecords]);
+      setShootManualModal({ isOpen: false, speedKmh: '', playerId: '', customPlayerName: '', footType: '오른발' });
+      setShootLastResult({ ...newRec, rank: 1, isPersonalBest: true, saved: true });
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // ================= 위성지도 기반 구장(꼭짓점 4곳) 등록/관리 =================
@@ -5442,6 +6319,28 @@ const renderGoalFlowModal = () => {
 
         {activeTab === 'gps' && (
           <div className="space-y-3.5 animate-in fade-in flex-1 overflow-y-auto overflow-x-hidden hide-scrollbar pb-6 break-keep">
+            {/* 상단 서브탭: GPS 분석 / 슈팅 측정 */}
+            <div className="grid grid-cols-2 bg-slate-900 p-1 rounded-2xl border border-slate-700/80 gap-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setRecordSubTab('gps')}
+                className={`py-2.5 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 min-w-0 overflow-hidden truncate ${recordSubTab === 'gps' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+              >
+                <span className="shrink-0">⌚</span>
+                <span className="truncate">GPS 분석</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRecordSubTab('shoot')}
+                className={`py-2.5 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 min-w-0 overflow-hidden truncate ${recordSubTab === 'shoot' ? 'bg-gradient-to-r from-rose-600 to-amber-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+              >
+                <span className="shrink-0">⚡</span>
+                <span className="truncate">슈팅 측정</span>
+              </button>
+            </div>
+
+            {recordSubTab === 'gps' ? (
+              <>
             {/* 상단 타이틀 및 가이드 버튼 */}
             <div className="flex justify-between items-center gap-2 min-w-0">
               <div className="min-w-0 flex-1">
@@ -6206,6 +7105,505 @@ const renderGoalFlowModal = () => {
                 </div>
               );
             })()}
+              </>
+            ) : (
+              /* ================= 슈팅 측정 (실시간 가상 레이저 트랩 스피드건) 화면 ================= */
+              <div className="space-y-3.5 animate-in fade-in min-w-0">
+                {/* 1. 상단 타이틀 및 측정 가이드 버튼 */}
+                <div className="flex justify-between items-center gap-2 min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-lg sm:text-xl font-black text-white flex items-center gap-1.5 truncate">
+                      <span className="shrink-0">⚡</span>
+                      <span className="truncate">실시간 슈팅 스피드건</span>
+                    </h2>
+                    <p className="text-[11px] text-slate-400 mt-0.5 truncate">가상 레이저 트랩(픽셀 변화 감지) · 자동 기록 · 랭킹</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShootGuideModal(true)}
+                    className="text-xs bg-slate-800 hover:bg-slate-700 text-amber-400 px-3 py-2 rounded-xl font-bold border border-amber-500/30 flex items-center gap-1.5 transition shrink-0 whitespace-nowrap shadow-sm"
+                  >
+                    <span>📐</span> 측정 가이드
+                  </button>
+                </div>
+
+                {/* 2. 측정 선수 선택 및 슈팅 유형 · 자동 저장 설정 카드 */}
+                <div className="bg-slate-800/85 border border-slate-700/80 rounded-2xl p-3 space-y-2.5 shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <span className="text-[11px] font-black text-amber-400 truncate">🎯 STEP 1. 측정 선수 및 슈팅 옵션</span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShootSoundEnabled(prev => !prev)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition whitespace-nowrap ${shootSoundEnabled ? 'bg-slate-900 text-emerald-400 border-emerald-500/40' : 'bg-slate-900 text-slate-500 border-slate-700'}`}
+                      >
+                        {shootSoundEnabled ? '🔊 효과음 ON' : '🔇 효과음 OFF'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShootAutoSave(prev => !prev)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-black border transition whitespace-nowrap ${shootAutoSave ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
+                      >
+                        {shootAutoSave ? '⚡ 자동 기록 ON' : '✋ 수동 저장'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 min-w-0">
+                    <select
+                      value={shootSelectedPlayerId}
+                      onChange={(e) => setShootSelectedPlayerId(e.target.value)}
+                      className="w-0 flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none truncate"
+                    >
+                      <option value="">👤 측정할 선수 선택 (미선택 시 미지정 선수)</option>
+                      {currentTeamPlayers.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} ({formatBirthYear(p.birthYear)})</option>
+                      ))}
+                      <option value="__custom__">✍️ 이름 직접 입력...</option>
+                    </select>
+                  </div>
+
+                  {shootSelectedPlayerId === '__custom__' && (
+                    <input
+                      type="text"
+                      value={shootCustomPlayerName}
+                      onChange={(e) => setShootCustomPlayerName(e.target.value)}
+                      placeholder="측정 선수 이름 직접 입력 (예: 손흥민)"
+                      className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none"
+                    />
+                  )}
+
+                  {/* 주발/슈팅 유형 선택 */}
+                  <div className="grid grid-cols-4 gap-1.5 pt-0.5">
+                    {['오른발', '왼발', '발리/논스톱', '프리킥'].map(ft => (
+                      <button
+                        key={ft}
+                        type="button"
+                        onClick={() => setShootFootType(ft)}
+                        className={`py-1.5 px-1 rounded-xl text-[11px] font-bold border transition truncate ${shootFootType === ft ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}`}
+                      >
+                        {ft}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 3. 디지털 스피드건 전광판 & 가상 레이저 트랩 뷰파인더 */}
+                <div className="bg-slate-900 border-2 border-slate-700/90 rounded-3xl overflow-hidden shadow-xl">
+                  {/* 상단 스피드건 디지털 계기판 */}
+                  <div className="p-3.5 sm:p-4 bg-gradient-to-b from-slate-950 to-slate-900 border-b border-slate-800">
+                    <div className="flex items-center justify-between gap-2 mb-2 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                          shootTrapStatus === 'measured' ? 'bg-rose-500 animate-ping' :
+                          shootTrapStatus === 'armed_gate1' ? 'bg-amber-400 animate-pulse' :
+                          shootTrapStatus === 'shake_warn' ? 'bg-orange-500 animate-bounce' :
+                          isShootCameraActive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                        }`} />
+                        <span className="text-[11px] font-black tracking-wide truncate text-slate-200">
+                          {shootTrapStatus === 'measured' ? '🔴 SHOT DETECTED! (구속 측정 완료)' :
+                           shootTrapStatus === 'armed_gate1' ? '🟡 GATE 1 통과! (GATE 2 감지 중...)' :
+                           shootTrapStatus === 'shake_warn' ? '🟠 카메라 흔들림 감지 (기기를 고정하세요)' :
+                           isShootCameraActive ? '🟢 LASER TRAP ARMED (실시간 감지 대기중)' : '⚪ STANDBY (카메라를 켜거나 시뮬레이션 실행)'}
+                        </span>
+                      </div>
+                      {shootLastResult && (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0 whitespace-nowrap">
+                          🏆 팀 {shootLastResult.rank}위
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-baseline justify-between gap-2 min-w-0">
+                      <div className="flex items-baseline gap-1.5 min-w-0">
+                        <span className={`text-4xl sm:text-5xl font-black tracking-tight tabular-nums leading-none ${
+                          shootLastResult
+                            ? (shootLastResult.speedKmh >= 100 ? 'text-rose-400 drop-shadow-[0_0_12px_rgba(244,63,94,0.45)]' : 'text-amber-400 drop-shadow-[0_0_12px_rgba(251,191,36,0.35)]')
+                            : 'text-slate-600'
+                        }`}>
+                          {shootLastResult ? shootLastResult.speedKmh.toFixed(1) : '00.0'}
+                        </span>
+                        <span className="text-sm sm:text-base font-black text-slate-400">KM/H</span>
+                      </div>
+
+                      {shootLastResult ? (
+                        <div className="text-right min-w-0 shrink-0">
+                          <span className={`inline-block text-[10px] font-black px-2 py-0.5 rounded-lg border ${getShootPowerBadge(shootLastResult.speedKmh).className}`}>
+                            {getShootPowerBadge(shootLastResult.speedKmh).label}
+                          </span>
+                          <div className="text-[10px] text-slate-400 mt-1 font-bold truncate">
+                            {shootLastResult.playerName} · {shootLastResult.footType} ({shootLastResult.elapsedMs}ms/{shootLastResult.distanceM}m)
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-right text-[11px] text-slate-500 font-bold shrink-0">
+                          레이저 간격 {shootGateDistanceM.toFixed(1)}m<br/>
+                          <span className="text-[10px] text-slate-600">20~160km/h 자동 포착</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 카메라 뷰파인더 + 가상 레이저 트랩 오버레이 캔버스 */}
+                  <div className="relative w-full aspect-video bg-slate-950 overflow-hidden select-none">
+                    <video
+                      ref={shootVideoRef}
+                      playsInline
+                      muted
+                      autoPlay
+                      className={`w-full h-full object-cover ${isShootCameraActive ? 'block' : 'hidden'}`}
+                    />
+                    <canvas
+                      ref={shootOverlayCanvasRef}
+                      width={480}
+                      height={270}
+                      className="absolute inset-0 w-full h-full pointer-events-none"
+                    />
+
+                    {/* 카메라가 꺼져 있을 때 중앙 안내 오버레이 */}
+                    {!isShootCameraActive && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center pointer-events-none">
+                        <div className="bg-slate-900/85 border border-slate-700/80 px-4 py-2.5 rounded-2xl shadow-lg max-w-[260px]">
+                          <div className="text-xs font-black text-emerald-400 mb-0.5">🎯 이중 가상 레이저 트랩 (GATE 1 · 2)</div>
+                          <div className="text-[11px] text-slate-300 leading-snug">
+                            카메라를 켜고 두 레이저 선 사이로 공을 차면 픽셀 변화를 감지해 구속을 즉시 계산합니다.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 카메라 활성화 시 우측 상단 전/후면 전환 버튼 */}
+                    {isShootCameraActive && (
+                      <button
+                        type="button"
+                        onClick={toggleShootFacingMode}
+                        className="absolute top-2.5 right-2.5 bg-slate-900/85 hover:bg-slate-800 text-white border border-slate-600 px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 shadow-lg z-10"
+                      >
+                        🔄 {shootFacingMode === 'environment' ? '후면 카메라' : '전면 카메라'}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 하단 카메라 시작/종료 & 시뮬레이션 & 레이저 세팅 바 */}
+                  <div className="p-3 bg-slate-900 space-y-2.5 border-t border-slate-800">
+                    <div className="flex gap-2">
+                      {!isShootCameraActive ? (
+                        <button
+                          type="button"
+                          onClick={() => startShootCamera()}
+                          className="flex-1 py-3 px-3 bg-gradient-to-r from-rose-600 to-amber-500 hover:from-rose-500 hover:to-amber-400 text-white font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-1.5 min-w-0 overflow-hidden"
+                        >
+                          <span className="shrink-0">📷</span>
+                          <span className="truncate">카메라 켜기 (실시간 측정 시작)</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={stopShootCamera}
+                          className="flex-1 py-3 px-3 bg-slate-800 hover:bg-red-500/20 text-red-400 border border-red-500/40 font-black text-xs rounded-xl transition flex items-center justify-center gap-1.5 min-w-0 overflow-hidden"
+                        >
+                          <span className="shrink-0">⏹️</span>
+                          <span className="truncate">카메라 끄기 (측정 중지)</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={triggerSimulatedLaserShot}
+                        className="py-3 px-3 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-bold text-xs rounded-xl transition shrink-0 whitespace-nowrap"
+                        title="실내에서도 레이저 통과 및 자동 랭킹 기록을 테스트할 수 있습니다"
+                      >
+                        ⚡ 테스트 슈팅
+                      </button>
+                    </div>
+
+                    {/* 레이저 트랩 세부 보정 (게이트 거리 / 슈팅 방향 / 픽셀 감도) */}
+                    <div className="grid grid-cols-3 gap-1.5 pt-1 text-[11px]">
+                      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2 min-w-0">
+                        <div className="text-[10px] text-slate-400 font-bold mb-1 truncate">📏 트랩 실제 간격</div>
+                        <div className="flex items-center justify-between gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setShootGateDistanceM(prev => Math.max(1.5, Number((prev - 0.5).toFixed(1))))}
+                            className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-black text-xs flex items-center justify-center shrink-0"
+                          >
+                            -
+                          </button>
+                          <span className="font-black text-sky-400 text-xs whitespace-nowrap">{shootGateDistanceM.toFixed(1)}m</span>
+                          <button
+                            type="button"
+                            onClick={() => setShootGateDistanceM(prev => Math.min(8.0, Number((prev + 0.5).toFixed(1))))}
+                            className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-black text-xs flex items-center justify-center shrink-0"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2 min-w-0">
+                        <div className="text-[10px] text-slate-400 font-bold mb-1 truncate">🧭 슈팅 통과 방향</div>
+                        <select
+                          value={shootDirectionMode}
+                          onChange={(e) => setShootDirectionMode(e.target.value)}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-1.5 py-1 text-[11px] font-bold text-white outline-none truncate"
+                        >
+                          <option value="auto">양방향 자동</option>
+                          <option value="ltr">좌 ➔ 우</option>
+                          <option value="rtl">우 ➔ 좌</option>
+                        </select>
+                      </div>
+
+                      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2 min-w-0">
+                        <div className="text-[10px] text-slate-400 font-bold mb-1 truncate">📡 픽셀 변화 감도</div>
+                        <select
+                          value={shootSensitivity}
+                          onChange={(e) => setShootSensitivity(e.target.value)}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-1.5 py-1 text-[11px] font-bold text-emerald-400 outline-none truncate"
+                        >
+                          <option value="high">민감 (빠른볼)</option>
+                          <option value="normal">표준 (권장)</option>
+                          <option value="low">둔감 (야외바람)</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. 직전 측정 결과 알림 카드 (자동 업데이트 확인 및 즉시 선수 변경 지원) */}
+                {shootLastResult && (
+                  <div className="bg-gradient-to-r from-slate-800 via-slate-800/95 to-slate-800 border border-amber-500/40 rounded-2xl p-3.5 space-y-2.5 shadow-md animate-in fade-in">
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-xs font-black text-amber-300 truncate">
+                          🎉 {shootLastResult.playerName} 선수 측정 완료!
+                        </span>
+                        {shootLastResult.isPersonalBest && (
+                          <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 shrink-0 whitespace-nowrap">
+                            NEW 개인 최고기록!
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] font-bold text-emerald-400 shrink-0 whitespace-nowrap">
+                        {shootLastResult.saved ? '✅ 랭킹 자동 반영됨' : '⚠️ 미저장 상태'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between bg-slate-900/90 border border-slate-700/80 rounded-xl p-2.5 gap-2">
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-slate-300 truncate">
+                          구속 <strong className="text-amber-400 text-sm font-black">{shootLastResult.speedKmh.toFixed(1)} km/h</strong> · 현재 팀 랭킹 <strong className="text-white">{shootLastResult.rank}위</strong>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                          {shootLastResult.footType} · 트랩 {shootLastResult.distanceM}m 통과 시간 {shootLastResult.elapsedMs}ms
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {!shootLastResult.saved && (
+                          <button
+                            type="button"
+                            onClick={saveLastShotManually}
+                            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-black transition whitespace-nowrap"
+                          >
+                            💾 기록 저장
+                          </button>
+                        )}
+                        {shootLastResult.saved && (
+                          <button
+                            type="button"
+                            onClick={() => openShootEditModal(shootLastResult)}
+                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg text-[11px] font-bold transition whitespace-nowrap"
+                          >
+                            ✏️ 선수 변경
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. 우리 팀 슈팅 속도 랭킹 보드 (명예의 전당 - 최고 구속 기준 자동 순위) */}
+                <div className="bg-slate-800/85 border border-slate-700 rounded-2xl p-3.5 sm:p-4 space-y-3 shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-black text-white flex items-center gap-1.5 truncate">
+                        <span>🏆</span>
+                        <span className="truncate">팀 슈팅 속도 랭킹 (명예의 전당)</span>
+                      </h3>
+                      <p className="text-[10px] text-slate-400 mt-0.5 truncate">선수별 최고 구속(Best Speed) 기준 실시간 자동 순위</p>
+                    </div>
+                    <span className="text-[11px] font-black px-2.5 py-1 rounded-full bg-slate-900 text-amber-400 border border-slate-700 shrink-0 whitespace-nowrap">
+                      총 {shootLeaderboard.length}명
+                    </span>
+                  </div>
+
+                  {shootLeaderboard.length === 0 ? (
+                    <div className="text-center py-8 bg-slate-900/60 rounded-2xl border border-slate-800 space-y-2 px-3">
+                      <div className="text-2xl">⚡</div>
+                      <div className="text-xs font-bold text-slate-300">아직 등록된 팀 슈팅 속도 기록이 없습니다.</div>
+                      <div className="text-[11px] text-slate-500">위 스피드건 카메라로 슈팅을 측정하거나 [⚡ 테스트 슈팅]을 눌러 첫 랭킹을 등록해보세요!</div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {/* TOP 3 포디움 카드 */}
+                      <div className="grid grid-cols-3 gap-2">
+                        {shootLeaderboard.slice(0, 3).map((item, idx) => {
+                          const medal = idx === 0 ? '🥇 1위' : idx === 1 ? '🥈 2위' : '🥉 3위';
+                          const cardStyle = idx === 0
+                            ? 'bg-gradient-to-b from-amber-500/20 to-slate-900 border-amber-400/60 shadow-md'
+                            : idx === 1
+                              ? 'bg-gradient-to-b from-slate-400/15 to-slate-900 border-slate-400/40'
+                              : 'bg-gradient-to-b from-amber-700/20 to-slate-900 border-amber-600/40';
+                          return (
+                            <div key={item.key} className={`rounded-2xl border p-2.5 text-center space-y-1 min-w-0 overflow-hidden ${cardStyle}`}>
+                              <div className="text-[11px] font-black text-amber-300 truncate">{medal}</div>
+                              <div className="text-xs sm:text-sm font-black text-white truncate">
+                                {item.playerName}
+                                {item.birthYear && <span className="text-[10px] text-slate-400 font-bold ml-1">{item.birthYear}</span>}
+                              </div>
+                              <div className="text-base sm:text-lg font-black text-rose-400 tabular-nums leading-tight">
+                                {item.bestSpeedKmh.toFixed(1)}
+                                <span className="text-[10px] text-slate-400 font-bold ml-0.5">km/h</span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate">
+                                평균 {item.avgSpeedKmh} · {item.count}회
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* 전체 순위 리스트 */}
+                      <div className="space-y-1.5 pt-1">
+                        {shootLeaderboard.map((item) => {
+                          const badge = getShootPowerBadge(item.bestSpeedKmh);
+                          return (
+                            <div
+                              key={item.key}
+                              className={`p-2.5 sm:p-3 rounded-xl border flex items-center justify-between gap-2 min-w-0 overflow-hidden ${
+                                item.rank === 1
+                                  ? 'bg-amber-500/10 border-amber-500/40'
+                                  : 'bg-slate-900/75 border-slate-700/80'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black shrink-0 ${
+                                  item.rank === 1 ? 'bg-amber-500 text-slate-950' :
+                                  item.rank === 2 ? 'bg-slate-300 text-slate-900' :
+                                  item.rank === 3 ? 'bg-amber-700 text-white' :
+                                  'bg-slate-800 text-slate-400 border border-slate-700'
+                                }`}>
+                                  {item.rank}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="text-xs sm:text-sm font-black text-white truncate">{item.playerName}</span>
+                                    {item.birthYear && (
+                                      <span className="text-[10px] text-slate-400 font-bold shrink-0">{item.birthYear}</span>
+                                    )}
+                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border shrink-0 whitespace-nowrap ${badge.className}`}>
+                                      {badge.tier}급
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                                    주발/유형: <strong className="text-slate-300">{item.bestFootType}</strong> · 평균 <strong className="text-slate-300">{item.avgSpeedKmh}km/h</strong> ({item.count}회 측정)
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="text-right shrink-0 whitespace-nowrap">
+                                <div className="text-sm sm:text-base font-black text-amber-400 tabular-nums">
+                                  {item.bestSpeedKmh.toFixed(1)} <span className="text-[10px] text-slate-400 font-bold">km/h</span>
+                                </div>
+                                <div className="text-[9px] text-slate-500 font-bold">
+                                  {(item.bestDate || '').slice(5).replace('-', '/')} 최고기록
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 6. 실시간 측정 히스토리 로그 (개별 기록 수정/삭제 및 수기 추가) */}
+                <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-3.5 sm:p-4 space-y-3 overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <h3 className="text-xs font-black text-slate-200 flex items-center gap-1.5 truncate">
+                      <span>📋</span>
+                      <span className="truncate">최근 슈팅 측정 기록 ({savedShootRecords.length})</span>
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setShootManualModal({
+                        isOpen: true,
+                        speedKmh: '',
+                        playerId: shootSelectedPlayerId || '',
+                        customPlayerName: shootCustomPlayerName || '',
+                        footType: shootFootType || '오른발'
+                      })}
+                      className="text-[11px] bg-slate-900 hover:bg-slate-700 text-amber-400 border border-amber-500/30 px-2.5 py-1.5 rounded-xl font-bold transition shrink-0 whitespace-nowrap flex items-center gap-1"
+                    >
+                      <Plus size={12}/> 수기 기록 추가
+                    </button>
+                  </div>
+
+                  {savedShootRecords.length === 0 ? (
+                    <div className="text-center py-5 text-xs text-slate-500 bg-slate-900/50 rounded-xl border border-slate-800">
+                      저장된 개별 슈팅 측정 내역이 없습니다.
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-72 overflow-y-auto pr-0.5 hide-scrollbar">
+                      {savedShootRecords.slice(0, 30).map((rec) => {
+                        const badge = getShootPowerBadge(rec.speedKmh);
+                        return (
+                          <div
+                            key={rec.id}
+                            className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-700/80 flex items-center justify-between gap-2 min-w-0 overflow-hidden"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="text-xs font-black text-white truncate">{rec.playerName || '미지정 선수'}</span>
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 shrink-0 whitespace-nowrap">
+                                  {rec.footType || '오른발'}
+                                </span>
+                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border shrink-0 whitespace-nowrap ${badge.className}`}>
+                                  {badge.label}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                                {(rec.date || '').slice(5).replace('-', '/')} · 트랩 {rec.distanceM || 3}m ({rec.elapsedMs || '-'}ms) {rec.mode === 'sim' ? '· 시뮬레이션' : rec.mode === 'manual' ? '· 수기입력' : '· 레이저실측'}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0 whitespace-nowrap">
+                              <span className="text-xs sm:text-sm font-black text-amber-400 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700 tabular-nums">
+                                {Number(rec.speedKmh).toFixed(1)} <span className="text-[9px] text-slate-400">km/h</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => openShootEditModal(rec)}
+                                className="p-1.5 text-slate-400 hover:text-emerald-400 transition shrink-0"
+                                title="선수 및 슈팅 유형 수정"
+                              >
+                                <Edit size={14}/>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => requestDeleteShootRecord(rec.id)}
+                                className="p-1.5 text-slate-500 hover:text-red-400 transition shrink-0"
+                                title="기록 삭제"
+                              >
+                                <Trash2 size={14}/>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -6272,524 +7670,146 @@ const renderGoalFlowModal = () => {
         <button onClick={() => setActiveTab('schedule')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'schedule' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}><Calendar size={20} className="mb-1" /><span className="text-[10px] font-bold">일정</span></button>
         <button onClick={() => setActiveTab('stats')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'stats' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}><BarChart2 size={20} className="mb-1" /><span className="text-[10px] font-bold">통계</span></button>
         <button onClick={() => setActiveTab('tactics')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'tactics' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}><Target size={20} className="mb-1" /><span className="text-[10px] font-bold">전술</span></button>
-        <button onClick={() => setActiveTab('gps')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'gps' ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}><Activity size={20} className="mb-1" /><span className="text-[10px] font-bold">GPS</span></button>
+        <button onClick={() => setActiveTab('gps')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'gps' ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}><Activity size={20} className="mb-1" /><span className="text-[10px] font-bold">기록</span></button>
         <button onClick={() => setActiveTab('roster')} className={`flex flex-col items-center p-2 flex-1 ${activeTab === 'roster' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}><Users size={20} className="mb-1" /><span className="text-[10px] font-bold">명단</span></button>
       </nav>
 
-      {tacticsTutorialModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[200] p-4 animate-in fade-in zoom-in-95">
-           <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl relative">
-              <button onClick={() => setTacticsTutorialModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20}/></button>
-              <h2 className="text-xl font-black text-white mb-6 flex items-center gap-2"><Target className="text-emerald-400"/> 전술판 사용 가이드</h2>
-              <div className="space-y-6">
-                 <div className="flex gap-4"><div className="w-8 h-8 rounded-full bg-emerald-600/20 text-emerald-400 flex items-center justify-center font-black shrink-0 border border-emerald-500/30">1</div><div><div className="text-white font-bold mb-1">선수 배치 및 스케치</div><div className="text-sm text-slate-400 leading-snug">선수 토큰을 이동시키고, 화살표나 지역 표시 등 그리기 도구를 활용해 상황을 세팅하세요.</div></div></div>
-                 <div className="flex gap-4"><div className="w-8 h-8 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center font-black shrink-0 border border-red-500/30">2</div><div><div className="text-white font-bold mb-1">[자동 녹화] 켜고 움직이기</div><div className="text-sm text-slate-400 leading-snug">상단의 <strong className="text-red-400">자동녹화</strong> 버튼을 켜면 화면 테두리가 빨간색으로 바뀝니다.<br/>이 상태에서 선수를 움직이거나 선을 그릴 때마다 컷(프레임)이 자동 저장됩니다!</div></div></div>
-                 <div className="flex gap-4"><div className="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-black shrink-0 border border-blue-500/30">3</div><div><div className="text-white font-bold mb-1">애니메이션 확인 및 공유</div><div className="text-sm text-slate-400 leading-snug"><strong className="text-blue-400">재생</strong> 버튼을 눌러 부드러운 애니메이션을 확인하고, <strong className="text-yellow-400">영상공유</strong> 버튼으로 MP4 파일을 추출해 카톡으로 공유하세요!</div></div></div>
-              </div>
-              <button onClick={() => setTacticsTutorialModal(false)} className="w-full mt-8 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3.5 rounded-xl transition">닫기</button>
-           </div>
-        </div>
-      )}
-
-      {gpsGuideModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[200] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
-          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[86vh] flex flex-col relative overflow-hidden">
+      {/* ⚡ 슈팅 스피드건 측정 가이드 모달 */}
+      {shootGuideModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[230] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[88vh] flex flex-col relative overflow-hidden">
             <div className="flex justify-between items-center mb-3 shrink-0 gap-2 min-w-0">
               <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 min-w-0 truncate">
-                <span className="shrink-0">⌚</span>
-                <span className="truncate">스마트워치 GPS 연동 가이드</span>
+                <span className="shrink-0">⚡</span>
+                <span className="truncate">가상 레이저 스피드건 측정 가이드</span>
               </h2>
-              <button onClick={() => setGpsGuideModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
-            </div>
-
-            <div className="grid grid-cols-2 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1 mb-3 shrink-0">
-              <button
-                type="button"
-                onClick={() => setGpsGuideTab('android')}
-                className={`py-2 px-1.5 rounded-lg text-xs font-bold transition min-w-0 overflow-hidden truncate ${gpsGuideTab === 'android' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-              >
-                🤖 갤럭시워치
-              </button>
-              <button
-                type="button"
-                onClick={() => setGpsGuideTab('ios')}
-                className={`py-2 px-1.5 rounded-lg text-xs font-bold transition min-w-0 overflow-hidden truncate ${gpsGuideTab === 'ios' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-              >
-                🍎 애플워치 (iOS)
-              </button>
+              <button onClick={() => setShootGuideModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
             </div>
 
             <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
-              {gpsGuideTab === 'android' ? (
-                <>
-                  <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3 text-[11px] text-amber-200 leading-relaxed space-y-1.5">
-                    <strong className="text-amber-400 block">🚨 [달리기]로 측정했는데도 GPX 내보내기가 안 보일 때 체크리스트!</strong>
-                    <div>
-                      <strong>① 상세 화면에 '지도(이동 경로)'가 그려져 있나요?</strong><br/>
-                      삼성 헬스 달리기 상세 화면에 지도가 아예 없다면 워치 GPS가 꺼져 있었거나 실내에서 시작해 위성 신호를 못 잡은 상태입니다. (지도 데이터가 없으면 GPX 메뉴 자체가 숨겨집니다)
-                    </div>
-                    <div>
-                      <strong>② 워치 [달리기 설정]에서 '위치(GPS)' 켜기</strong><br/>
-                      워치 삼성 헬스 → [달리기] 옆 ⚙️설정 → <strong>[위치] ON</strong> 확인 후, 야외에서 상단 📍위성 아이콘이 깜빡임을 멈추고 <strong>초록색으로 고정</strong>된 뒤 시작하세요.
-                    </div>
-                    <div>
-                      <strong>③ 스마트폰 삼성 헬스 '위치 정보' 권한 허용</strong><br/>
-                      폰 삼성 헬스 홈 → 우측 상단 <strong>⋮</strong> → <strong>[설정]</strong> → 맨 아래 <strong>[위치 정보]</strong>가 켜져 있어야 지도가 표시되고 GPX 추출 메뉴가 나타납니다.
-                    </div>
-                    <div>
-                      <strong>④ 공유 버튼이 아닌 우측 상단 [⋮ (더보기)] 메뉴 확인</strong><br/>
-                      운동 상세 화면의 [공유] 아이콘이 아니라, 화면 맨 위 우측 모서리의 <strong>[⋮ (점 3개)]</strong>를 누르면 <strong>[경로 내보내기]</strong> 또는 <strong>[GPX 파일로 내보내기/공유]</strong>가 있습니다.
-                    </div>
-                  </div>
-                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">1</div>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold text-white mb-0.5">워치에서 [달리기] 모드로 측정 시작</div>
-                      갤럭시워치 <strong className="text-emerald-400">[삼성 헬스]</strong>에서 축구가 아닌 <strong className="text-white">[달리기]</strong>(또는 걷기/하이킹)를 직접 눌러 시작하고 경기를 진행하세요. (시작 전 워치 상단 위치 아이콘이 깜빡이다 고정되는지 확인)
-                    </div>
-                  </div>
-                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">2</div>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold text-white mb-0.5">스마트폰 삼성 헬스에서 GPX 내보내기</div>
-                      경기 종료 후 스마트폰 <strong className="text-white">[삼성 헬스]</strong> 앱 → <strong className="text-white">[운동 기록]</strong>에서 방금 뛴 달리기 항목 터치(상세 화면에 지도 경로 표시 확인) → 우측 상단 <strong className="text-amber-400">[⋮ (점 3개)]</strong> → <strong className="text-white">[GPX로 내보내기]</strong>를 눌러 저장하세요.
-                    </div>
-                  </div>
-                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">3</div>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold text-white mb-0.5">MATCHBOARD에서 파일 열기</div>
-                      현재 GPS 탭의 <strong className="text-blue-400">[📂 GPX 기록 파일 불러오기]</strong> 터치 → 파일 선택창 상단 <strong className="text-white">[최근 파일]</strong> 또는 좌측 메뉴(☰) <strong className="text-white">[내 파일 → 내장 메모리 → Download → SamsungHealth]</strong>에서 <strong className="text-emerald-400">.gpx 파일</strong>을 선택하면 자동 분석됩니다!
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3 text-[11px] text-amber-200 leading-relaxed space-y-1.5">
-                    <strong className="text-amber-400 block">🚨 아이폰 · 애플워치 필수 사전 설정 체크리스트!</strong>
-                    <div>
-                      <strong>① 워치에서 '축구'가 아닌 [실외 달리기] 선택!</strong><br/>
-                      애플워치도 기본 <strong>'축구'</strong> 종목은 심박/칼로리만 재고 <strong>GPS 지도 경로를 저장하지 않습니다.</strong> 반드시 <strong className="text-white underline">[실외 달리기]</strong>(또는 실외 걷기)로 측정해야 GPS 경로가 기록됩니다.
-                    </div>
-                    <div>
-                      <strong>② 아이폰 위치 서비스 권한 2가지 확인</strong><br/>
-                      • 아이폰 <strong>설정 → 개인정보 보호 및 보안 → 위치 서비스 → [Apple Watch 운동]</strong>을 <strong>'앱을 사용하는 동안' + '정확한 위치 ON'</strong>으로 설정<br/>
-                      • 위치 서비스 맨 아래 <strong>[시스템 서비스] → [동작 보정 및 거리] ON</strong> 확인
-                    </div>
-                    <div>
-                      <strong>③ 무료 GPX 추출 앱 1개 설치 (최초 1회)</strong><br/>
-                      아이폰 기본 피트니스 앱에는 파일 저장 버튼이 없으므로, 앱스토어에서 무료 앱(<strong>GPX Export, RunGap, Strava</strong> 등) 설치 후 <strong>'건강(운동 경로) 읽기 권한'</strong>을 허용해 두세요.
-                    </div>
-                  </div>
-                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">1</div>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold text-white mb-0.5">애플워치에서 [실외 달리기]로 측정</div>
-                      애플워치 기본 <strong className="text-emerald-400">[운동]</strong> 앱에서 축구가 아닌 <strong className="text-white">[실외 달리기]</strong>를 눌러 시작하고 경기를 뛰세요.
-                    </div>
-                  </div>
-                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">2</div>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold text-white mb-0.5">연동 앱에서 GPX 파일로 내보내기</div>
-                      경기 후 아이폰 연동 앱(<strong className="text-white">GPX Export, RunGap, WorkOutDoors, HealthFit</strong> 등)을 열어 방금 기록을 선택한 뒤 <strong className="text-amber-400">[Export GPX → 파일에 저장]</strong>을 누르세요.
-                    </div>
-                  </div>
-                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">3</div>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold text-white mb-0.5">MATCHBOARD에서 파일 열기</div>
-                      현재 GPS 탭의 <strong className="text-blue-400">[📂 GPX 기록 파일 불러오기]</strong> 버튼으로 아이폰 [파일] 앱에 저장된 `.gpx` 파일을 불러오면 히트맵과 스탯이 즉시 생성됩니다!
-                    </div>
-                  </div>
-                </>
-              )}
+              {/* 원리 요약 다이어그램 박스 */}
+              <div className="bg-slate-950 border border-amber-500/30 rounded-2xl p-3 text-center space-y-1.5">
+                <div className="text-[11px] font-black text-amber-400">📡 가상 레이저 트랩(Optical Laser Trap) 원리</div>
+                <div className="bg-slate-900 rounded-xl p-2.5 border border-slate-800 font-mono text-[11px] text-slate-200">
+                  ⚽ ───► <span className="text-emerald-400 font-black">[GATE 1]</span> ◄── 3.0m ──► <span className="text-rose-400 font-black">[GATE 2]</span> ───► 🥅
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  고속 카메라 프레임에서 축구공이 <strong className="text-emerald-400">GATE 1</strong>과 <strong className="text-rose-400">GATE 2</strong> 레이저 라인을 통과할 때의 <strong className="text-white">픽셀 변화 시점 차이(Δt)</strong>를 정밀 보간하여 시속(km/h)을 즉시 계산합니다.
+                </p>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black flex items-center justify-center shrink-0">1</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-white mb-0.5">스마트폰을 슈팅 경로 측면(90°)에 고정</div>
+                  공이 날아가는 라인에서 옆으로 <strong className="text-amber-300">약 4~6m 떨어진 측면</strong>에 스마트폰을 가로/세로로 세워 고정하세요. (삼각대, 벤치, 물병 거치 권장! 카메라가 흔들리지 않아야 정확합니다.)
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black flex items-center justify-center shrink-0">2</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-white mb-0.5">두 레이저 게이트 간 실제 거리(m) 맞추기</div>
+                  화면에 표시된 <strong className="text-emerald-400">GATE 1</strong>과 <strong className="text-emerald-400">GATE 2</strong> 선이 바닥의 콘(마커) 2개 위치나 페널티박스 간격(권장 <strong className="text-white">3.0m</strong>, 큰 걸음 3~4보)과 일치하도록 거리를 맞추세요.
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black flex items-center justify-center shrink-0">3</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-white mb-0.5">선수 선택 후 슈팅! (자동 기록 & 랭킹 반영)</div>
+                  측정할 선수를 선택하고 <strong className="text-rose-400">[📷 카메라 켜기]</strong>를 누른 뒤 공을 차세요. 두 레이저 선을 통과하는 즉시 구속이 계산되며 <strong className="text-emerald-400">명예의 전당(팀 랭킹)에 자동 업데이트</strong>됩니다!
+                </div>
+              </div>
+
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-[11px] text-emerald-200 space-y-1">
+                <strong className="text-emerald-400 block">💡 정확도를 100%로 높이는 꿀팁</strong>
+                <div>• 두 레이저 게이트 뒤쪽 배경에 다른 팀원이 걸어 다니지 않도록 비워주세요.</div>
+                <div>• 공을 차는 선수의 몸이 GATE 1 선을 직접 가리지 않도록, <strong>공을 놓는 지점을 GATE 1보다 한 걸음(약 1m) 바깥쪽</strong>에 두면 공만 깔끔하게 포착됩니다!</div>
+              </div>
             </div>
 
             <button
               type="button"
-              onClick={() => setGpsGuideModal(false)}
-              className="w-full mt-4 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl text-sm transition shrink-0"
+              onClick={() => setShootGuideModal(false)}
+              className="w-full mt-4 py-3 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-slate-950 font-black rounded-xl text-xs transition shrink-0 shadow"
             >
-              확인했어요
+              가이드 확인 완료!
             </button>
           </div>
         </div>
       )}
 
-      {pitchManagerModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[210] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
-          <div className="bg-slate-800 p-4 sm:p-5 rounded-3xl w-full max-w-md border border-slate-700 shadow-2xl max-h-[92vh] flex flex-col relative overflow-hidden">
-            <div className="flex justify-between items-center mb-3 shrink-0 gap-2 min-w-0">
-              <div className="min-w-0 flex-1">
-                <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 min-w-0 truncate">
-                  <span className="shrink-0">🏟️</span>
-                  <span className="truncate">위성지도 구장(코너 4곳) 등록</span>
-                </h2>
-                <p className="text-[11px] text-slate-400 truncate">위성사진의 축구장 네 귀퉁이에 1~4번 핀을 맞춰주세요</p>
-              </div>
-              <button onClick={() => setPitchManagerModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-2.5 pr-0.5 hide-scrollbar">
-              {/* 지도 종류 선택 탭 (네이버 위성 / 네이버 일반 / 구글 위성) */}
-              <div className="grid grid-cols-3 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1">
-                <button
-                  type="button"
-                  onClick={() => setPitchMapStyle('naver_sat')}
-                  className={`py-1.5 px-1 rounded-lg text-[11px] font-bold transition min-w-0 overflow-hidden truncate ${pitchMapStyle === 'naver_sat' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-                >
-                  🟢 네이버 위성
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPitchMapStyle('naver_basic')}
-                  className={`py-1.5 px-1 rounded-lg text-[11px] font-bold transition min-w-0 overflow-hidden truncate ${pitchMapStyle === 'naver_basic' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-                >
-                  🗺️ 네이버 일반
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPitchMapStyle('google_sat')}
-                  className={`py-1.5 px-1 rounded-lg text-[11px] font-bold transition min-w-0 overflow-hidden truncate ${pitchMapStyle === 'google_sat' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-                >
-                  🌏 구글 위성
-                </button>
-              </div>
-
-              {/* 구장 위치 검색 바 */}
-              <form onSubmit={handlePitchPlaceSearch} className="flex gap-1.5 min-w-0">
-                <input
-                  type="text"
-                  value={pitchSearchQuery}
-                  onChange={(e) => {
-                    setPitchSearchQuery(e.target.value);
-                    if (pitchSearchMessage) setPitchSearchMessage('');
-                  }}
-                  placeholder="구장/공원/도로명주소 검색 (예: 마들스타디움)"
-                  className="w-0 flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none"
-                />
-                <button
-                  type="submit"
-                  disabled={isPitchSearching}
-                  className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition shrink-0 whitespace-nowrap"
-                >
-                  {isPitchSearching ? '검색중..' : '🔍 검색'}
-                </button>
-              </form>
-
-              {/* 검색 결과 없음 안내 */}
-              {pitchSearchMessage && (
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 text-[11px] text-amber-300 leading-relaxed">
-                  💡 {pitchSearchMessage}
-                </div>
-              )}
-
-              {/* 검색 결과 리스트 */}
-              {pitchSearchResults.length > 0 && (
-                <div className="bg-slate-900 border border-slate-700 rounded-xl p-1.5 max-h-36 overflow-y-auto space-y-1">
-                  {pitchSearchResults.map((item, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        const lat = parseFloat(item.lat);
-                        const lon = parseFloat(item.lon);
-                        if (pitchMapInstanceRef.current) {
-                          pitchMapInstanceRef.current.setView([lat, lon], 18);
-                          applyCornersToSatelliteMap(createDefaultCornersAround(lat, lon, 96, 62), false);
-                        }
-                        const cleanTitle = (item.title || item.display_name || '').split('(')[0].split(',')[0].trim();
-                        if (cleanTitle) setPitchFormName(cleanTitle);
-                        setPitchSearchResults([]);
-                      }}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 transition flex items-start justify-between gap-2"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[11px] font-bold text-emerald-300 truncate">
-                          📍 {item.title || item.display_name}
-                        </div>
-                        {item.address && (
-                          <div className="text-[10px] text-slate-400 truncate mt-0.5">
-                            {item.address}
-                          </div>
-                        )}
-                      </div>
-                      {item.category && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 shrink-0 mt-0.5">
-                          {item.category}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* 위성지도 컨트롤 버튼 바 */}
-              <div className="grid grid-cols-3 gap-1.5">
-                <button
-                  type="button"
-                  onClick={placeCornersAtMapCenter}
-                  className="py-1.5 px-1 bg-slate-900 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 rounded-lg text-[11px] font-bold transition min-w-0 overflow-hidden truncate"
-                >
-                  🎯 중앙에 배치
-                </button>
-                <button
-                  type="button"
-                  onClick={() => rotateDraftCorners(30)}
-                  className="py-1.5 px-1 bg-slate-900 hover:bg-slate-700 text-amber-300 border border-amber-500/30 rounded-lg text-[11px] font-bold transition min-w-0 overflow-hidden truncate"
-                >
-                  🔄 구장 틀 회전
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (gpsSession?.centerLat && gpsSession?.centerLon && pitchMapInstanceRef.current) {
-                      pitchMapInstanceRef.current.setView([gpsSession.centerLat, gpsSession.centerLon], 18);
-                      applyCornersToSatelliteMap(createDefaultCornersAround(gpsSession.centerLat, gpsSession.centerLon, 96, 62), false);
-                    } else if (navigator.geolocation) {
-                      navigator.geolocation.getCurrentPosition((pos) => {
-                        const { latitude, longitude } = pos.coords;
-                        if (pitchMapInstanceRef.current) {
-                          pitchMapInstanceRef.current.setView([latitude, longitude], 18);
-                          applyCornersToSatelliteMap(createDefaultCornersAround(latitude, longitude, 96, 62), false);
-                        }
-                      });
-                    }
-                  }}
-                  className="py-1.5 px-1 bg-slate-900 hover:bg-slate-700 text-blue-400 border border-blue-500/30 rounded-lg text-[11px] font-bold transition min-w-0 overflow-hidden truncate"
-                >
-                  {gpsSession?.centerLat ? '📂 GPX 위치' : '📍 내 위치 이동'}
-                </button>
-              </div>
-
-              {/* 위성지도 영역 */}
-              <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-500/40 shadow-inner bg-slate-950">
-                <div ref={pitchMapContainerRef} className="w-full h-60 sm:h-72 z-10" />
-                <div className="bg-slate-900/95 px-2.5 py-1.5 text-[10px] text-slate-300 flex flex-wrap items-center justify-between gap-1 border-t border-slate-800">
-                  <span>🔴 <strong className="text-red-400">1·2번 핀</strong>: 공격 진영</span>
-                  <span>🔵 <strong className="text-blue-400">3·4번 핀</strong>: 수비 진영 (드래그)</span>
-                </div>
-              </div>
-
-              {/* 구장 이름 입력 및 저장 */}
-              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3 space-y-2">
-                <div className="text-xs font-bold text-white">새 구장으로 저장하기</div>
-                <div className="flex gap-2 min-w-0">
-                  <input
-                    type="text"
-                    value={pitchFormName}
-                    onChange={(e) => setPitchFormName(e.target.value)}
-                    placeholder="구장 이름 입력 (예: 마들스타디움)"
-                    className="w-0 flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={savePitchToTeam}
-                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition shrink-0 whitespace-nowrap shadow"
-                  >
-                    💾 구장 저장
-                  </button>
-                </div>
-              </div>
-
-              {/* 등록된 구장 목록 */}
-              <div className="bg-slate-900/70 border border-slate-700/70 rounded-2xl p-3 space-y-2">
-                <div className="text-xs font-bold text-slate-300">등록된 구장 목록 ({allGpsPitches.length})</div>
-                <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                  {allGpsPitches.map(p => (
-                    <div
-                      key={p.id}
-                      onClick={() => {
-                        setGpsSelectedPitchId(p.id);
-                        applyCornersToSatelliteMap(p.corners, true);
-                      }}
-                      className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition overflow-hidden ${gpsSelectedPitchId === p.id ? 'bg-emerald-500/15 border-emerald-500/40' : 'bg-slate-800/80 border-slate-700 hover:border-slate-600'}`}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs font-bold text-white truncate">🏟️ {p.name}</div>
-                        <div className="text-[10px] text-slate-400 truncate">터치하여 위성지도 위치 확인 및 적용</div>
-                      </div>
-                      {!p.isPreset && (
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); requestDeletePitch(p.id); }}
-                          className="p-1.5 text-slate-400 hover:text-red-400 transition shrink-0"
-                        >
-                          <Trash2 size={14}/>
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {gpsRecordEditModal.isOpen && gpsRecordEditModal.record && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[220] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
-          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[88vh] overflow-y-auto overflow-x-hidden relative">
-            <div className="flex justify-between items-center mb-4 gap-2 min-w-0">
-              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2 min-w-0 truncate">
-                <Edit size={18} className="text-emerald-400 shrink-0"/>
-                <span className="truncate">저장된 GPS 기록 편집</span>
-              </h2>
+      {/* ✏️ 슈팅 기록 선수/유형 편집 모달 */}
+      {shootEditModal.isOpen && shootEditModal.record && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[235] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center gap-2 min-w-0">
+              <h3 className="text-base font-black text-white flex items-center gap-2 truncate">
+                <Edit size={18} className="text-amber-400 shrink-0"/>
+                <span className="truncate">슈팅 기록 정보 수정 ({shootEditModal.record.speedKmh}km/h)</span>
+              </h3>
               <button
                 type="button"
-                onClick={() => setGpsRecordEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', quarterLabel: '1Q', positionCode: 'AM', matchId: '' })}
+                onClick={() => setShootEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', footType: '오른발' })}
                 className="text-slate-400 hover:text-white p-1 shrink-0"
               >
                 <X size={20}/>
               </button>
             </div>
 
-            <form onSubmit={saveEditedGpsRecord} className="space-y-3.5">
+            <form onSubmit={saveEditedShootRecord} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">👤 선수 이름</label>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">👤 측정 선수</label>
                 <select
-                  value={gpsRecordEditModal.playerId}
-                  onChange={(e) => setGpsRecordEditModal(prev => ({ ...prev, playerId: e.target.value }))}
-                  className="w-full max-w-full min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none truncate"
+                  value={shootEditModal.playerId}
+                  onChange={(e) => setShootEditModal(prev => ({ ...prev, playerId: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
                 >
                   <option value="">미지정 선수</option>
                   {currentTeamPlayers.map(p => (
                     <option key={p.id} value={p.id}>{p.name} ({formatBirthYear(p.birthYear)})</option>
                   ))}
-                  <option value="__custom__">✍️ 직접 이름 입력...</option>
+                  <option value="__custom__">✍️ 이름 직접 입력...</option>
                 </select>
-                {gpsRecordEditModal.playerId === '__custom__' && (
+                {shootEditModal.playerId === '__custom__' && (
                   <input
                     type="text"
-                    value={gpsRecordEditModal.customPlayerName}
-                    onChange={(e) => setGpsRecordEditModal(prev => ({ ...prev, customPlayerName: e.target.value }))}
-                    placeholder="선수 이름 직접 입력 (예: 홍길동)"
-                    className="w-full mt-2 bg-slate-900 border border-emerald-500/50 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
-                    autoFocus
+                    value={shootEditModal.customPlayerName}
+                    onChange={(e) => setShootEditModal(prev => ({ ...prev, customPlayerName: e.target.value }))}
+                    placeholder="선수 이름 직접 입력"
+                    className="w-full mt-2 bg-slate-900 border border-amber-500/50 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
                   />
                 )}
               </div>
 
               <div>
-                <div className="flex flex-wrap items-center justify-between gap-1 mb-1.5">
-                  <label className="text-xs font-bold text-slate-400">
-                    ⏱️ 쿼터 선택 <span className="text-[10px] font-normal text-slate-500">(복수 터치 시 3~4Q 조합)</span>
-                  </label>
-                  <span className="text-[11px] font-black px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
-                    표시: {gpsRecordEditModal.quarterLabel}
-                  </span>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">👟 슈팅 유형</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {['오른발', '왼발', '발리/논스톱', '프리킥'].map(ft => (
+                    <button
+                      key={ft}
+                      type="button"
+                      onClick={() => setShootEditModal(prev => ({ ...prev, footType: ft }))}
+                      className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition truncate ${shootEditModal.footType === ft ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-900 text-slate-300 border-slate-700'}`}
+                    >
+                      {ft}
+                    </button>
+                  ))}
                 </div>
-                {(() => {
-                  const selectedNums = parseQuarterLabelToNums(gpsRecordEditModal.quarterLabel);
-                  const isAll = gpsRecordEditModal.quarterLabel === '전체';
-                  return (
-                    <div className="space-y-2">
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {[1, 2, 3, 4, 5, 6].map(qNum => {
-                          const isSelected = !isAll && selectedNums.includes(qNum);
-                          return (
-                            <button
-                              key={qNum}
-                              type="button"
-                              onClick={() => {
-                                setGpsRecordEditModal(prev => {
-                                  if (!prev.quarterTouched) {
-                                    return { ...prev, quarterTouched: true, quarterLabel: `${qNum}Q` };
-                                  }
-                                  return {
-                                    ...prev,
-                                    quarterTouched: true,
-                                    quarterLabel: toggleQuarterInLabel(prev.quarterLabel, qNum)
-                                  };
-                                });
-                              }}
-                              className={`py-2 px-1 rounded-xl text-xs font-bold border transition min-w-0 overflow-hidden truncate ${isSelected ? 'bg-emerald-600 text-white border-emerald-500 shadow' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}`}
-                            >
-                              {qNum}쿼터
-                            </button>
-                          );
-                        })}
-                        <button
-                          type="button"
-                          onClick={() => setGpsRecordEditModal(prev => ({ ...prev, quarterTouched: false, quarterLabel: '전체' }))}
-                          className={`col-span-2 py-2 px-1 rounded-xl text-xs font-bold border transition min-w-0 overflow-hidden truncate ${isAll ? 'bg-emerald-600 text-white border-emerald-500 shadow' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}`}
-                        >
-                          경기 전체
-                        </button>
-                      </div>
-
-                      {/* 자주 쓰는 연속 쿼터 원터치 버튼 */}
-                      <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar pt-0.5">
-                        <span className="text-[10px] text-slate-500 font-bold shrink-0">연속 측정:</span>
-                        {['1~2Q', '2~3Q', '3~4Q', '4~5Q', '5~6Q', '1~3Q', '2~4Q'].map(preset => (
-                          <button
-                            key={preset}
-                            type="button"
-                            onClick={() => setGpsRecordEditModal(prev => ({ ...prev, quarterTouched: true, quarterLabel: preset }))}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition shrink-0 whitespace-nowrap ${gpsRecordEditModal.quarterLabel === preset ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-900/80 text-slate-400 border-slate-700 hover:text-white'}`}
-                          >
-                            {preset.replace('Q', '쿼터')}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">🎯 출전 포지션</label>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {GPS_POSITIONS.map(pos => {
-                    const isSel = (gpsRecordEditModal.positionCode || 'AM') === pos.code;
-                    return (
-                      <button
-                        key={pos.code}
-                        type="button"
-                        onClick={() => setGpsRecordEditModal(prev => ({ ...prev, positionCode: pos.code }))}
-                        className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition flex items-center justify-center gap-1 min-w-0 overflow-hidden ${isSel ? 'bg-indigo-600 text-white border-indigo-400 shadow' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}`}
-                      >
-                        <span className="shrink-0">{pos.icon}</span>
-                        <span className="truncate">{pos.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">📅 연결할 경기 일정</label>
-                <select
-                  value={gpsRecordEditModal.matchId}
-                  onChange={(e) => setGpsRecordEditModal(prev => ({ ...prev, matchId: e.target.value }))}
-                  className="w-full max-w-full min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-200 outline-none truncate"
-                >
-                  <option value="">자유 기록 ({gpsRecordEditModal.record.date})</option>
-                  {[...currentTeamMatches]
-                    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-                    .map(m => {
-                      const typeLabel = m.matchType === 'external' ? `교류전` : m.matchType === 'futsal' ? '풋살' : '자체전';
-                      return (
-                        <option key={m.id} value={m.id}>
-                          {m.date} · [{typeLabel}] {m.location}
-                        </option>
-                      );
-                    })}
-                </select>
               </div>
 
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setGpsRecordEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', quarterLabel: '1Q', positionCode: 'AM', matchId: '' })}
+                  onClick={() => setShootEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', footType: '오른발' })}
                   className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs rounded-xl transition"
                 >
                   취소
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition shadow"
+                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition shadow"
                 >
                   💾 수정 완료
                 </button>
@@ -6799,70 +7819,94 @@ const renderGoalFlowModal = () => {
         </div>
       )}
 
-      {/* 🤖 Google Gemini 무료 AI 키 설정 모달 */}
-      {geminiApiKeyModal.isOpen && (
-        <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[265] p-3 sm:p-4 animate-in fade-in"
-          onClick={() => setGeminiApiKeyModal({ isOpen: false, keyInput: '' })}
-        >
-          <div
-            className="bg-slate-800 border border-slate-700 rounded-3xl w-full max-w-sm p-4 sm:p-5 space-y-4 shadow-2xl max-h-[88vh] overflow-y-auto overflow-x-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center border-b border-slate-700 pb-3 gap-2 min-w-0">
-              <h3 className="text-base font-black text-white flex items-center gap-2 min-w-0 truncate">
-                🤖 Google Gemini AI 코치 연결
+      {/* ➕ 수기/외부 스피드건 슈팅 기록 추가 모달 */}
+      {shootManualModal.isOpen && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[235] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center gap-2 min-w-0">
+              <h3 className="text-base font-black text-white flex items-center gap-2 truncate">
+                <Plus size={18} className="text-amber-400 shrink-0"/>
+                <span className="truncate">슈팅 속도 수기 기록 등록</span>
               </h3>
               <button
                 type="button"
-                onClick={() => setGeminiApiKeyModal({ isOpen: false, keyInput: '' })}
+                onClick={() => setShootManualModal({ isOpen: false, speedKmh: '', playerId: '', customPlayerName: '', footType: '오른발' })}
                 className="text-slate-400 hover:text-white p-1 shrink-0"
               >
-                <X size={20} />
+                <X size={20}/>
               </button>
             </div>
 
-            <form onSubmit={saveTeamGeminiApiKey} className="space-y-3.5 text-xs">
-              <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3 space-y-2 text-slate-300 leading-relaxed break-keep">
-                <div className="font-black text-indigo-300">💡 Google Gemini AI 코치 (무료 API 키)</div>
-                <p className="text-[11px] text-slate-400">
-                  Google AI Studio에서 무료로 발급받는 <strong className="text-white">Gemini API 키</strong>를 한 번만 등록해 두면, 우리 팀원 누구나 매 경기 완전히 새로운 문장의 생성형 AI 전술 코칭을 무제한(무료 등급 하루 1,500회) 이용할 수 있습니다.
-                </p>
-                <a
-                  href="https://aistudio.google.com/app/apikey"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 text-[11px] font-black transition"
-                >
-                  🔗 Google AI Studio에서 무료 키 발급받기 &gt;
-                </a>
-              </div>
-
+            <form onSubmit={saveManualShootRecord} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">🔑 Gemini API Key (AIza...로 시작)</label>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">⚡ 측정된 슈팅 속도 (km/h)</label>
                 <input
-                  type="password"
-                  value={geminiApiKeyModal.keyInput}
-                  onChange={(e) => setGeminiApiKeyModal(prev => ({ ...prev, keyInput: e.target.value }))}
-                  placeholder="AIzaSy... 키 붙여넣기"
-                  className="w-full bg-slate-900 border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
+                  type="number"
+                  step="0.1"
+                  min="15"
+                  max="190"
+                  required
+                  value={shootManualModal.speedKmh}
+                  onChange={(e) => setShootManualModal(prev => ({ ...prev, speedKmh: e.target.value }))}
+                  placeholder="예: 96.5"
+                  className="w-full bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2.5 text-sm font-black text-amber-400 outline-none"
                   autoFocus
                 />
               </div>
 
-              <div className="flex gap-2 pt-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">👤 측정 선수</label>
+                <select
+                  value={shootManualModal.playerId}
+                  onChange={(e) => setShootManualModal(prev => ({ ...prev, playerId: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
+                >
+                  <option value="">미지정 선수</option>
+                  {currentTeamPlayers.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({formatBirthYear(p.birthYear)})</option>
+                  ))}
+                  <option value="__custom__">✍️ 이름 직접 입력...</option>
+                </select>
+                {shootManualModal.playerId === '__custom__' && (
+                  <input
+                    type="text"
+                    value={shootManualModal.customPlayerName}
+                    onChange={(e) => setShootManualModal(prev => ({ ...prev, customPlayerName: e.target.value }))}
+                    placeholder="선수 이름 직접 입력"
+                    className="w-full mt-2 bg-slate-900 border border-amber-500/50 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
+                  />
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">👟 슈팅 유형</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {['오른발', '왼발', '발리/논스톱', '프리킥'].map(ft => (
+                    <button
+                      key={ft}
+                      type="button"
+                      onClick={() => setShootManualModal(prev => ({ ...prev, footType: ft }))}
+                      className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition truncate ${shootManualModal.footType === ft ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-900 text-slate-300 border-slate-700'}`}
+                    >
+                      {ft}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setGeminiApiKeyModal({ isOpen: false, keyInput: '' })}
+                  onClick={() => setShootManualModal({ isOpen: false, speedKmh: '', playerId: '', customPlayerName: '', footType: '오른발' })}
                   className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs rounded-xl transition"
                 >
-                  닫기
+                  취소
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl transition shadow"
+                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition shadow"
                 >
-                  💾 저장 후 AI 분석 시작
+                  💾 랭킹에 등록
                 </button>
               </div>
             </form>
@@ -6870,46 +7914,71 @@ const renderGoalFlowModal = () => {
         </div>
       )}
 
-      {galleryModal.isOpen && (
-        <div className="fixed inset-0 bg-black z-[250] flex flex-col animate-in fade-in">
-          <div className="flex justify-between items-center p-4 absolute top-0 w-full z-10 bg-gradient-to-b from-black/80 to-transparent">
-            <div className="text-white font-bold text-sm bg-black/50 px-3 py-1.5 rounded-full">{galleryModal.currentIndex + 1} / {(galleryModal.photos||[]).length}</div>
-            <div className="flex gap-4">
-              {isAdmin && ( <button onClick={() => requestDeletePhoto((galleryModal.photos||[])[galleryModal.currentIndex].id)} className="text-white/70 hover:text-red-400 bg-black/50 p-2 rounded-full transition"><Trash2 size={20}/></button> )}
-              <button onClick={() => setGalleryModal({ isOpen: false, photos: [], currentIndex: 0, matchId: null })} className="text-white bg-black/50 p-2 rounded-full hover:bg-black/80 transition"><X size={20}/></button>
+      {/* ⚡ 슈팅 스피드건 측정 가이드 모달 */}
+      {shootGuideModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[230] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[88vh] flex flex-col relative overflow-hidden">
+            <div className="flex justify-between items-center mb-3 shrink-0 gap-2 min-w-0">
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 min-w-0 truncate">
+                <span className="shrink-0">⚡</span>
+                <span className="truncate">가상 레이저 스피드건 측정 가이드</span>
+              </h2>
+              <button onClick={() => setShootGuideModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
             </div>
-          </div>
-          <div className="flex-1 flex items-center justify-center relative overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-             <div className="hidden">
-               {galleryModal.currentIndex > 0 && <img src={(galleryModal.photos||[])[galleryModal.currentIndex - 1]?.url} alt="preload-prev" />}
-               {galleryModal.currentIndex < (galleryModal.photos||[]).length - 1 && <img src={(galleryModal.photos||[])[galleryModal.currentIndex + 1]?.url} alt="preload-next1" />}
-               {galleryModal.currentIndex < (galleryModal.photos||[]).length - 2 && <img src={(galleryModal.photos||[])[galleryModal.currentIndex + 2]?.url} alt="preload-next2" />}
-             </div>
 
-             {galleryModal.currentIndex > 0 && ( <button onClick={() => setGalleryModal(p => ({...p, currentIndex: p.currentIndex - 1}))} className="absolute left-4 p-3 bg-black/50 text-white rounded-full z-10 hidden sm:block"><ChevronLeft size={24}/></button> )}
-             <img key={(galleryModal.photos||[])[galleryModal.currentIndex]?.id} src={(galleryModal.photos||[])[galleryModal.currentIndex]?.url} alt="gallery" className="max-w-full max-h-full object-contain animate-in fade-in zoom-in-95 duration-200" />
-             {galleryModal.currentIndex < (galleryModal.photos||[]).length - 1 && ( <button onClick={() => setGalleryModal(p => ({...p, currentIndex: p.currentIndex + 1}))} className="absolute right-4 p-3 bg-black/50 text-white rounded-full z-10 hidden sm:block"><ChevronRight size={24}/></button> )}
+            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
+              {/* 원리 요약 다이어그램 박스 */}
+              <div className="bg-slate-950 border border-amber-500/30 rounded-2xl p-3 text-center space-y-1.5">
+                <div className="text-[11px] font-black text-amber-400">📡 가상 레이저 트랩(Optical Laser Trap) 원리</div>
+                <div className="bg-slate-900 rounded-xl p-2.5 border border-slate-800 font-mono text-[11px] text-slate-200">
+                  ⚽ ───► <span className="text-emerald-400 font-black">[GATE 1]</span> ◄── 3.0m ──► <span className="text-rose-400 font-black">[GATE 2]</span> ───► 🥅
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  고속 카메라 프레임에서 축구공이 <strong className="text-emerald-400">GATE 1</strong>과 <strong className="text-rose-400">GATE 2</strong> 레이저 라인을 통과할 때의 <strong className="text-white">픽셀 변화 시점 차이(Δt)</strong>를 정밀 보간하여 시속(km/h)을 즉시 계산합니다.
+                </p>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black flex items-center justify-center shrink-0">1</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-white mb-0.5">스마트폰을 슈팅 경로 측면(90°)에 고정</div>
+                  공이 날아가는 라인에서 옆으로 <strong className="text-amber-300">약 4~6m 떨어진 측면</strong>에 스마트폰을 가로/세로로 세워 고정하세요. (삼각대, 벤치, 물병 거치 권장! 카메라가 흔들리지 않아야 정확합니다.)
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black flex items-center justify-center shrink-0">2</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-white mb-0.5">두 레이저 게이트 간 실제 거리(m) 맞추기</div>
+                  화면에 표시된 <strong className="text-emerald-400">GATE 1</strong>과 <strong className="text-emerald-400">GATE 2</strong> 선이 바닥의 콘(마커) 2개 위치나 페널티박스 간격(권장 <strong className="text-white">3.0m</strong>, 큰 걸음 3~4보)과 일치하도록 거리를 맞추세요.
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black flex items-center justify-center shrink-0">3</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-white mb-0.5">선수 선택 후 슈팅! (자동 기록 & 랭킹 반영)</div>
+                  측정할 선수를 선택하고 <strong className="text-rose-400">[📷 카메라 켜기]</strong>를 누른 뒤 공을 차세요. 두 레이저 선을 통과하는 즉시 구속이 계산되며 <strong className="text-emerald-400">명예의 전당(팀 랭킹)에 자동 업데이트</strong>됩니다!
+                </div>
+              </div>
+
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-[11px] text-emerald-200 space-y-1">
+                <strong className="text-emerald-400 block">💡 정확도를 100%로 높이는 꿀팁</strong>
+                <div>• 두 레이저 게이트 뒤쪽 배경에 다른 팀원이 걸어 다니지 않도록 비워주세요.</div>
+                <div>• 공을 차는 선수의 몸이 GATE 1 선을 직접 가리지 않도록, <strong>공을 놓는 지점을 GATE 1보다 한 걸음(약 1m) 바깥쪽</strong>에 두면 공만 깔끔하게 포착됩니다!</div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShootGuideModal(false)}
+              className="w-full mt-4 py-3 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-slate-950 font-black rounded-xl text-xs transition shrink-0 shadow"
+            >
+              가이드 확인 완료!
+            </button>
           </div>
         </div>
       )}
 
-      {renderDetailModal()}
-      {renderMatchModalForm()}
-      {renderAssignmentModal()}
-      {renderRosterModalForm()}
-      {renderAuthModal()}
-      {renderCreateTeamModal()}
-      {renderEditTeamModal()}
-      {renderAdminPwdChangeModal()}
-      {renderTeamSettingsModal()}
-      {renderTokenEditModal()}
-      {renderShareModal()}
-      {renderDateMemoModal()}
-      {renderGoalFlowModal()}
-      {renderLogEditModal()}
-      {renderQuarterEditModal()}
-      {renderHiddenCaptureArea()}
-      {renderSystemModals()}
-    </div>
-  );
-}
+      {/* ✏️ 슈팅 기록 선수/유형 편
+... [truncated for diff preview]
