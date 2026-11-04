@@ -3699,7 +3699,16 @@ export default function App() {
       const updatedList = savedShootRecords.map(r => (r.id === rec.id ? updatedRec : r));
       await persistShootRecordList(updatedList);
       if (shootLastResult?.id === rec.id) {
-        setShootLastResult(prev => (prev ? { ...prev, ...updatedRec } : null));
+        const bestByPlayer = {};
+        updatedList.forEach(r => {
+          const k = r.playerId ? `id_${r.playerId}` : `name_${r.playerName}`;
+          const s = Number(r.speedKmh) || 0;
+          if (!bestByPlayer[k] || s > bestByPlayer[k]) bestByPlayer[k] = s;
+        });
+        const myKey = finalPlayerId ? `id_${finalPlayerId}` : `name_${finalPlayerName}`;
+        const sortedBest = Object.entries(bestByPlayer).sort((a, b) => b[1] - a[1]);
+        const computedRank = sortedBest.findIndex(([k]) => k === myKey) + 1;
+        setShootLastResult(prev => (prev ? { ...prev, ...updatedRec, rank: computedRank > 0 ? computedRank : 1 } : null));
       }
       setShootEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', footType: '오른발' });
     } finally {
@@ -3733,6 +3742,7 @@ export default function App() {
       setSystemAlert({ isOpen: true, message: '유효한 슈팅 속도(10 ~ 200 km/h)를 입력해주세요.' });
       return;
     }
+    const cleanSpeed = Number(spd.toFixed(1));
     const isCustom = shootManualModal.playerId === '__custom__';
     const playerObj = !isCustom ? currentTeamPlayers.find(p => p.id === shootManualModal.playerId) : null;
     const finalPlayerId = playerObj ? playerObj.id : null;
@@ -3741,15 +3751,23 @@ export default function App() {
       : (playerObj ? playerObj.name : '미지정 선수');
     const finalBirthYear = playerObj ? formatBirthYear(playerObj.birthYear) : null;
 
+    const prevPlayerRecords = savedShootRecords.filter(r =>
+      (finalPlayerId && r.playerId === finalPlayerId) || (!finalPlayerId && r.playerName === finalPlayerName)
+    );
+    const prevBestSpeed = prevPlayerRecords.length > 0
+      ? Math.max(...prevPlayerRecords.map(r => Number(r.speedKmh) || 0))
+      : 0;
+    const isPersonalBest = cleanSpeed > prevBestSpeed;
+
     const newRec = {
       id: `shot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       teamId: activeTeamId,
       playerId: finalPlayerId,
       playerName: finalPlayerName,
       birthYear: finalBirthYear,
-      speedKmh: Number(spd.toFixed(1)),
+      speedKmh: cleanSpeed,
       distanceM: shootGateDistanceM,
-      elapsedMs: Math.round((shootGateDistanceM / (spd / 3.6)) * 1000),
+      elapsedMs: Math.round((shootGateDistanceM / (cleanSpeed / 3.6)) * 1000),
       direction: 'ltr',
       footType: shootManualModal.footType || '오른발',
       mode: 'manual',
@@ -3757,11 +3775,22 @@ export default function App() {
       createdAt: new Date().toISOString()
     };
 
+    const updatedRecords = [newRec, ...savedShootRecords];
+    const bestByPlayer = {};
+    updatedRecords.forEach(r => {
+      const k = r.playerId ? `id_${r.playerId}` : `name_${r.playerName}`;
+      const s = Number(r.speedKmh) || 0;
+      if (!bestByPlayer[k] || s > bestByPlayer[k]) bestByPlayer[k] = s;
+    });
+    const myKey = finalPlayerId ? `id_${finalPlayerId}` : `name_${finalPlayerName}`;
+    const sortedBest = Object.entries(bestByPlayer).sort((a, b) => b[1] - a[1]);
+    const computedRank = sortedBest.findIndex(([k]) => k === myKey) + 1;
+
     setIsProcessing(true);
     try {
-      await persistShootRecordList([newRec, ...savedShootRecords]);
+      await persistShootRecordList(updatedRecords);
       setShootManualModal({ isOpen: false, speedKmh: '', playerId: '', customPlayerName: '', footType: '오른발' });
-      setShootLastResult({ ...newRec, rank: 1, isPersonalBest: true, saved: true });
+      setShootLastResult({ ...newRec, rank: computedRank > 0 ? computedRank : 1, isPersonalBest, saved: true });
     } finally {
       setIsProcessing(false);
     }
@@ -7717,268 +7746,5 @@ const renderGoalFlowModal = () => {
               <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
                 <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black flex items-center justify-center shrink-0">3</div>
                 <div className="min-w-0 flex-1">
-                  <div className="font-bold text-white mb-0.5">선수 선택 후 슈팅! (자동 기록 & 랭킹 반영)</div>
-                  측정할 선수를 선택하고 <strong className="text-rose-400">[📷 카메라 켜기]</strong>를 누른 뒤 공을 차세요. 두 레이저 선을 통과하는 즉시 구속이 계산되며 <strong className="text-emerald-400">명예의 전당(팀 랭킹)에 자동 업데이트</strong>됩니다!
-                </div>
-              </div>
-
-              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-[11px] text-emerald-200 space-y-1">
-                <strong className="text-emerald-400 block">💡 정확도를 100%로 높이는 꿀팁</strong>
-                <div>• 두 레이저 게이트 뒤쪽 배경에 다른 팀원이 걸어 다니지 않도록 비워주세요.</div>
-                <div>• 공을 차는 선수의 몸이 GATE 1 선을 직접 가리지 않도록, <strong>공을 놓는 지점을 GATE 1보다 한 걸음(약 1m) 바깥쪽</strong>에 두면 공만 깔끔하게 포착됩니다!</div>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setShootGuideModal(false)}
-              className="w-full mt-4 py-3 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-slate-950 font-black rounded-xl text-xs transition shrink-0 shadow"
-            >
-              가이드 확인 완료!
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ✏️ 슈팅 기록 선수/유형 편집 모달 */}
-      {shootEditModal.isOpen && shootEditModal.record && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[235] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
-          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl space-y-4">
-            <div className="flex justify-between items-center gap-2 min-w-0">
-              <h3 className="text-base font-black text-white flex items-center gap-2 truncate">
-                <Edit size={18} className="text-amber-400 shrink-0"/>
-                <span className="truncate">슈팅 기록 정보 수정 ({shootEditModal.record.speedKmh}km/h)</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShootEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', footType: '오른발' })}
-                className="text-slate-400 hover:text-white p-1 shrink-0"
-              >
-                <X size={20}/>
-              </button>
-            </div>
-
-            <form onSubmit={saveEditedShootRecord} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">👤 측정 선수</label>
-                <select
-                  value={shootEditModal.playerId}
-                  onChange={(e) => setShootEditModal(prev => ({ ...prev, playerId: e.target.value }))}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
-                >
-                  <option value="">미지정 선수</option>
-                  {currentTeamPlayers.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({formatBirthYear(p.birthYear)})</option>
-                  ))}
-                  <option value="__custom__">✍️ 이름 직접 입력...</option>
-                </select>
-                {shootEditModal.playerId === '__custom__' && (
-                  <input
-                    type="text"
-                    value={shootEditModal.customPlayerName}
-                    onChange={(e) => setShootEditModal(prev => ({ ...prev, customPlayerName: e.target.value }))}
-                    placeholder="선수 이름 직접 입력"
-                    className="w-full mt-2 bg-slate-900 border border-amber-500/50 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
-                  />
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">👟 슈팅 유형</label>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {['오른발', '왼발', '발리/논스톱', '프리킥'].map(ft => (
-                    <button
-                      key={ft}
-                      type="button"
-                      onClick={() => setShootEditModal(prev => ({ ...prev, footType: ft }))}
-                      className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition truncate ${shootEditModal.footType === ft ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-900 text-slate-300 border-slate-700'}`}
-                    >
-                      {ft}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShootEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', footType: '오른발' })}
-                  className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs rounded-xl transition"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition shadow"
-                >
-                  💾 수정 완료
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ➕ 수기/외부 스피드건 슈팅 기록 추가 모달 */}
-      {shootManualModal.isOpen && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[235] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
-          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl space-y-4">
-            <div className="flex justify-between items-center gap-2 min-w-0">
-              <h3 className="text-base font-black text-white flex items-center gap-2 truncate">
-                <Plus size={18} className="text-amber-400 shrink-0"/>
-                <span className="truncate">슈팅 속도 수기 기록 등록</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShootManualModal({ isOpen: false, speedKmh: '', playerId: '', customPlayerName: '', footType: '오른발' })}
-                className="text-slate-400 hover:text-white p-1 shrink-0"
-              >
-                <X size={20}/>
-              </button>
-            </div>
-
-            <form onSubmit={saveManualShootRecord} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">⚡ 측정된 슈팅 속도 (km/h)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="15"
-                  max="190"
-                  required
-                  value={shootManualModal.speedKmh}
-                  onChange={(e) => setShootManualModal(prev => ({ ...prev, speedKmh: e.target.value }))}
-                  placeholder="예: 96.5"
-                  className="w-full bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2.5 text-sm font-black text-amber-400 outline-none"
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">👤 측정 선수</label>
-                <select
-                  value={shootManualModal.playerId}
-                  onChange={(e) => setShootManualModal(prev => ({ ...prev, playerId: e.target.value }))}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
-                >
-                  <option value="">미지정 선수</option>
-                  {currentTeamPlayers.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({formatBirthYear(p.birthYear)})</option>
-                  ))}
-                  <option value="__custom__">✍️ 이름 직접 입력...</option>
-                </select>
-                {shootManualModal.playerId === '__custom__' && (
-                  <input
-                    type="text"
-                    value={shootManualModal.customPlayerName}
-                    onChange={(e) => setShootManualModal(prev => ({ ...prev, customPlayerName: e.target.value }))}
-                    placeholder="선수 이름 직접 입력"
-                    className="w-full mt-2 bg-slate-900 border border-amber-500/50 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
-                  />
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">👟 슈팅 유형</label>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {['오른발', '왼발', '발리/논스톱', '프리킥'].map(ft => (
-                    <button
-                      key={ft}
-                      type="button"
-                      onClick={() => setShootManualModal(prev => ({ ...prev, footType: ft }))}
-                      className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition truncate ${shootManualModal.footType === ft ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-900 text-slate-300 border-slate-700'}`}
-                    >
-                      {ft}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShootManualModal({ isOpen: false, speedKmh: '', playerId: '', customPlayerName: '', footType: '오른발' })}
-                  className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs rounded-xl transition"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition shadow"
-                >
-                  💾 랭킹에 등록
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ⚡ 슈팅 스피드건 측정 가이드 모달 */}
-      {shootGuideModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[230] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
-          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[88vh] flex flex-col relative overflow-hidden">
-            <div className="flex justify-between items-center mb-3 shrink-0 gap-2 min-w-0">
-              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 min-w-0 truncate">
-                <span className="shrink-0">⚡</span>
-                <span className="truncate">가상 레이저 스피드건 측정 가이드</span>
-              </h2>
-              <button onClick={() => setShootGuideModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
-              {/* 원리 요약 다이어그램 박스 */}
-              <div className="bg-slate-950 border border-amber-500/30 rounded-2xl p-3 text-center space-y-1.5">
-                <div className="text-[11px] font-black text-amber-400">📡 가상 레이저 트랩(Optical Laser Trap) 원리</div>
-                <div className="bg-slate-900 rounded-xl p-2.5 border border-slate-800 font-mono text-[11px] text-slate-200">
-                  ⚽ ───► <span className="text-emerald-400 font-black">[GATE 1]</span> ◄── 3.0m ──► <span className="text-rose-400 font-black">[GATE 2]</span> ───► 🥅
-                </div>
-                <p className="text-[11px] text-slate-400 leading-snug">
-                  고속 카메라 프레임에서 축구공이 <strong className="text-emerald-400">GATE 1</strong>과 <strong className="text-rose-400">GATE 2</strong> 레이저 라인을 통과할 때의 <strong className="text-white">픽셀 변화 시점 차이(Δt)</strong>를 정밀 보간하여 시속(km/h)을 즉시 계산합니다.
-                </p>
-              </div>
-
-              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black flex items-center justify-center shrink-0">1</div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-bold text-white mb-0.5">스마트폰을 슈팅 경로 측면(90°)에 고정</div>
-                  공이 날아가는 라인에서 옆으로 <strong className="text-amber-300">약 4~6m 떨어진 측면</strong>에 스마트폰을 가로/세로로 세워 고정하세요. (삼각대, 벤치, 물병 거치 권장! 카메라가 흔들리지 않아야 정확합니다.)
-                </div>
-              </div>
-
-              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black flex items-center justify-center shrink-0">2</div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-bold text-white mb-0.5">두 레이저 게이트 간 실제 거리(m) 맞추기</div>
-                  화면에 표시된 <strong className="text-emerald-400">GATE 1</strong>과 <strong className="text-emerald-400">GATE 2</strong> 선이 바닥의 콘(마커) 2개 위치나 페널티박스 간격(권장 <strong className="text-white">3.0m</strong>, 큰 걸음 3~4보)과 일치하도록 거리를 맞추세요.
-                </div>
-              </div>
-
-              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black flex items-center justify-center shrink-0">3</div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-bold text-white mb-0.5">선수 선택 후 슈팅! (자동 기록 & 랭킹 반영)</div>
-                  측정할 선수를 선택하고 <strong className="text-rose-400">[📷 카메라 켜기]</strong>를 누른 뒤 공을 차세요. 두 레이저 선을 통과하는 즉시 구속이 계산되며 <strong className="text-emerald-400">명예의 전당(팀 랭킹)에 자동 업데이트</strong>됩니다!
-                </div>
-              </div>
-
-              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-[11px] text-emerald-200 space-y-1">
-                <strong className="text-emerald-400 block">💡 정확도를 100%로 높이는 꿀팁</strong>
-                <div>• 두 레이저 게이트 뒤쪽 배경에 다른 팀원이 걸어 다니지 않도록 비워주세요.</div>
-                <div>• 공을 차는 선수의 몸이 GATE 1 선을 직접 가리지 않도록, <strong>공을 놓는 지점을 GATE 1보다 한 걸음(약 1m) 바깥쪽</strong>에 두면 공만 깔끔하게 포착됩니다!</div>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setShootGuideModal(false)}
-              className="w-full mt-4 py-3 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-slate-950 font-black rounded-xl text-xs transition shrink-0 shadow"
-            >
-              가이드 확인 완료!
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ✏️ 슈팅 기록 선수/유형 편
+                  <div className="font-bold text-white mb-0.
 ... [truncated for diff preview]
