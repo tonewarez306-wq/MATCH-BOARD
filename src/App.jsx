@@ -378,7 +378,8 @@ export default function App() {
   const [shootFootType, setShootFootType] = useState('오른발'); // '오른발' | '왼발' | '발리/논스톱' | '프리킥'
   const [shootAutoSave, setShootAutoSave] = useState(true);
   const [shootSoundEnabled, setShootSoundEnabled] = useState(true);
-  const [shootTrapStatus, setShootTrapStatus] = useState('idle'); // 'idle' | 'ready' | 'armed_gate1' | 'measured' | 'shake_warn'
+  const [isShootTrapLocked, setIsShootTrapLocked] = useState(false); // 카메라 조준/거치 중 오작동 방지 수동 잠금 토글
+  const [shootTrapStatus, setShootTrapStatus] = useState('idle'); // 'idle' | 'stabilizing' | 'ready' | 'armed_gate1' | 'measured' | 'shake_warn' | 'locked'
   const [shootLastResult, setShootLastResult] = useState(null);
   const [shootEditModal, setShootEditModal] = useState({ isOpen: false, record: null, playerId: '', customPlayerName: '', footType: '오른발' });
   const [shootManualModal, setShootManualModal] = useState({ isOpen: false, speedKmh: '', playerId: '', customPlayerName: '', footType: '오른발' });
@@ -405,7 +406,9 @@ export default function App() {
     prevScoreA: 0,
     prevScoreB: 0,
     prevFrameTs: 0,
-    shakeWarnUntilMs: 0
+    shakeWarnUntilMs: 0,
+    stableSinceMs: 0,
+    globalMotion: 0
   });
 
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
@@ -3208,6 +3211,7 @@ export default function App() {
         }
       } catch {}
 
+      const initNow = performance.now();
       shootTrapRuntimeRef.current = {
         prevFrameData: null,
         state: 'ready',
@@ -3219,16 +3223,19 @@ export default function App() {
         lastShotDir: 'ltr',
         lastShotSpeed: 0,
         lastShotAtMs: 0,
-        cooldownUntilMs: performance.now() + 500,
+        cooldownUntilMs: initNow + 1200,
         scoreA: 0,
         scoreB: 0,
         prevScoreA: 0,
         prevScoreB: 0,
-        prevFrameTs: performance.now(),
-        shakeWarnUntilMs: 0
+        prevFrameTs: initNow,
+        shakeWarnUntilMs: 0,
+        stableSinceMs: initNow,
+        globalMotion: 0
       };
       setIsShootCameraActive(true);
-      setShootTrapStatus('ready');
+      setIsShootTrapLocked(false);
+      setShootTrapStatus('stabilizing');
     } catch (err) {
       console.error('Camera error:', err);
       setSystemAlert({
@@ -3334,15 +3341,18 @@ export default function App() {
           const frameData = procCtx.getImageData(0, 0, procW, procH).data;
           const prevData = rt.prevFrameData;
 
-          const pixelDiffThreshold = shootSensitivity === 'high' ? 22 : shootSensitivity === 'low' ? 36 : 28;
-          const gateTriggerScore = shootSensitivity === 'high' ? 14 : shootSensitivity === 'low' ? 27 : 19;
+          const pixelDiffThreshold = shootSensitivity === 'high' ? 26 : shootSensitivity === 'low' ? 42 : 33;
+          const gateTriggerScore = shootSensitivity === 'high' ? 18 : shootSensitivity === 'low' ? 32 : 24;
+          const maxShakeAvg = shootSensitivity === 'high' ? 6.2 : shootSensitivity === 'low' ? 4.2 : 5.0;
+          const maxShakyBgRatio = shootSensitivity === 'high' ? 0.09 : shootSensitivity === 'low' ? 0.055 : 0.07;
 
           if (prevData && prevData.length === frameData.length) {
-            // 전체 화면 흔들림(카메라 이동) 체크용 배경 샘플링
+            // 전체 화면 흔들림(손떨림·카메라 이동·패닝) 정밀 체크용 고밀도 배경 그리드 샘플링
             let globalDiffSum = 0;
             let globalSamples = 0;
-            for (let gy = 10; gy < procH - 10; gy += 16) {
-              for (let gx = 12; gx < procW - 12; gx += 20) {
+            let shakyBgPoints = 0;
+            for (let gy = 8; gy < procH - 8; gy += 10) {
+              for (let gx = 8; gx < procW - 8; gx += 12) {
                 const idx = (gy * procW + gx) * 4;
                 const d = (
                   Math.abs(frameData[idx] - prevData[idx]) +
@@ -3351,20 +3361,27 @@ export default function App() {
                 ) / 3;
                 globalDiffSum += d;
                 globalSamples++;
+                if (d >= 13) shakyBgPoints++;
               }
             }
             const globalMotionAvg = globalSamples > 0 ? globalDiffSum / globalSamples : 0;
+            const shakyBgRatio = globalSamples > 0 ? shakyBgPoints / globalSamples : 0;
+            rt.globalMotion = globalMotionAvg;
 
             const measureGateStrip = (centerXFrac) => {
               const cx = Math.round(procW * centerXFrac);
               const yStart = Math.round(procH * yMinFrac);
               const yEnd = Math.round(procH * yMaxFrac);
+              const totalRows = Math.max(1, yEnd - yStart + 1);
               let activePixels = 0;
+              let activeRows = 0;
               let weightedYSum = 0;
               let weightSum = 0;
               let totalStripPixels = 0;
+              const rowActiveCounts = new Uint8Array(totalRows);
 
               for (let y = yStart; y <= yEnd; y++) {
+                let rowHits = 0;
                 for (let dx = -2; dx <= 2; dx++) {
                   const x = cx + dx;
                   const idx = (y * procW + x) * 4;
@@ -3376,107 +3393,177 @@ export default function App() {
                   totalStripPixels++;
                   if (diff >= pixelDiffThreshold) {
                     activePixels++;
+                    rowHits++;
                     weightedYSum += (y / procH) * diff;
                     weightSum += diff;
                   }
                 }
+                rowActiveCounts[y - yStart] = rowHits;
+                if (rowHits >= 2) activeRows++;
               }
 
-              // 유효 축구공 크기 비율을 0~100 감도 점수로 환산
-              const ratio = totalStripPixels > 0 ? activePixels / totalStripPixels : 0;
-              const score = Math.min(100, Math.round(ratio * 420));
               const centerY = weightSum > 0 ? (weightedYSum / weightSum) : 0.5;
-              return { score, centerY };
+              // 중심점(centerY) 주변 ±15% 반경 내에 변화 픽셀이 얼마나 뭉쳐 있는지(축구공 형태 밀집도) 계산
+              let clusterPixels = 0;
+              for (let y = yStart; y <= yEnd; y++) {
+                if (Math.abs((y / procH) - centerY) <= 0.15) {
+                  clusterPixels += rowActiveCounts[y - yStart];
+                }
+              }
+              const clusterRatio = activePixels > 0 ? (clusterPixels / activePixels) : 0;
+              const activeRowRatio = activeRows / totalRows;
+
+              // 유효 축구공 판별: 세로줄 전체가 흔들리거나(>40%) 위아래로 흩어진 엣지(<70% 밀집도)는 공이 아님
+              const isBallBlob = activePixels >= 6 && activeRowRatio >= 0.05 && activeRowRatio <= 0.40 && clusterRatio >= 0.70;
+              const isFullLineShake = activeRowRatio > 0.42 || (activePixels >= 10 && clusterRatio < 0.58);
+
+              const ratio = totalStripPixels > 0 ? activePixels / totalStripPixels : 0;
+              const rawScore = Math.min(100, Math.round(ratio * 420));
+              const score = isBallBlob ? rawScore : Math.min(rawScore, Math.round(rawScore * 0.35));
+              return { score, rawScore, centerY, isBallBlob, isFullLineShake };
             };
 
             const resA = measureGateStrip(gateAXFrac);
             const resB = measureGateStrip(gateBXFrac);
+            const resGuardL = measureGateStrip(0.08);
+            const resGuardMid = measureGateStrip(0.50);
+            const resGuardR = measureGateStrip(0.92);
+            const guardMaxRaw = Math.max(resGuardL.rawScore, resGuardMid.rawScore, resGuardR.rawScore);
 
             rt.prevScoreA = rt.scoreA;
             rt.prevScoreB = rt.scoreB;
             rt.scoreA = resA.score;
             rt.scoreB = resB.score;
-
-            // 카메라 전체 흔들림 방지 필터
-            if (globalMotionAvg > 36 && resA.score > gateTriggerScore && resB.score > gateTriggerScore) {
-              rt.shakeWarnUntilMs = nowMs + 900;
+            // 1) 수동 조준 잠금 상태인 경우 모든 트리거 차단
+            if (isShootTrapLocked) {
               rt.state = 'ready';
               rt.startGate = null;
-              setShootTrapStatus('shake_warn');
-            } else if (nowMs < rt.cooldownUntilMs) {
-              // 측정 직후 쿨다운 구간
+              rt.stableSinceMs = nowMs;
+              setShootTrapStatus('locked');
             } else {
-              if (rt.state === 'cooldown') {
+              // 2) 미세 손떨림·배경 패닝·초점 이동 정밀 차단 필터
+              // - 배경 격자 평균 변화(globalMotionAvg) 또는 흔들린 배경 비율(shakyBgRatio) 초과
+              // - 게이트 라인 전체가 동시에 흔들리는 수직선 엣지 이동(isFullLineShake)
+              // - 게이트 외부 기준선(guardMaxRaw) 동시 반응 또는 두 게이트 동시 반응
+              const isCameraShaking =
+                globalMotionAvg > maxShakeAvg ||
+                shakyBgRatio > maxShakyBgRatio ||
+                resA.isFullLineShake ||
+                resB.isFullLineShake ||
+                guardMaxRaw >= gateTriggerScore * 0.65 ||
+                (resA.rawScore >= gateTriggerScore * 0.7 && resB.rawScore >= gateTriggerScore * 0.7);
+
+              if (isCameraShaking) {
+                rt.stableSinceMs = nowMs;
+                rt.shakeWarnUntilMs = nowMs + 850;
                 rt.state = 'ready';
-                setShootTrapStatus('ready');
-              }
-
-              // 최소/최대 유효 통과 시간 (20km/h ~ 160km/h)
-              const minValidMs = Math.max(22, (shootGateDistanceM / (160 / 3.6)) * 1000);
-              const maxValidMs = (shootGateDistanceM / (20 / 3.6)) * 1000;
-
-              if (rt.state === 'ready') {
-                const canTriggerA = (shootDirectionMode === 'auto' || shootDirectionMode === 'ltr') &&
-                  resA.score >= gateTriggerScore && resB.score < gateTriggerScore * 0.65;
-                const canTriggerB = (shootDirectionMode === 'auto' || shootDirectionMode === 'rtl') &&
-                  resB.score >= gateTriggerScore && resA.score < gateTriggerScore * 0.65;
-
-                if (canTriggerA || canTriggerB) {
-                  const chosenGate = canTriggerA ? 'A' : 'B';
-                  const curScore = chosenGate === 'A' ? resA.score : resB.score;
-                  const prevScore = chosenGate === 'A' ? rt.prevScoreA : rt.prevScoreB;
-                  const frameDt = Math.max(4, Math.min(50, nowMs - (rt.prevFrameTs || (nowMs - 16))));
-                  // 서브프레임 보간으로 정밀 통과 시각 추정
-                  const frac = curScore > prevScore
-                    ? Math.max(0, Math.min(1, (gateTriggerScore - prevScore) / Math.max(1, curScore - prevScore)))
-                    : 0.5;
-                  rt.startGate = chosenGate;
-                  rt.startTimeMs = (nowMs - frameDt) + frac * frameDt;
-                  rt.startY = chosenGate === 'A' ? resA.centerY : resB.centerY;
-                  rt.state = 'armed_gate1';
-                  setShootTrapStatus('armed_gate1');
-                  playShootRadarBeep('gate1');
-                }
-              } else if (rt.state === 'armed_gate1') {
-                const elapsedFromStart = nowMs - rt.startTimeMs;
-                if (elapsedFromStart > maxValidMs) {
-                  // 너무 느린 물체(사람 보행 등)는 자동 리셋하여 대기 상태 유지
+                rt.startGate = null;
+                rt.scoreA = 0;
+                rt.scoreB = 0;
+                setShootTrapStatus('shake_warn');
+              } else if (nowMs < rt.cooldownUntilMs) {
+                // 측정 직후 쿨다운 구간
+              } else if (nowMs < rt.shakeWarnUntilMs || (nowMs - (rt.stableSinceMs || 0)) < 850) {
+                // 카메라 이동 후 최소 0.85초간 완전히 정지 상태가 유지되어야 측정 대기 활성화
+                rt.state = 'ready';
+                rt.startGate = null;
+                const nextStatus = nowMs < rt.shakeWarnUntilMs ? 'shake_warn' : 'stabilizing';
+                setShootTrapStatus(prev => (prev !== nextStatus ? nextStatus : prev));
+              } else {
+                if (rt.state === 'cooldown') {
                   rt.state = 'ready';
-                  rt.startGate = null;
-                  setShootTrapStatus('ready');
-                } else {
-                  const targetIsB = rt.startGate === 'A';
-                  const targetScore = targetIsB ? resB.score : resA.score;
-                  const prevTargetScore = targetIsB ? rt.prevScoreB : rt.prevScoreA;
-                  const targetCenterY = targetIsB ? resB.centerY : resA.centerY;
+                }
+                setShootTrapStatus(prev =>
+                  prev === 'shake_warn' || prev === 'stabilizing' || prev === 'locked' || (prev === 'measured' && rt.state === 'ready')
+                    ? 'ready'
+                    : prev
+                );
 
-                  if (targetScore >= gateTriggerScore && elapsedFromStart >= minValidMs) {
+                // 최소/최대 유효 통과 시간 (22km/h ~ 158km/h)
+                const minValidMs = Math.max(24, (shootGateDistanceM / (158 / 3.6)) * 1000);
+                const maxValidMs = (shootGateDistanceM / (22 / 3.6)) * 1000;
+
+                if (rt.state === 'ready') {
+                  // 게이트 1 진입 조건:
+                  // - 국소 원형 군집(isBallBlob === true)만 축구공으로 인정
+                  // - 반대편 게이트(rawScore <= 8)와 외부 가드 라인(guardMaxRaw <= 10)은 고요해야 함
+                  const canTriggerA = (shootDirectionMode === 'auto' || shootDirectionMode === 'ltr') &&
+                    resA.isBallBlob && resA.score >= gateTriggerScore && resB.rawScore <= 8 && guardMaxRaw <= 10;
+                  const canTriggerB = (shootDirectionMode === 'auto' || shootDirectionMode === 'rtl') &&
+                    resB.isBallBlob && resB.score >= gateTriggerScore && resA.rawScore <= 8 && guardMaxRaw <= 10;
+
+                  if (canTriggerA || canTriggerB) {
+                    const chosenGate = canTriggerA ? 'A' : 'B';
+                    const curScore = chosenGate === 'A' ? resA.score : resB.score;
+                    const prevScore = chosenGate === 'A' ? rt.prevScoreA : rt.prevScoreB;
                     const frameDt = Math.max(4, Math.min(50, nowMs - (rt.prevFrameTs || (nowMs - 16))));
-                    const frac = targetScore > prevTargetScore
-                      ? Math.max(0, Math.min(1, (gateTriggerScore - prevTargetScore) / Math.max(1, targetScore - prevTargetScore)))
+                    const frac = curScore > prevScore
+                      ? Math.max(0, Math.min(1, (gateTriggerScore - prevScore) / Math.max(1, curScore - prevScore)))
                       : 0.5;
-                    const exactEndTimeMs = (nowMs - frameDt) + frac * frameDt;
-                    const exactElapsedMs = Math.max(minValidMs, exactEndTimeMs - rt.startTimeMs);
-                    const calcSpeedKmh = (shootGateDistanceM / (exactElapsedMs / 1000)) * 3.6;
+                    rt.startGate = chosenGate;
+                    rt.startTimeMs = (nowMs - frameDt) + frac * frameDt;
+                    rt.startY = chosenGate === 'A' ? resA.centerY : resB.centerY;
+                    rt.state = 'armed_gate1';
+                    setShootTrapStatus('armed_gate1');
+                    playShootRadarBeep('gate1');
+                  }
+                } else if (rt.state === 'armed_gate1') {
+                  const elapsedFromStart = nowMs - rt.startTimeMs;
+                  if (elapsedFromStart > maxValidMs) {
+                    // 너무 느린 물체(보행자 등)는 자동 리셋
+                    rt.state = 'ready';
+                    rt.startGate = null;
+                    setShootTrapStatus('ready');
+                  } else {
+                    const targetIsB = rt.startGate === 'A';
+                    const targetRes = targetIsB ? resB : resA;
+                    const startGateNowRaw = targetIsB ? resA.rawScore : resB.rawScore;
+                    const targetScore = targetRes.score;
+                    const prevTargetScore = targetIsB ? rt.prevScoreB : rt.prevScoreA;
+                    const targetCenterY = targetRes.centerY;
 
-                    if (calcSpeedKmh >= 20 && calcSpeedKmh <= 160) {
-                      rt.lastShotStartY = rt.startY;
-                      rt.lastShotEndY = targetCenterY;
-                      rt.lastShotDir = targetIsB ? 'ltr' : 'rtl';
-                      rt.lastShotSpeed = Number(calcSpeedKmh.toFixed(1));
-                      rt.lastShotAtMs = nowMs;
-                      rt.cooldownUntilMs = nowMs + 1400;
-                      rt.state = 'cooldown';
-                      rt.startGate = null;
+                    // 게이트 2 통과 조건:
+                    // - 게이트 2에서도 축구공 형태(targetRes.isBallBlob)여야 함
+                    // - 출발 게이트에서는 공이 이미 빠져나가 변화량이 줄어든 상태여야 함 (카메라 패닝 완벽 배제)
+                    // - 수직 궤적 편차(startY vs targetCenterY)가 0.32 이내여야 함
+                    const isTrajectoryValid = Math.abs(targetCenterY - (rt.startY || 0.5)) <= 0.32;
+                    const hasClearedStartGate = startGateNowRaw < targetScore * 0.55;
 
-                      if (handleShotMeasuredRef.current) {
-                        handleShotMeasuredRef.current({
-                          speedKmh: Number(calcSpeedKmh.toFixed(1)),
-                          elapsedMs: Math.round(exactElapsedMs),
-                          distanceM: shootGateDistanceM,
-                          direction: targetIsB ? 'ltr' : 'rtl',
-                          mode: 'laser'
-                        });
+                    if (
+                      targetRes.isBallBlob &&
+                      targetScore >= gateTriggerScore &&
+                      hasClearedStartGate &&
+                      isTrajectoryValid &&
+                      guardMaxRaw <= 12 &&
+                      elapsedFromStart >= minValidMs
+                    ) {
+                      const frameDt = Math.max(4, Math.min(50, nowMs - (rt.prevFrameTs || (nowMs - 16))));
+                      const frac = targetScore > prevTargetScore
+                        ? Math.max(0, Math.min(1, (gateTriggerScore - prevTargetScore) / Math.max(1, targetScore - prevTargetScore)))
+                        : 0.5;
+                      const exactEndTimeMs = (nowMs - frameDt) + frac * frameDt;
+                      const exactElapsedMs = Math.max(minValidMs, exactEndTimeMs - rt.startTimeMs);
+                      const calcSpeedKmh = (shootGateDistanceM / (exactElapsedMs / 1000)) * 3.6;
+
+                      if (calcSpeedKmh >= 22 && calcSpeedKmh <= 158) {
+                        rt.lastShotStartY = rt.startY;
+                        rt.lastShotEndY = targetCenterY;
+                        rt.lastShotDir = targetIsB ? 'ltr' : 'rtl';
+                        rt.lastShotSpeed = Number(calcSpeedKmh.toFixed(1));
+                        rt.lastShotAtMs = nowMs;
+                        rt.cooldownUntilMs = nowMs + 1500;
+                        rt.state = 'cooldown';
+                        rt.startGate = null;
+
+                        if (handleShotMeasuredRef.current) {
+                          handleShotMeasuredRef.current({
+                            speedKmh: Number(calcSpeedKmh.toFixed(1)),
+                            elapsedMs: Math.round(exactElapsedMs),
+                            distanceM: shootGateDistanceM,
+                            direction: targetIsB ? 'ltr' : 'rtl',
+                            mode: 'laser'
+                          });
+                        }
                       }
                     }
                   }
@@ -3646,7 +3733,7 @@ export default function App() {
       isCancelled = true;
       if (shootRafRef.current) cancelAnimationFrame(shootRafRef.current);
     };
-  }, [appState, activeTab, recordSubTab, isShootCameraActive, shootGateDistanceM, shootSensitivity, shootDirectionMode]);
+  }, [appState, activeTab, recordSubTab, isShootCameraActive, shootGateDistanceM, shootSensitivity, shootDirectionMode, isShootTrapLocked]);
 
   const saveLastShotManually = async () => {
     if (!shootLastResult || shootLastResult.saved || !activeTeamId || isProcessing) return;
@@ -3658,6 +3745,23 @@ export default function App() {
       setSystemAlert({ isOpen: true, message: `${shootLastResult.playerName} 선수의 ${shootLastResult.speedKmh}km/h 슈팅 기록이 저장되었습니다!` });
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const cancelLastMeasuredShot = async () => {
+    if (!shootLastResult || isProcessing) return;
+    const targetId = shootLastResult.id;
+    const wasSaved = shootLastResult.saved;
+    setShootLastResult(null);
+    setShootTrapStatus(isShootCameraActive ? (isShootTrapLocked ? 'locked' : 'ready') : 'idle');
+    if (wasSaved && activeTeamId) {
+      setIsProcessing(true);
+      try {
+        const updated = savedShootRecords.filter(r => r.id !== targetId);
+        await persistShootRecordList(updated);
+      } finally {
+        setIsProcessing(false);
+      }
     }
   };
 
@@ -7227,13 +7331,17 @@ const renderGoalFlowModal = () => {
                           shootTrapStatus === 'measured' ? 'bg-rose-500 animate-ping' :
                           shootTrapStatus === 'armed_gate1' ? 'bg-amber-400 animate-pulse' :
                           shootTrapStatus === 'shake_warn' ? 'bg-orange-500 animate-bounce' :
+                          shootTrapStatus === 'stabilizing' ? 'bg-yellow-400 animate-pulse' :
+                          shootTrapStatus === 'locked' ? 'bg-sky-400' :
                           isShootCameraActive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
                         }`} />
                         <span className="text-[11px] font-black tracking-wide truncate text-slate-200">
                           {shootTrapStatus === 'measured' ? '🔴 SHOT DETECTED! (구속 측정 완료)' :
                            shootTrapStatus === 'armed_gate1' ? '🟡 GATE 1 통과! (GATE 2 감지 중...)' :
-                           shootTrapStatus === 'shake_warn' ? '🟠 카메라 흔들림 감지 (기기를 고정하세요)' :
-                           isShootCameraActive ? '🟢 LASER TRAP ARMED (실시간 감지 대기중)' : '⚪ STANDBY (카메라를 켜거나 시뮬레이션 실행)'}
+                           shootTrapStatus === 'shake_warn' ? '🟠 카메라 흔들림 감지됨 (오작동 자동 차단중)' :
+                           shootTrapStatus === 'stabilizing' ? '🟡 카메라 안정화 확인 중... (잠시 고정하세요)' :
+                           shootTrapStatus === 'locked' ? '🔒 조준 잠금됨 (구도 맞춘 후 잠금 해제)' :
+                           isShootCameraActive ? '🟢 LASER TRAP ARMED (흔들림 없음 · 슈팅 대기중)' : '⚪ STANDBY (카메라를 켜거나 시뮬레이션 실행)'}
                         </span>
                       </div>
                       {shootLastResult && (
@@ -7267,7 +7375,7 @@ const renderGoalFlowModal = () => {
                       ) : (
                         <div className="text-right text-[11px] text-slate-500 font-bold shrink-0">
                           레이저 간격 {shootGateDistanceM.toFixed(1)}m<br/>
-                          <span className="text-[10px] text-slate-600">20~160km/h 자동 포착</span>
+                          <span className="text-[10px] text-slate-600">손떨림 자동 차단 필터 적용</span>
                         </div>
                       )}
                     </div>
@@ -7295,21 +7403,34 @@ const renderGoalFlowModal = () => {
                         <div className="bg-slate-900/85 border border-slate-700/80 px-4 py-2.5 rounded-2xl shadow-lg max-w-[260px]">
                           <div className="text-xs font-black text-emerald-400 mb-0.5">🎯 이중 가상 레이저 트랩 (GATE 1 · 2)</div>
                           <div className="text-[11px] text-slate-300 leading-snug">
-                            카메라를 켜고 두 레이저 선 사이로 공을 차면 픽셀 변화를 감지해 구속을 즉시 계산합니다.
+                            카메라를 켜고 두 레이저 선 사이로 공을 차면 손떨림은 무시하고 축구공 구속만 정밀 계산합니다.
                           </div>
                         </div>
                       </div>
                     )}
 
-                    {/* 카메라 활성화 시 우측 상단 전/후면 전환 버튼 */}
+                    {/* 카메라 활성화 시 좌측 상단 조준 잠금 토글 & 우측 상단 전/후면 전환 버튼 */}
                     {isShootCameraActive && (
-                      <button
-                        type="button"
-                        onClick={toggleShootFacingMode}
-                        className="absolute top-2.5 right-2.5 bg-slate-900/85 hover:bg-slate-800 text-white border border-slate-600 px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 shadow-lg z-10"
-                      >
-                        🔄 {shootFacingMode === 'environment' ? '후면 카메라' : '전면 카메라'}
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setIsShootTrapLocked(prev => !prev)}
+                          className={`absolute top-2.5 left-2.5 px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1 shadow-lg z-10 border transition ${
+                            isShootTrapLocked
+                              ? 'bg-sky-600/95 hover:bg-sky-500 text-white border-sky-300'
+                              : 'bg-slate-900/85 hover:bg-slate-800 text-emerald-300 border-emerald-500/40'
+                          }`}
+                        >
+                          {isShootTrapLocked ? '🔒 조준 잠금됨 (터치해 측정 재개)' : '🎯 측정 활성 (구도 이동 시 잠금)'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={toggleShootFacingMode}
+                          className="absolute top-2.5 right-2.5 bg-slate-900/85 hover:bg-slate-800 text-white border border-slate-600 px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 shadow-lg z-10"
+                        >
+                          🔄 {shootFacingMode === 'environment' ? '후면 카메라' : '전면 카메라'}
+                        </button>
+                      </>
                     )}
                   </div>
 
@@ -7444,6 +7565,14 @@ const renderGoalFlowModal = () => {
                             ✏️ 선수 변경
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={cancelLastMeasuredShot}
+                          className="px-2 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-lg text-[11px] font-bold transition whitespace-nowrap"
+                          title="방금 측정된 기록을 즉시 취소하고 삭제합니다"
+                        >
+                          🗑️ 오측정 취소
+                        </button>
                       </div>
                     </div>
                   </div>
