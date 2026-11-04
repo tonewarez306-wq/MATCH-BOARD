@@ -7746,5 +7746,495 @@ const renderGoalFlowModal = () => {
               <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
                 <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black flex items-center justify-center shrink-0">3</div>
                 <div className="min-w-0 flex-1">
-                  <div className="font-bold text-white mb-0.
-... [truncated for diff preview]
+                  <div className="font-bold text-white mb-0.5">선수만 슈팅 라인에 대기 & 배경 정리</div>
+                  게이트 선 뒤로 다른 선수나 사람이 지나가면 레이저가 먼저 반응할 수 있습니다. <strong className="text-emerald-400">GATE 1 바깥쪽(슈팅 출발 지점)</strong>에 공을 놓고 키커가 슈팅하도록 안내하세요.
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black flex items-center justify-center shrink-0">4</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-white mb-0.5">자동 측정 & 실시간 랭킹 보드 반영</div>
+                  공이 두 레이저 선을 통과하는 즉시 <strong className="text-amber-400">시속(km/h)과 등급(S~D)</strong>이 알림음과 함께 표시되며, <strong className="text-emerald-400">자동 저장 ON</strong> 상태에서는 팀 순위표(1위~N위)가 실시간으로 갱신됩니다!
+                </div>
+              </div>
+
+              <div className="bg-amber-950/30 border border-amber-500/30 rounded-2xl p-3 text-[11px] text-amber-200/90 space-y-1">
+                <div className="font-black text-amber-400">💡 정확도 높이는 꿀팁</div>
+                <div>• 주간 야외 구장에서는 <strong className="text-white">감도: 보통(M)</strong>, 어두운 야간 구장이나 흰색 공이 배경과 비슷할 때는 <strong className="text-white">감도: 민감(H)</strong>을 선택하세요.</div>
+                <div>• 공이 GATE 1 통과 후 발이나 몸이 함께 찍히지 않도록, <strong className="text-white">슈팅 임팩트 지점에서 최소 1m 이상 앞쪽</strong>에 GATE 1이 오도록 조준하세요.</div>
+              </div>
+            </div>
+
+            <button onClick={() => setShootGuideModal(false)} className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 py-3 rounded-xl font-black text-sm shadow-lg mt-3 shrink-0 transition">
+              가이드 확인 완료
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ⚡ 슈팅 기록 수정 모달 */}
+      {shootEditModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[230] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">✏️ 슈팅 측정 기록 수정</h2>
+              <button onClick={() => setShootEditModal(null)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+            </div>
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-[11px] text-slate-400 font-bold block mb-1">선수 선택</label>
+                <select
+                  value={shootEditModal.playerId || ''}
+                  onChange={(e) => {
+                    const pid = e.target.value;
+                    const found = roster.find(r => String(r.id) === String(pid));
+                    setShootEditModal({
+                      ...shootEditModal,
+                      playerId: pid,
+                      playerName: found ? found.name : shootEditModal.playerName
+                    });
+                  }}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-amber-500"
+                >
+                  <option value="">직접 이름 입력</option>
+                  {sortedRoster.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.pos || 'FP'})</option>
+                  ))}
+                </select>
+              </div>
+              {!shootEditModal.playerId && (
+                <div>
+                  <label className="text-[11px] text-slate-400 font-bold block mb-1">선수 이름</label>
+                  <input
+                    type="text"
+                    value={shootEditModal.playerName}
+                    onChange={(e) => setShootEditModal({ ...shootEditModal, playerName: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
+                  />
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] text-slate-400 font-bold block mb-1">측정 시속 (km/h)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={shootEditModal.speedKmh}
+                    onChange={(e) => setShootEditModal({ ...shootEditModal, speedKmh: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-amber-400 font-black outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-slate-400 font-bold block mb-1">주발 구분</label>
+                  <select
+                    value={shootEditModal.footType}
+                    onChange={(e) => setShootEditModal({ ...shootEditModal, footType: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
+                  >
+                    <option value="오른발">오른발</option>
+                    <option value="왼발">왼발</option>
+                    <option value="발리/기타">발리/기타</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400 font-bold block mb-1">측정 일자</label>
+                <input
+                  type="date"
+                  value={shootEditModal.dateStr}
+                  onChange={(e) => setShootEditModal({ ...shootEditModal, dateStr: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400 font-bold block mb-1">메모 (선택)</label>
+                <input
+                  type="text"
+                  value={shootEditModal.note}
+                  onChange={(e) => setShootEditModal({ ...shootEditModal, note: e.target.value })}
+                  placeholder="예: 페널티 아크 정면 인스텝 슛"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setShootEditModal(null)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 py-2.5 rounded-xl font-bold text-xs">취소</button>
+              <button onClick={handleSaveEditedShootRecord} className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 py-2.5 rounded-xl font-black text-xs shadow-lg">저장하기</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ⚡ 슈팅 기록 수동 등록 모달 (외부 스피드건 또는 수기 입력용) */}
+      {shootManualModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[230] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">➕ 슈팅 속도 수동 기록 등록</h2>
+              <button onClick={() => setShootManualModal(null)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+            </div>
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-[11px] text-slate-400 font-bold block mb-1">선수 선택</label>
+                <select
+                  value={shootManualModal.playerId || ''}
+                  onChange={(e) => setShootManualModal({ ...shootManualModal, playerId: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-amber-500"
+                >
+                  <option value="">직접 이름 입력</option>
+                  {sortedRoster.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.pos || 'FP'})</option>
+                  ))}
+                </select>
+              </div>
+              {!shootManualModal.playerId && (
+                <div>
+                  <label className="text-[11px] text-slate-400 font-bold block mb-1">선수 이름</label>
+                  <input
+                    type="text"
+                    value={shootManualModal.customName}
+                    onChange={(e) => setShootManualModal({ ...shootManualModal, customName: e.target.value })}
+                    placeholder="이름 또는 게스트명 입력"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
+                  />
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] text-slate-400 font-bold block mb-1">측정 시속 (km/h)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="예: 98.5"
+                    value={shootManualModal.speedKmh}
+                    onChange={(e) => setShootManualModal({ ...shootManualModal, speedKmh: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-amber-400 font-black outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-slate-400 font-bold block mb-1">주발 구분</label>
+                  <select
+                    value={shootManualModal.footType}
+                    onChange={(e) => setShootManualModal({ ...shootManualModal, footType: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
+                  >
+                    <option value="오른발">오른발</option>
+                    <option value="왼발">왼발</option>
+                    <option value="발리/기타">발리/기타</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400 font-bold block mb-1">측정 일자</label>
+                <input
+                  type="date"
+                  value={shootManualModal.dateStr}
+                  onChange={(e) => setShootManualModal({ ...shootManualModal, dateStr: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400 font-bold block mb-1">메모 (선택)</label>
+                <input
+                  type="text"
+                  value={shootManualModal.note}
+                  onChange={(e) => setShootManualModal({ ...shootManualModal, note: e.target.value })}
+                  placeholder="예: 구장 스피드건 이벤트 측정"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setShootManualModal(null)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 py-2.5 rounded-xl font-bold text-xs">취소</button>
+              <button onClick={handleSaveManualShootRecord} className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 py-2.5 rounded-xl font-black text-xs shadow-lg">기록 등록</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 전술판 사용 가이드 튜토리얼 모달 */}
+      {tacticsTutorialModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[220] p-4 animate-in fade-in zoom-in-95">
+          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[85vh] flex flex-col relative">
+            <div className="flex justify-between items-center mb-4 shrink-0">
+              <h2 className="text-lg font-black text-white flex items-center gap-2">🎯 전술판 100% 활용 가이드</h2>
+              <button onClick={() => setTacticsTutorialModal(false)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1 hide-scrollbar text-xs leading-relaxed text-slate-300">
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                <div className="text-xl shrink-0">👆</div>
+                <div><div className="font-bold text-white mb-0.5">선수 배치 및 포지션 이동</div>상단 <strong className="text-blue-400">[이동]</strong> 모드에서 경기장 위 유니폼이나 축구공(⚽)을 드래그하여 원하는 위치에 배치하세요.</div>
+              </div>
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                <div className="text-xl shrink-0">✏️</div>
+                <div><div className="font-bold text-white mb-0.5">전술 펜슬 & 화살표 판서</div><strong className="text-yellow-400">[펜슬]</strong>은 자유로운 곡선을, <strong className="text-orange-400">[화살표]</strong>는 패스·침투 경로 직선을 그립니다.</div>
+              </div>
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                <div className="text-xl shrink-0">🎬</div>
+                <div><div className="font-bold text-white mb-0.5">전술 애니메이션 (프레임 재생)</div>하단의 <strong className="text-indigo-400">[+ 장면 추가]</strong>를 누른 뒤 선수와 공을 다음 위치로 이동시키세요. 이후 <strong className="text-emerald-400">[▶ 재생]</strong>을 누르면 전술 움직임이 스무스하게 재생됩니다!</div>
+              </div>
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                <div className="text-xl shrink-0">💾</div>
+                <div><div className="font-bold text-white mb-0.5">전술 저장 및 카톡 이미지 공유</div>우측 상단 <strong className="text-emerald-400">[전술 저장]</strong>으로 클라우드에 보관하거나 <strong className="text-indigo-400">[이미지 저장]</strong>으로 캡처해 단톡방에 공유할 수 있습니다.</div>
+              </div>
+            </div>
+            <button onClick={() => setTacticsTutorialModal(false)} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-black text-sm shadow-lg mt-4 shrink-0 transition">확인했습니다</button>
+          </div>
+        </div>
+      )}
+      {/* GPS 워치 연동 방법 가이드 모달 */}
+      {gpsGuideModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[220] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[85vh] flex flex-col relative overflow-hidden">
+            <div className="flex justify-between items-center mb-3 sm:mb-4 shrink-0 gap-2 min-w-0">
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 min-w-0 truncate"><span className="shrink-0">⌚</span><span className="truncate">스마트워치 GPX 연동 가이드</span></h2>
+              <button onClick={() => setGpsGuideModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
+            </div>
+            
+            <div className="flex gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-700 mb-3 sm:mb-4 shrink-0">
+              <button onClick={() => setGpsGuideBrand('galaxy')} className={`flex-1 py-2 rounded-lg text-[11px] font-black transition truncate px-1 ${gpsGuideBrand === 'galaxy' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>갤럭시 워치</button>
+              <button onClick={() => setGpsGuideBrand('apple')} className={`flex-1 py-2 rounded-lg text-[11px] font-black transition truncate px-1 ${gpsGuideBrand === 'apple' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>애플 워치</button>
+              <button onClick={() => setGpsGuideBrand('garmin')} className={`flex-1 py-2 rounded-lg text-[11px] font-black transition truncate px-1 ${gpsGuideBrand === 'garmin' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>가민 (Garmin)</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-2.5 sm:space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
+              {gpsGuideBrand === 'galaxy' && (
+                <>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-blue-600/20 text-blue-400 border border-blue-500/40 font-black flex items-center justify-center shrink-0">1</div>
+                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">워치에서 운동 기록 측정</div>갤럭시 워치에서 <strong className="text-blue-400">[축구]</strong> 또는 <strong className="text-blue-400">[달리기]</strong> 모드를 켜고 경기를 뜁니다. (GPS 위치 권한 필수)</div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-blue-600/20 text-blue-400 border border-blue-500/40 font-black flex items-center justify-center shrink-0">2</div>
+                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">삼성 헬스(Samsung Health) 앱 열기</div>스마트폰에서 <strong className="text-blue-400">삼성 헬스</strong> 앱 실행 후 방금 측정한 운동 기록 상세 화면으로 들어갑니다.</div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-blue-600/20 text-blue-400 border border-blue-500/40 font-black flex items-center justify-center shrink-0">3</div>
+                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">GPX 파일로 내보내기</div>우측 상단 <strong className="text-white">점 3개(⋮) 메뉴 → [GPX로 내보내기]</strong>를 눌러 휴대폰에 저장한 뒤, 본 화면의 <strong className="text-emerald-400">[GPX/TCX 업로드]</strong>로 불러오면 끝!</div>
+                  </div>
+                </>
+              )}
+
+              {gpsGuideBrand === 'apple' && (
+                <>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">1</div>
+                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">애플워치 실외 운동으로 기록</div>기본 피트니스 앱에서 <strong className="text-emerald-400">[실외 달리기]</strong> 등 GPS 경로가 남는 모드로 측정하거나, <strong className="text-emerald-400">WorkOutDoors</strong> 앱으로 측정합니다.</div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">2</div>
+                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">HealthFit 또는 GPX 변환 앱 활용</div>아이폰 기본 앱은 GPX 직접 추출 버튼이 없으므로 무료 앱 <strong className="text-emerald-400">[GPX Workout]</strong> 또는 <strong className="text-emerald-400">[HealthFit]</strong>에서 기록을 선택해 <strong className="text-white">GPX 내보내기(파일에 저장)</strong>를 실행합니다.</div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">3</div>
+                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">매치보드에 업로드</div>아이폰 파일 앱에 저장된 <strong className="text-white">.gpx 파일</strong>을 선택해 업로드하면 즉시 히트맵이 생성됩니다!</div>
+                  </div>
+                </>
+              )}
+
+              {gpsGuideBrand === 'garmin' && (
+                <>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-indigo-600/20 text-indigo-400 border border-indigo-500/40 font-black flex items-center justify-center shrink-0">1</div>
+                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">Garmin Connect 동기화</div>가민 워치로 경기 측정 후 스마트폰 <strong className="text-indigo-400">Garmin Connect</strong>와 동기화합니다.</div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-indigo-600/20 text-indigo-400 border border-indigo-500/40 font-black flex items-center justify-center shrink-0">2</div>
+                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">웹(브라우저)에서 GPX/TCX 내보내기</div>브라우저로 <strong className="text-white">connect.garmin.com</strong> 접속 → 해당 활동 클릭 → 우측 상단 <strong className="text-indigo-400">톱니바퀴(⚙️) → [GPX로 내보내기] 또는 [TCX로 내보내기]</strong>를 누르면 심박수까지 포함된 파일이 다운로드됩니다!</div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <button onClick={() => setGpsGuideModal(false)} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-black text-sm shadow-lg mt-4 shrink-0 transition">가이드 닫기</button>
+          </div>
+        </div>
+      )}
+      {/* 구장 커스텀 코너 등록 및 관리 모달 */}
+      {pitchManagerModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[220] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[85vh] flex flex-col relative overflow-hidden">
+            <div className="flex justify-between items-center mb-3 sm:mb-4 shrink-0 gap-2 min-w-0">
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 min-w-0 truncate"><MapPin size={18} className="text-blue-400 shrink-0"/> <span className="truncate">자주 뛰는 구장 캘리브레이션</span></h2>
+              <button onClick={() => setPitchManagerModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 sm:space-y-4 pr-0.5 hide-scrollbar text-xs">
+              <div className="bg-slate-900/90 border border-slate-700 p-3.5 rounded-2xl space-y-2.5">
+                <div className="font-black text-blue-400 text-[11px] flex items-center justify-between">
+                  <span>➕ 새 구장 코너 좌표 등록</span>
+                  {gpsData && <button onClick={handleAutoFillCornersFromGps} className="bg-emerald-950/60 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-md text-[10px] font-bold hover:bg-emerald-900/50 transition">현재 GPX 경계로 자동입력</button>}
+                </div>
+                <input
+                  type="text"
+                  value={newPitchName}
+                  onChange={(e) => setNewPitchName(e.target.value)}
+                  placeholder="구장 이름 (예: 탄천종합운동장 B구장)"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-bold outline-none focus:border-blue-500"
+                />
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  구글 지도나 네이버 지도에서 경기장 네 모서리(코너킥 지점)를 길게 눌러 위도, 경도를 복사해 넣으면 오차 없는 고정 규격 히트맵이 완성됩니다.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                    <div className="text-[11px] font-black text-slate-400">↖ 좌상단 (TL)</div>
+                    <input type="text" placeholder="위도 (예: 37.5123)" value={newPitchCorners.tlLat} onChange={e => setNewPitchCorners({...newPitchCorners, tlLat: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
+                    <input type="text" placeholder="경도 (예: 127.0123)" value={newPitchCorners.tlLon} onChange={e => setNewPitchCorners({...newPitchCorners, tlLon: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
+                  </div>
+                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                    <div className="text-[11px] font-black text-slate-400">↗ 우상단 (TR)</div>
+                    <input type="text" placeholder="위도 (Lat)" value={newPitchCorners.trLat} onChange={e => setNewPitchCorners({...newPitchCorners, trLat: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
+                    <input type="text" placeholder="경도 (Lon)" value={newPitchCorners.trLon} onChange={e => setNewPitchCorners({...newPitchCorners, trLon: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
+                  </div>
+                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                    <div className="text-[11px] font-black text-slate-400">↙ 좌하단 (BL)</div>
+                    <input type="text" placeholder="위도 (Lat)" value={newPitchCorners.blLat} onChange={e => setNewPitchCorners({...newPitchCorners, blLat: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
+                    <input type="text" placeholder="경도 (Lon)" value={newPitchCorners.blLon} onChange={e => setNewPitchCorners({...newPitchCorners, blLon: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
+                  </div>
+                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                    <div className="text-[11px] font-black text-slate-400">↘ 우하단 (BR)</div>
+                    <input type="text" placeholder="위도 (Lat)" value={newPitchCorners.brLat} onChange={e => setNewPitchCorners({...newPitchCorners, brLat: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
+                    <input type="text" placeholder="경도 (Lon)" value={newPitchCorners.brLon} onChange={e => setNewPitchCorners({...newPitchCorners, brLon: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
+                  </div>
+                </div>
+                <button onClick={handleSavePitchPreset} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl font-black text-xs shadow transition mt-1">구장 프리셋 저장</button>
+              </div>
+
+              <div className="space-y-2">
+                <div className="font-black text-slate-400 text-[11px]">📋 등록된 구장 목록 ({pitchPresets.length})</div>
+                {pitchPresets.length === 0 ? (
+                  <div className="text-center text-slate-500 py-4 bg-slate-900/50 rounded-xl border border-slate-800">등록된 커스텀 구장이 없습니다.</div>
+                ) : (
+                  pitchPresets.map(p => (
+                    <div key={p.id} className="bg-slate-900 border border-slate-700/80 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                      <div>
+                        <div className="font-bold text-white text-xs">{p.name}</div>
+                        <div className="text-[11px] text-slate-500">4코너 위경도 고정 규격</div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => { setSelectedPitchId(p.id); setPitchManagerModal(false); }} className="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-lg text-[10px] font-bold">적용</button>
+                        <button onClick={() => handleDeletePitchPreset(p.id, p.name)} className="bg-rose-950/50 text-rose-400 border border-rose-500/30 p-1.5 rounded-lg hover:bg-rose-900/50"><Trash2 size={13}/></button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <button onClick={() => setPitchManagerModal(false)} className="w-full bg-slate-700 hover:bg-slate-600 text-white py-2.5 rounded-xl font-black text-xs mt-4 shrink-0 transition">닫기</button>
+          </div>
+        </div>
+      )}
+      {/* GPS 아카이브 기록 수정 모달 */}
+      {gpsRecordEditModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[230] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">✏️ GPS 기록 정보 수정</h2>
+              <button onClick={() => setGpsRecordEditModal(null)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+            </div>
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-[11px] text-slate-400 font-bold block mb-1">선수 선택</label>
+                <select
+                  value={gpsRecordEditModal.playerId}
+                  onChange={(e) => setGpsRecordEditModal({ ...gpsRecordEditModal, playerId: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-emerald-500"
+                >
+                  <option value="">미지정 (게스트/공통)</option>
+                  {sortedRoster.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.pos || 'FP'})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400 font-bold block mb-1">경기 일자</label>
+                <input
+                  type="date"
+                  value={gpsRecordEditModal.dateStr}
+                  onChange={(e) => setGpsRecordEditModal({ ...gpsRecordEditModal, dateStr: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400 font-bold block mb-1">구분 / 쿼터명</label>
+                <input
+                  type="text"
+                  value={gpsRecordEditModal.quarterLabel}
+                  onChange={(e) => setGpsRecordEditModal({ ...gpsRecordEditModal, quarterLabel: e.target.value })}
+                  placeholder="예: 1쿼터, 2쿼터, 전반전, 전체"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400 font-bold block mb-1">적용 구장 규격</label>
+                <select
+                  value={gpsRecordEditModal.pitchId}
+                  onChange={(e) => setGpsRecordEditModal({ ...gpsRecordEditModal, pitchId: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-emerald-500"
+                >
+                  <option value="auto">자동 보정 (트랙 경계 기준)</option>
+                  {pitchPresets.map(p => (
+                    <option key={p.id} value={p.id}>📍 {p.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setGpsRecordEditModal(null)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 py-2.5 rounded-xl font-bold text-xs">취소</button>
+              <button onClick={handleSaveEditedGpsRecord} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-black text-xs shadow-lg">저장하기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Gemini API 키 설정 모달 */}
+      {geminiApiKeyModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[230] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl flex flex-col">
+            <div className="flex justify-between items-center mb-3 gap-2">
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">🔑 Gemini AI API 키 설정</h2>
+              <button onClick={() => setGeminiApiKeyModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed mb-3">
+              Google AI Studio(<span className="text-indigo-400 font-bold">aistudio.google.com</span>)에서 무료로 발급받은 Gemini API 키를 입력하면, 내 브라우저에 안전하게 저장되어 언제든 <strong className="text-indigo-300">Gemini 2.5 Flash 실시간 퍼포먼스 분석</strong>을 사용할 수 있습니다.
+            </p>
+            <input
+              type="password"
+              value={geminiApiKeyInput}
+              onChange={(e) => setGeminiApiKeyInput(e.target.value)}
+              placeholder="AIzaSy... 로 시작하는 API 키 입력"
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono outline-none focus:border-indigo-500 mb-4"
+            />
+            <div className="flex gap-2">
+              <button onClick={() => setGeminiApiKeyModal(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 py-2.5 rounded-xl font-bold text-xs">취소</button>
+              <button onClick={() => handleSaveGeminiApiKey(geminiApiKeyInput)} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl font-black text-xs shadow-lg">저장하기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 명예의 전당 모달 */}
+      {galleryModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[110] p-4 animate-in fade-in zoom-in-95">
+          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[85vh] flex flex-col">
+            <div className="flex justify-between items-center mb-4 shrink-0">
+              <h2 className="text-lg font-black text-white flex items-center gap-2"><Award className="text-yellow-400" size={22}/> 명예의 전당 & 기록실</h2>
+              <button onClick={() => setGalleryModal(false)} className="text-slate-400 hover:text-white"><X size={20}/></button>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1 hide-scrollbar text-center text-slate-400 text-sm py-10">
+              시즌 누적 데이터가 이곳에 표시됩니다.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renderDetailModal()}
+      {renderConfirmModal()}
+      {renderAlertModal()}
+      {renderJoinModal()}
+      {renderUniformModal()}
+      {renderSystemModals()}
+    </div>
+  );
+}
