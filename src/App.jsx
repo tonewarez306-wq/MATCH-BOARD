@@ -7773,467 +7773,806 @@ const renderGoalFlowModal = () => {
         </div>
       )}
 
-      {/* ⚡ 슈팅 기록 수정 모달 */}
-      {shootEditModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[230] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
-          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl flex flex-col">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">✏️ 슈팅 측정 기록 수정</h2>
-              <button onClick={() => setShootEditModal(null)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+      {/* ✏️ 슈팅 기록 선수/유형 편집 모달 */}
+      {shootEditModal.isOpen && shootEditModal.record && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[235] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center gap-2 min-w-0">
+              <h3 className="text-base font-black text-white flex items-center gap-2 truncate">
+                <Edit size={18} className="text-amber-400 shrink-0"/>
+                <span className="truncate">슈팅 기록 정보 수정 ({shootEditModal.record.speedKmh}km/h)</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShootEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', footType: '오른발' })}
+                className="text-slate-400 hover:text-white p-1 shrink-0"
+              >
+                <X size={20}/>
+              </button>
             </div>
-            <div className="space-y-3 text-xs">
+
+            <form onSubmit={saveEditedShootRecord} className="space-y-3.5">
               <div>
-                <label className="text-[11px] text-slate-400 font-bold block mb-1">선수 선택</label>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">👤 측정 선수</label>
                 <select
-                  value={shootEditModal.playerId || ''}
-                  onChange={(e) => {
-                    const pid = e.target.value;
-                    const found = roster.find(r => String(r.id) === String(pid));
-                    setShootEditModal({
-                      ...shootEditModal,
-                      playerId: pid,
-                      playerName: found ? found.name : shootEditModal.playerName
-                    });
-                  }}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-amber-500"
+                  value={shootEditModal.playerId}
+                  onChange={(e) => setShootEditModal(prev => ({ ...prev, playerId: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
                 >
-                  <option value="">직접 이름 입력</option>
-                  {sortedRoster.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.pos || 'FP'})</option>
+                  <option value="">미지정 선수</option>
+                  {currentTeamPlayers.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({formatBirthYear(p.birthYear)})</option>
                   ))}
+                  <option value="__custom__">✍️ 이름 직접 입력...</option>
                 </select>
-              </div>
-              {!shootEditModal.playerId && (
-                <div>
-                  <label className="text-[11px] text-slate-400 font-bold block mb-1">선수 이름</label>
+                {shootEditModal.playerId === '__custom__' && (
                   <input
                     type="text"
-                    value={shootEditModal.playerName}
-                    onChange={(e) => setShootEditModal({ ...shootEditModal, playerName: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
+                    value={shootEditModal.customPlayerName}
+                    onChange={(e) => setShootEditModal(prev => ({ ...prev, customPlayerName: e.target.value }))}
+                    placeholder="선수 이름 직접 입력"
+                    className="w-full mt-2 bg-slate-900 border border-amber-500/50 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
                   />
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[11px] text-slate-400 font-bold block mb-1">측정 시속 (km/h)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={shootEditModal.speedKmh}
-                    onChange={(e) => setShootEditModal({ ...shootEditModal, speedKmh: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-amber-400 font-black outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] text-slate-400 font-bold block mb-1">주발 구분</label>
-                  <select
-                    value={shootEditModal.footType}
-                    onChange={(e) => setShootEditModal({ ...shootEditModal, footType: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
-                  >
-                    <option value="오른발">오른발</option>
-                    <option value="왼발">왼발</option>
-                    <option value="발리/기타">발리/기타</option>
-                  </select>
-                </div>
+                )}
               </div>
+
               <div>
-                <label className="text-[11px] text-slate-400 font-bold block mb-1">측정 일자</label>
-                <input
-                  type="date"
-                  value={shootEditModal.dateStr}
-                  onChange={(e) => setShootEditModal({ ...shootEditModal, dateStr: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
-                />
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">👟 슈팅 유형</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {['오른발', '왼발', '발리/논스톱', '프리킥'].map(ft => (
+                    <button
+                      key={ft}
+                      type="button"
+                      onClick={() => setShootEditModal(prev => ({ ...prev, footType: ft }))}
+                      className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition truncate ${shootEditModal.footType === ft ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-900 text-slate-300 border-slate-700'}`}
+                    >
+                      {ft}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div>
-                <label className="text-[11px] text-slate-400 font-bold block mb-1">메모 (선택)</label>
-                <input
-                  type="text"
-                  value={shootEditModal.note}
-                  onChange={(e) => setShootEditModal({ ...shootEditModal, note: e.target.value })}
-                  placeholder="예: 페널티 아크 정면 인스텝 슛"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-amber-500"
-                />
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShootEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', footType: '오른발' })}
+                  className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs rounded-xl transition"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition shadow"
+                >
+                  💾 수정 완료
+                </button>
               </div>
-            </div>
-            <div className="flex gap-2 mt-5">
-              <button onClick={() => setShootEditModal(null)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 py-2.5 rounded-xl font-bold text-xs">취소</button>
-              <button onClick={handleSaveEditedShootRecord} className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 py-2.5 rounded-xl font-black text-xs shadow-lg">저장하기</button>
-            </div>
+            </form>
           </div>
         </div>
       )}
-      {/* ⚡ 슈팅 기록 수동 등록 모달 (외부 스피드건 또는 수기 입력용) */}
-      {shootManualModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[230] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
-          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl flex flex-col">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">➕ 슈팅 속도 수동 기록 등록</h2>
-              <button onClick={() => setShootManualModal(null)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+      {/* ➕ 수기/외부 스피드건 슈팅 기록 추가 모달 */}
+      {shootManualModal.isOpen && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[235] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center gap-2 min-w-0">
+              <h3 className="text-base font-black text-white flex items-center gap-2 truncate">
+                <Plus size={18} className="text-amber-400 shrink-0"/>
+                <span className="truncate">슈팅 속도 수기 기록 등록</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShootManualModal({ isOpen: false, speedKmh: '', playerId: '', customPlayerName: '', footType: '오른발' })}
+                className="text-slate-400 hover:text-white p-1 shrink-0"
+              >
+                <X size={20}/>
+              </button>
             </div>
-            <div className="space-y-3 text-xs">
+
+            <form onSubmit={saveManualShootRecord} className="space-y-3.5">
               <div>
-                <label className="text-[11px] text-slate-400 font-bold block mb-1">선수 선택</label>
-                <select
-                  value={shootManualModal.playerId || ''}
-                  onChange={(e) => setShootManualModal({ ...shootManualModal, playerId: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-amber-500"
-                >
-                  <option value="">직접 이름 입력</option>
-                  {sortedRoster.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.pos || 'FP'})</option>
-                  ))}
-                </select>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">⚡ 측정된 슈팅 속도 (km/h)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="15"
+                  max="190"
+                  required
+                  value={shootManualModal.speedKmh}
+                  onChange={(e) => setShootManualModal(prev => ({ ...prev, speedKmh: e.target.value }))}
+                  placeholder="예: 96.5"
+                  className="w-full bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2.5 text-sm font-black text-amber-400 outline-none"
+                  autoFocus
+                />
               </div>
-              {!shootManualModal.playerId && (
-                <div>
-                  <label className="text-[11px] text-slate-400 font-bold block mb-1">선수 이름</label>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">👤 측정 선수</label>
+                <select
+                  value={shootManualModal.playerId}
+                  onChange={(e) => setShootManualModal(prev => ({ ...prev, playerId: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
+                >
+                  <option value="">미지정 선수</option>
+                  {currentTeamPlayers.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({formatBirthYear(p.birthYear)})</option>
+                  ))}
+                  <option value="__custom__">✍️ 이름 직접 입력...</option>
+                </select>
+                {shootManualModal.playerId === '__custom__' && (
                   <input
                     type="text"
-                    value={shootManualModal.customName}
-                    onChange={(e) => setShootManualModal({ ...shootManualModal, customName: e.target.value })}
-                    placeholder="이름 또는 게스트명 입력"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
+                    value={shootManualModal.customPlayerName}
+                    onChange={(e) => setShootManualModal(prev => ({ ...prev, customPlayerName: e.target.value }))}
+                    placeholder="선수 이름 직접 입력"
+                    className="w-full mt-2 bg-slate-900 border border-amber-500/50 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
                   />
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[11px] text-slate-400 font-bold block mb-1">측정 시속 (km/h)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    placeholder="예: 98.5"
-                    value={shootManualModal.speedKmh}
-                    onChange={(e) => setShootManualModal({ ...shootManualModal, speedKmh: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-amber-400 font-black outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] text-slate-400 font-bold block mb-1">주발 구분</label>
-                  <select
-                    value={shootManualModal.footType}
-                    onChange={(e) => setShootManualModal({ ...shootManualModal, footType: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
-                  >
-                    <option value="오른발">오른발</option>
-                    <option value="왼발">왼발</option>
-                    <option value="발리/기타">발리/기타</option>
-                  </select>
-                </div>
+                )}
               </div>
+
               <div>
-                <label className="text-[11px] text-slate-400 font-bold block mb-1">측정 일자</label>
-                <input
-                  type="date"
-                  value={shootManualModal.dateStr}
-                  onChange={(e) => setShootManualModal({ ...shootManualModal, dateStr: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
-                />
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">👟 슈팅 유형</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {['오른발', '왼발', '발리/논스톱', '프리킥'].map(ft => (
+                    <button
+                      key={ft}
+                      type="button"
+                      onClick={() => setShootManualModal(prev => ({ ...prev, footType: ft }))}
+                      className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition truncate ${shootManualModal.footType === ft ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-900 text-slate-300 border-slate-700'}`}
+                    >
+                      {ft}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div>
-                <label className="text-[11px] text-slate-400 font-bold block mb-1">메모 (선택)</label>
-                <input
-                  type="text"
-                  value={shootManualModal.note}
-                  onChange={(e) => setShootManualModal({ ...shootManualModal, note: e.target.value })}
-                  placeholder="예: 구장 스피드건 이벤트 측정"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-amber-500"
-                />
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShootManualModal({ isOpen: false, speedKmh: '', playerId: '', customPlayerName: '', footType: '오른발' })}
+                  className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs rounded-xl transition"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition shadow"
+                >
+                  💾 랭킹에 등록
+                </button>
               </div>
-            </div>
-            <div className="flex gap-2 mt-5">
-              <button onClick={() => setShootManualModal(null)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 py-2.5 rounded-xl font-bold text-xs">취소</button>
-              <button onClick={handleSaveManualShootRecord} className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 py-2.5 rounded-xl font-black text-xs shadow-lg">기록 등록</button>
-            </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* 전술판 사용 가이드 튜토리얼 모달 */}
       {tacticsTutorialModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[220] p-4 animate-in fade-in zoom-in-95">
-          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[85vh] flex flex-col relative">
-            <div className="flex justify-between items-center mb-4 shrink-0">
-              <h2 className="text-lg font-black text-white flex items-center gap-2">🎯 전술판 100% 활용 가이드</h2>
-              <button onClick={() => setTacticsTutorialModal(false)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
-            </div>
-            <div className="flex-1 overflow-y-auto space-y-3 pr-1 hide-scrollbar text-xs leading-relaxed text-slate-300">
-              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                <div className="text-xl shrink-0">👆</div>
-                <div><div className="font-bold text-white mb-0.5">선수 배치 및 포지션 이동</div>상단 <strong className="text-blue-400">[이동]</strong> 모드에서 경기장 위 유니폼이나 축구공(⚽)을 드래그하여 원하는 위치에 배치하세요.</div>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[200] p-4 animate-in fade-in zoom-in-95">
+           <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl relative">
+              <button onClick={() => setTacticsTutorialModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20}/></button>
+              <h2 className="text-xl font-black text-white mb-6 flex items-center gap-2"><Target className="text-emerald-400"/> 전술판 사용 가이드</h2>
+              <div className="space-y-6">
+                 <div className="flex gap-4"><div className="w-8 h-8 rounded-full bg-emerald-600/20 text-emerald-400 flex items-center justify-center font-black shrink-0 border border-emerald-500/30">1</div><div><div className="text-white font-bold mb-1">선수 배치 및 스케치</div><div className="text-sm text-slate-400 leading-snug">선수 토큰을 이동시키고, 화살표나 지역 표시 등 그리기 도구를 활용해 상황을 세팅하세요.</div></div></div>
+                 <div className="flex gap-4"><div className="w-8 h-8 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center font-black shrink-0 border border-red-500/30">2</div><div><div className="text-white font-bold mb-1">[자동 녹화] 켜고 움직이기</div><div className="text-sm text-slate-400 leading-snug">상단의 <strong className="text-red-400">자동녹화</strong> 버튼을 켜면 화면 테두리가 빨간색으로 바뀝니다.<br/>이 상태에서 선수를 움직이거나 선을 그릴 때마다 컷(프레임)이 자동 저장됩니다!</div></div></div>
+                 <div className="flex gap-4"><div className="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-black shrink-0 border border-blue-500/30">3</div><div><div className="text-white font-bold mb-1">애니메이션 확인 및 공유</div><div className="text-sm text-slate-400 leading-snug"><strong className="text-blue-400">재생</strong> 버튼을 눌러 부드러운 애니메이션을 확인하고, <strong className="text-yellow-400">영상공유</strong> 버튼으로 MP4 파일을 추출해 카톡으로 공유하세요!</div></div></div>
               </div>
-              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                <div className="text-xl shrink-0">✏️</div>
-                <div><div className="font-bold text-white mb-0.5">전술 펜슬 & 화살표 판서</div><strong className="text-yellow-400">[펜슬]</strong>은 자유로운 곡선을, <strong className="text-orange-400">[화살표]</strong>는 패스·침투 경로 직선을 그립니다.</div>
-              </div>
-              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                <div className="text-xl shrink-0">🎬</div>
-                <div><div className="font-bold text-white mb-0.5">전술 애니메이션 (프레임 재생)</div>하단의 <strong className="text-indigo-400">[+ 장면 추가]</strong>를 누른 뒤 선수와 공을 다음 위치로 이동시키세요. 이후 <strong className="text-emerald-400">[▶ 재생]</strong>을 누르면 전술 움직임이 스무스하게 재생됩니다!</div>
-              </div>
-              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                <div className="text-xl shrink-0">💾</div>
-                <div><div className="font-bold text-white mb-0.5">전술 저장 및 카톡 이미지 공유</div>우측 상단 <strong className="text-emerald-400">[전술 저장]</strong>으로 클라우드에 보관하거나 <strong className="text-indigo-400">[이미지 저장]</strong>으로 캡처해 단톡방에 공유할 수 있습니다.</div>
-              </div>
-            </div>
-            <button onClick={() => setTacticsTutorialModal(false)} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-black text-sm shadow-lg mt-4 shrink-0 transition">확인했습니다</button>
-          </div>
+              <button onClick={() => setTacticsTutorialModal(false)} className="w-full mt-8 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3.5 rounded-xl transition">닫기</button>
+           </div>
         </div>
       )}
-      {/* GPS 워치 연동 방법 가이드 모달 */}
       {gpsGuideModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[220] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
-          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[85vh] flex flex-col relative overflow-hidden">
-            <div className="flex justify-between items-center mb-3 sm:mb-4 shrink-0 gap-2 min-w-0">
-              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 min-w-0 truncate"><span className="shrink-0">⌚</span><span className="truncate">스마트워치 GPX 연동 가이드</span></h2>
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[200] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[86vh] flex flex-col relative overflow-hidden">
+            <div className="flex justify-between items-center mb-3 shrink-0 gap-2 min-w-0">
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 min-w-0 truncate">
+                <span className="shrink-0">⌚</span>
+                <span className="truncate">스마트워치 GPS 연동 가이드</span>
+              </h2>
               <button onClick={() => setGpsGuideModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
             </div>
-            
-            <div className="flex gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-700 mb-3 sm:mb-4 shrink-0">
-              <button onClick={() => setGpsGuideBrand('galaxy')} className={`flex-1 py-2 rounded-lg text-[11px] font-black transition truncate px-1 ${gpsGuideBrand === 'galaxy' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>갤럭시 워치</button>
-              <button onClick={() => setGpsGuideBrand('apple')} className={`flex-1 py-2 rounded-lg text-[11px] font-black transition truncate px-1 ${gpsGuideBrand === 'apple' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>애플 워치</button>
-              <button onClick={() => setGpsGuideBrand('garmin')} className={`flex-1 py-2 rounded-lg text-[11px] font-black transition truncate px-1 ${gpsGuideBrand === 'garmin' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>가민 (Garmin)</button>
+
+            <div className="grid grid-cols-2 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1 mb-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setGpsGuideTab('android')}
+                className={`py-2 px-1.5 rounded-lg text-xs font-bold transition min-w-0 overflow-hidden truncate ${gpsGuideTab === 'android' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+              >
+                🤖 갤럭시워치
+              </button>
+              <button
+                type="button"
+                onClick={() => setGpsGuideTab('ios')}
+                className={`py-2 px-1.5 rounded-lg text-xs font-bold transition min-w-0 overflow-hidden truncate ${gpsGuideTab === 'ios' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+              >
+                🍎 애플워치 (iOS)
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-2.5 sm:space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
-              {gpsGuideBrand === 'galaxy' && (
+            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
+              {gpsGuideTab === 'android' ? (
                 <>
-                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-blue-600/20 text-blue-400 border border-blue-500/40 font-black flex items-center justify-center shrink-0">1</div>
-                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">워치에서 운동 기록 측정</div>갤럭시 워치에서 <strong className="text-blue-400">[축구]</strong> 또는 <strong className="text-blue-400">[달리기]</strong> 모드를 켜고 경기를 뜁니다. (GPS 위치 권한 필수)</div>
+                  <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3 text-[11px] text-amber-200 leading-relaxed space-y-1.5">
+                    <strong className="text-amber-400 block">🚨 [달리기]로 측정했는데도 GPX 내보내기가 안 보일 때 체크리스트!</strong>
+                    <div>
+                      <strong>① 상세 화면에 '지도(이동 경로)'가 그려져 있나요?</strong><br/>
+                      삼성 헬스 달리기 상세 화면에 지도가 아예 없다면 워치 GPS가 꺼져 있었거나 실내에서 시작해 위성 신호를 못 잡은 상태입니다. (지도 데이터가 없으면 GPX 메뉴 자체가 숨겨집니다)
+                    </div>
+                    <div>
+                      <strong>② 워치 [달리기 설정]에서 '위치(GPS)' 켜기</strong><br/>
+                      워치 삼성 헬스 → [달리기] 옆 ⚙️설정 → <strong>[위치] ON</strong> 확인 후, 야외에서 상단 📍위성 아이콘이 깜빡임을 멈추고 <strong>초록색으로 고정</strong>된 뒤 시작하세요.
+                    </div>
+                    <div>
+                      <strong>③ 스마트폰 삼성 헬스 '위치 정보' 권한 허용</strong><br/>
+                      폰 삼성 헬스 홈 → 우측 상단 <strong>⋮</strong> → <strong>[설정]</strong> → 맨 아래 <strong>[위치 정보]</strong>가 켜져 있어야 지도가 표시되고 GPX 추출 메뉴가 나타납니다.
+                    </div>
+                    <div>
+                      <strong>④ 공유 버튼이 아닌 우측 상단 [⋮ (더보기)] 메뉴 확인</strong><br/>
+                      운동 상세 화면의 [공유] 아이콘이 아니라, 화면 맨 위 우측 모서리의 <strong>[⋮ (점 3개)]</strong>를 누르면 <strong>[경로 내보내기]</strong> 또는 <strong>[GPX 파일로 내보내기/공유]</strong>가 있습니다.
+                    </div>
                   </div>
                   <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-blue-600/20 text-blue-400 border border-blue-500/40 font-black flex items-center justify-center shrink-0">2</div>
-                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">삼성 헬스(Samsung Health) 앱 열기</div>스마트폰에서 <strong className="text-blue-400">삼성 헬스</strong> 앱 실행 후 방금 측정한 운동 기록 상세 화면으로 들어갑니다.</div>
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">1</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-white mb-0.5">워치에서 [달리기] 모드로 측정 시작</div>
+                      갤럭시워치 <strong className="text-emerald-400">[삼성 헬스]</strong>에서 축구가 아닌 <strong className="text-white">[달리기]</strong>(또는 걷기/하이킹)를 직접 눌러 시작하고 경기를 진행하세요. (시작 전 워치 상단 위치 아이콘이 깜빡이다 고정되는지 확인)
+                    </div>
                   </div>
                   <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-blue-600/20 text-blue-400 border border-blue-500/40 font-black flex items-center justify-center shrink-0">3</div>
-                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">GPX 파일로 내보내기</div>우측 상단 <strong className="text-white">점 3개(⋮) 메뉴 → [GPX로 내보내기]</strong>를 눌러 휴대폰에 저장한 뒤, 본 화면의 <strong className="text-emerald-400">[GPX/TCX 업로드]</strong>로 불러오면 끝!</div>
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">2</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-white mb-0.5">스마트폰 삼성 헬스에서 GPX 내보내기</div>
+                      경기 종료 후 스마트폰 <strong className="text-white">[삼성 헬스]</strong> 앱 → <strong className="text-white">[운동 기록]</strong>에서 방금 뛴 달리기 항목 터치(상세 화면에 지도 경로 표시 확인) → 우측 상단 <strong className="text-amber-400">[⋮ (점 3개)]</strong> → <strong className="text-white">[GPX로 내보내기]</strong>를 눌러 저장하세요.
+                    </div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">3</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-white mb-0.5">MATCHBOARD에서 파일 열기</div>
+                      현재 GPS 탭의 <strong className="text-blue-400">[📂 GPX 기록 파일 불러오기]</strong> 터치 → 파일 선택창 상단 <strong className="text-white">[최근 파일]</strong> 또는 좌측 메뉴(☰) <strong className="text-white">[내 파일 → 내장 메모리 → Download → SamsungHealth]</strong>에서 <strong className="text-emerald-400">.gpx 파일</strong>을 선택하면 자동 분석됩니다!
+                    </div>
                   </div>
                 </>
-              )}
-
-              {gpsGuideBrand === 'apple' && (
+              ) : (
                 <>
-                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">1</div>
-                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">애플워치 실외 운동으로 기록</div>기본 피트니스 앱에서 <strong className="text-emerald-400">[실외 달리기]</strong> 등 GPS 경로가 남는 모드로 측정하거나, <strong className="text-emerald-400">WorkOutDoors</strong> 앱으로 측정합니다.</div>
+                  <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3 text-[11px] text-amber-200 leading-relaxed space-y-1.5">
+                    <strong className="text-amber-400 block">🚨 아이폰 · 애플워치 필수 사전 설정 체크리스트!</strong>
+                    <div>
+                      <strong>① 워치에서 '축구'가 아닌 [실외 달리기] 선택!</strong><br/>
+                      애플워치도 기본 <strong>'축구'</strong> 종목은 심박/칼로리만 재고 <strong>GPS 지도 경로를 저장하지 않습니다.</strong> 반드시 <strong className="text-white underline">[실외 달리기]</strong>(또는 실외 걷기)로 측정해야 GPS 경로가 기록됩니다.
+                    </div>
+                    <div>
+                      <strong>② 아이폰 위치 서비스 권한 2가지 확인</strong><br/>
+                      • 아이폰 <strong>설정 → 개인정보 보호 및 보안 → 위치 서비스 → [Apple Watch 운동]</strong>을 <strong>'앱을 사용하는 동안' + '정확한 위치 ON'</strong>으로 설정<br/>
+                      • 위치 서비스 맨 아래 <strong>[시스템 서비스] → [동작 보정 및 거리] ON</strong> 확인
+                    </div>
+                    <div>
+                      <strong>③ 무료 GPX 추출 앱 1개 설치 (최초 1회)</strong><br/>
+                      아이폰 기본 피트니스 앱에는 파일 저장 버튼이 없으므로, 앱스토어에서 무료 앱(<strong>GPX Export, RunGap, Strava</strong> 등) 설치 후 <strong>'건강(운동 경로) 읽기 권한'</strong>을 허용해 두세요.
+                    </div>
                   </div>
                   <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">2</div>
-                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">HealthFit 또는 GPX 변환 앱 활용</div>아이폰 기본 앱은 GPX 직접 추출 버튼이 없으므로 무료 앱 <strong className="text-emerald-400">[GPX Workout]</strong> 또는 <strong className="text-emerald-400">[HealthFit]</strong>에서 기록을 선택해 <strong className="text-white">GPX 내보내기(파일에 저장)</strong>를 실행합니다.</div>
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">1</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-white mb-0.5">애플워치에서 [실외 달리기]로 측정</div>
+                      애플워치 기본 <strong className="text-emerald-400">[운동]</strong> 앱에서 축구가 아닌 <strong className="text-white">[실외 달리기]</strong>를 눌러 시작하고 경기를 뛰세요.
+                    </div>
                   </div>
                   <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">3</div>
-                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">매치보드에 업로드</div>아이폰 파일 앱에 저장된 <strong className="text-white">.gpx 파일</strong>을 선택해 업로드하면 즉시 히트맵이 생성됩니다!</div>
-                  </div>
-                </>
-              )}
-
-              {gpsGuideBrand === 'garmin' && (
-                <>
-                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-indigo-600/20 text-indigo-400 border border-indigo-500/40 font-black flex items-center justify-center shrink-0">1</div>
-                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">Garmin Connect 동기화</div>가민 워치로 경기 측정 후 스마트폰 <strong className="text-indigo-400">Garmin Connect</strong>와 동기화합니다.</div>
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">2</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-white mb-0.5">연동 앱에서 GPX 파일로 내보내기</div>
+                      경기 후 아이폰 연동 앱(<strong className="text-white">GPX Export, RunGap, WorkOutDoors, HealthFit</strong> 등)을 열어 방금 기록을 선택한 뒤 <strong className="text-amber-400">[Export GPX → 파일에 저장]</strong>을 누르세요.
+                    </div>
                   </div>
                   <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                    <div className="w-6 h-6 rounded-full bg-indigo-600/20 text-indigo-400 border border-indigo-500/40 font-black flex items-center justify-center shrink-0">2</div>
-                    <div className="min-w-0 flex-1"><div className="font-bold text-white mb-0.5">웹(브라우저)에서 GPX/TCX 내보내기</div>브라우저로 <strong className="text-white">connect.garmin.com</strong> 접속 → 해당 활동 클릭 → 우측 상단 <strong className="text-indigo-400">톱니바퀴(⚙️) → [GPX로 내보내기] 또는 [TCX로 내보내기]</strong>를 누르면 심박수까지 포함된 파일이 다운로드됩니다!</div>
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black flex items-center justify-center shrink-0">3</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-white mb-0.5">MATCHBOARD에서 파일 열기</div>
+                      현재 GPS 탭의 <strong className="text-blue-400">[📂 GPX 기록 파일 불러오기]</strong> 버튼으로 아이폰 [파일] 앱에 저장된 `.gpx` 파일을 불러오면 히트맵과 스탯이 즉시 생성됩니다!
+                    </div>
                   </div>
                 </>
               )}
             </div>
 
-            <button onClick={() => setGpsGuideModal(false)} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-black text-sm shadow-lg mt-4 shrink-0 transition">가이드 닫기</button>
+            <button
+              type="button"
+              onClick={() => setGpsGuideModal(false)}
+              className="w-full mt-4 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl text-sm transition shrink-0"
+            >
+              확인했어요
+            </button>
           </div>
         </div>
       )}
-      {/* 구장 커스텀 코너 등록 및 관리 모달 */}
       {pitchManagerModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[220] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
-          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[85vh] flex flex-col relative overflow-hidden">
-            <div className="flex justify-between items-center mb-3 sm:mb-4 shrink-0 gap-2 min-w-0">
-              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 min-w-0 truncate"><MapPin size={18} className="text-blue-400 shrink-0"/> <span className="truncate">자주 뛰는 구장 캘리브레이션</span></h2>
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[210] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-5 rounded-3xl w-full max-w-md border border-slate-700 shadow-2xl max-h-[92vh] flex flex-col relative overflow-hidden">
+            <div className="flex justify-between items-center mb-3 shrink-0 gap-2 min-w-0">
+              <div className="min-w-0 flex-1">
+                <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 min-w-0 truncate">
+                  <span className="shrink-0">🏟️</span>
+                  <span className="truncate">위성지도 구장(코너 4곳) 등록</span>
+                </h2>
+                <p className="text-[11px] text-slate-400 truncate">위성사진의 축구장 네 귀퉁이에 1~4번 핀을 맞춰주세요</p>
+              </div>
               <button onClick={() => setPitchManagerModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 sm:space-y-4 pr-0.5 hide-scrollbar text-xs">
-              <div className="bg-slate-900/90 border border-slate-700 p-3.5 rounded-2xl space-y-2.5">
-                <div className="font-black text-blue-400 text-[11px] flex items-center justify-between">
-                  <span>➕ 새 구장 코너 좌표 등록</span>
-                  {gpsData && <button onClick={handleAutoFillCornersFromGps} className="bg-emerald-950/60 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-md text-[10px] font-bold hover:bg-emerald-900/50 transition">현재 GPX 경계로 자동입력</button>}
-                </div>
+            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-2.5 pr-0.5 hide-scrollbar">
+              {/* 지도 종류 선택 탭 (네이버 위성 / 네이버 일반 / 구글 위성) */}
+              <div className="grid grid-cols-3 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPitchMapStyle('naver_sat')}
+                  className={`py-1.5 px-1 rounded-lg text-[11px] font-bold transition min-w-0 overflow-hidden truncate ${pitchMapStyle === 'naver_sat' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                >
+                  🟢 네이버 위성
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPitchMapStyle('naver_basic')}
+                  className={`py-1.5 px-1 rounded-lg text-[11px] font-bold transition min-w-0 overflow-hidden truncate ${pitchMapStyle === 'naver_basic' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                >
+                  🗺️ 네이버 일반
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPitchMapStyle('google_sat')}
+                  className={`py-1.5 px-1 rounded-lg text-[11px] font-bold transition min-w-0 overflow-hidden truncate ${pitchMapStyle === 'google_sat' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                >
+                  🌏 구글 위성
+                </button>
+              </div>
+
+              {/* 구장 위치 검색 바 */}
+              <form onSubmit={handlePitchPlaceSearch} className="flex gap-1.5 min-w-0">
                 <input
                   type="text"
-                  value={newPitchName}
-                  onChange={(e) => setNewPitchName(e.target.value)}
-                  placeholder="구장 이름 (예: 탄천종합운동장 B구장)"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-bold outline-none focus:border-blue-500"
+                  value={pitchSearchQuery}
+                  onChange={(e) => {
+                    setPitchSearchQuery(e.target.value);
+                    if (pitchSearchMessage) setPitchSearchMessage('');
+                  }}
+                  placeholder="구장/공원/도로명주소 검색 (예: 마들스타디움)"
+                  className="w-0 flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none"
                 />
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  구글 지도나 네이버 지도에서 경기장 네 모서리(코너킥 지점)를 길게 눌러 위도, 경도를 복사해 넣으면 오차 없는 고정 규격 히트맵이 완성됩니다.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
-                    <div className="text-[11px] font-black text-slate-400">↖ 좌상단 (TL)</div>
-                    <input type="text" placeholder="위도 (예: 37.5123)" value={newPitchCorners.tlLat} onChange={e => setNewPitchCorners({...newPitchCorners, tlLat: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
-                    <input type="text" placeholder="경도 (예: 127.0123)" value={newPitchCorners.tlLon} onChange={e => setNewPitchCorners({...newPitchCorners, tlLon: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
-                  </div>
-                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
-                    <div className="text-[11px] font-black text-slate-400">↗ 우상단 (TR)</div>
-                    <input type="text" placeholder="위도 (Lat)" value={newPitchCorners.trLat} onChange={e => setNewPitchCorners({...newPitchCorners, trLat: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
-                    <input type="text" placeholder="경도 (Lon)" value={newPitchCorners.trLon} onChange={e => setNewPitchCorners({...newPitchCorners, trLon: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
-                  </div>
-                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
-                    <div className="text-[11px] font-black text-slate-400">↙ 좌하단 (BL)</div>
-                    <input type="text" placeholder="위도 (Lat)" value={newPitchCorners.blLat} onChange={e => setNewPitchCorners({...newPitchCorners, blLat: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
-                    <input type="text" placeholder="경도 (Lon)" value={newPitchCorners.blLon} onChange={e => setNewPitchCorners({...newPitchCorners, blLon: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
-                  </div>
-                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
-                    <div className="text-[11px] font-black text-slate-400">↘ 우하단 (BR)</div>
-                    <input type="text" placeholder="위도 (Lat)" value={newPitchCorners.brLat} onChange={e => setNewPitchCorners({...newPitchCorners, brLat: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
-                    <input type="text" placeholder="경도 (Lon)" value={newPitchCorners.brLon} onChange={e => setNewPitchCorners({...newPitchCorners, brLon: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none"/>
-                  </div>
+                <button
+                  type="submit"
+                  disabled={isPitchSearching}
+                  className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition shrink-0 whitespace-nowrap"
+                >
+                  {isPitchSearching ? '검색중..' : '🔍 검색'}
+                </button>
+              </form>
+
+              {/* 검색 결과 없음 안내 */}
+              {pitchSearchMessage && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 text-[11px] text-amber-300 leading-relaxed">
+                  💡 {pitchSearchMessage}
                 </div>
-                <button onClick={handleSavePitchPreset} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl font-black text-xs shadow transition mt-1">구장 프리셋 저장</button>
+              )}
+
+              {/* 검색 결과 리스트 */}
+              {pitchSearchResults.length > 0 && (
+                <div className="bg-slate-900 border border-slate-700 rounded-xl p-1.5 max-h-36 overflow-y-auto space-y-1">
+                  {pitchSearchResults.map((item, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        const lat = parseFloat(item.lat);
+                        const lon = parseFloat(item.lon);
+                        if (pitchMapInstanceRef.current) {
+                          pitchMapInstanceRef.current.setView([lat, lon], 18);
+                          applyCornersToSatelliteMap(createDefaultCornersAround(lat, lon, 96, 62), false);
+                        }
+                        const cleanTitle = (item.title || item.display_name || '').split('(')[0].split(',')[0].trim();
+                        if (cleanTitle) setPitchFormName(cleanTitle);
+                        setPitchSearchResults([]);
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 transition flex items-start justify-between gap-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11px] font-bold text-emerald-300 truncate">
+                          📍 {item.title || item.display_name}
+                        </div>
+                        {item.address && (
+                          <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                            {item.address}
+                          </div>
+                        )}
+                      </div>
+                      {item.category && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 shrink-0 mt-0.5">
+                          {item.category}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* 위성지도 컨트롤 버튼 바 */}
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  onClick={placeCornersAtMapCenter}
+                  className="py-1.5 px-1 bg-slate-900 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 rounded-lg text-[11px] font-bold transition min-w-0 overflow-hidden truncate"
+                >
+                  🎯 중앙에 배치
+                </button>
+                <button
+                  type="button"
+                  onClick={() => rotateDraftCorners(30)}
+                  className="py-1.5 px-1 bg-slate-900 hover:bg-slate-700 text-amber-300 border border-amber-500/30 rounded-lg text-[11px] font-bold transition min-w-0 overflow-hidden truncate"
+                >
+                  🔄 구장 틀 회전
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (gpsSession?.centerLat && gpsSession?.centerLon && pitchMapInstanceRef.current) {
+                      pitchMapInstanceRef.current.setView([gpsSession.centerLat, gpsSession.centerLon], 18);
+                      applyCornersToSatelliteMap(createDefaultCornersAround(gpsSession.centerLat, gpsSession.centerLon, 96, 62), false);
+                    } else if (navigator.geolocation) {
+                      navigator.geolocation.getCurrentPosition((pos) => {
+                        const { latitude, longitude } = pos.coords;
+                        if (pitchMapInstanceRef.current) {
+                          pitchMapInstanceRef.current.setView([latitude, longitude], 18);
+                          applyCornersToSatelliteMap(createDefaultCornersAround(latitude, longitude, 96, 62), false);
+                        }
+                      });
+                    }
+                  }}
+                  className="py-1.5 px-1 bg-slate-900 hover:bg-slate-700 text-blue-400 border border-blue-500/30 rounded-lg text-[11px] font-bold transition min-w-0 overflow-hidden truncate"
+                >
+                  {gpsSession?.centerLat ? '📂 GPX 위치' : '📍 내 위치 이동'}
+                </button>
               </div>
 
-              <div className="space-y-2">
-                <div className="font-black text-slate-400 text-[11px]">📋 등록된 구장 목록 ({pitchPresets.length})</div>
-                {pitchPresets.length === 0 ? (
-                  <div className="text-center text-slate-500 py-4 bg-slate-900/50 rounded-xl border border-slate-800">등록된 커스텀 구장이 없습니다.</div>
-                ) : (
-                  pitchPresets.map(p => (
-                    <div key={p.id} className="bg-slate-900 border border-slate-700/80 rounded-xl p-2.5 flex items-center justify-between gap-2">
-                      <div>
-                        <div className="font-bold text-white text-xs">{p.name}</div>
-                        <div className="text-[11px] text-slate-500">4코너 위경도 고정 규격</div>
+              {/* 위성지도 영역 */}
+              <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-500/40 shadow-inner bg-slate-950">
+                <div ref={pitchMapContainerRef} className="w-full h-60 sm:h-72 z-10" />
+                <div className="bg-slate-900/95 px-2.5 py-1.5 text-[10px] text-slate-300 flex flex-wrap items-center justify-between gap-1 border-t border-slate-800">
+                  <span>🔴 <strong className="text-red-400">1·2번 핀</strong>: 공격 진영</span>
+                  <span>🔵 <strong className="text-blue-400">3·4번 핀</strong>: 수비 진영 (드래그)</span>
+                </div>
+              </div>
+
+              {/* 구장 이름 입력 및 저장 */}
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3 space-y-2">
+                <div className="text-xs font-bold text-white">새 구장으로 저장하기</div>
+                <div className="flex gap-2 min-w-0">
+                  <input
+                    type="text"
+                    value={pitchFormName}
+                    onChange={(e) => setPitchFormName(e.target.value)}
+                    placeholder="구장 이름 입력 (예: 마들스타디움)"
+                    className="w-0 flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={savePitchToTeam}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition shrink-0 whitespace-nowrap shadow"
+                  >
+                    💾 구장 저장
+                  </button>
+                </div>
+              </div>
+
+              {/* 등록된 구장 목록 */}
+              <div className="bg-slate-900/70 border border-slate-700/70 rounded-2xl p-3 space-y-2">
+                <div className="text-xs font-bold text-slate-300">등록된 구장 목록 ({allGpsPitches.length})</div>
+                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                  {allGpsPitches.map(p => (
+                    <div
+                      key={p.id}
+                      onClick={() => {
+                        setGpsSelectedPitchId(p.id);
+                        applyCornersToSatelliteMap(p.corners, true);
+                      }}
+                      className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition overflow-hidden ${gpsSelectedPitchId === p.id ? 'bg-emerald-500/15 border-emerald-500/40' : 'bg-slate-800/80 border-slate-700 hover:border-slate-600'}`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold text-white truncate">🏟️ {p.name}</div>
+                        <div className="text-[10px] text-slate-400 truncate">터치하여 위성지도 위치 확인 및 적용</div>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <button onClick={() => { setSelectedPitchId(p.id); setPitchManagerModal(false); }} className="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-lg text-[10px] font-bold">적용</button>
-                        <button onClick={() => handleDeletePitchPreset(p.id, p.name)} className="bg-rose-950/50 text-rose-400 border border-rose-500/30 p-1.5 rounded-lg hover:bg-rose-900/50"><Trash2 size={13}/></button>
-                      </div>
+                      {!p.isPreset && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); requestDeletePitch(p.id); }}
+                          className="p-1.5 text-slate-400 hover:text-red-400 transition shrink-0"
+                        >
+                          <Trash2 size={14}/>
+                        </button>
+                      )}
                     </div>
-                  ))
-                )}
+                  ))}
+                </div>
               </div>
             </div>
-
-            <button onClick={() => setPitchManagerModal(false)} className="w-full bg-slate-700 hover:bg-slate-600 text-white py-2.5 rounded-xl font-black text-xs mt-4 shrink-0 transition">닫기</button>
           </div>
         </div>
       )}
-      {/* GPS 아카이브 기록 수정 모달 */}
-      {gpsRecordEditModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[230] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
-          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl flex flex-col">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">✏️ GPS 기록 정보 수정</h2>
-              <button onClick={() => setGpsRecordEditModal(null)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+      {gpsRecordEditModal.isOpen && gpsRecordEditModal.record && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[220] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
+          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[88vh] overflow-y-auto overflow-x-hidden relative">
+            <div className="flex justify-between items-center mb-4 gap-2 min-w-0">
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2 min-w-0 truncate">
+                <Edit size={18} className="text-emerald-400 shrink-0"/>
+                <span className="truncate">저장된 GPS 기록 편집</span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => setGpsRecordEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', quarterLabel: '1Q', positionCode: 'AM', matchId: '' })}
+                className="text-slate-400 hover:text-white p-1 shrink-0"
+              >
+                <X size={20}/>
+              </button>
             </div>
-            <div className="space-y-3 text-xs">
+
+            <form onSubmit={saveEditedGpsRecord} className="space-y-3.5">
               <div>
-                <label className="text-[11px] text-slate-400 font-bold block mb-1">선수 선택</label>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">👤 선수 이름</label>
                 <select
                   value={gpsRecordEditModal.playerId}
-                  onChange={(e) => setGpsRecordEditModal({ ...gpsRecordEditModal, playerId: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-emerald-500"
+                  onChange={(e) => setGpsRecordEditModal(prev => ({ ...prev, playerId: e.target.value }))}
+                  className="w-full max-w-full min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none truncate"
                 >
-                  <option value="">미지정 (게스트/공통)</option>
-                  {sortedRoster.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.pos || 'FP'})</option>
+                  <option value="">미지정 선수</option>
+                  {currentTeamPlayers.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({formatBirthYear(p.birthYear)})</option>
                   ))}
+                  <option value="__custom__">✍️ 직접 이름 입력...</option>
                 </select>
+                {gpsRecordEditModal.playerId === '__custom__' && (
+                  <input
+                    type="text"
+                    value={gpsRecordEditModal.customPlayerName}
+                    onChange={(e) => setGpsRecordEditModal(prev => ({ ...prev, customPlayerName: e.target.value }))}
+                    placeholder="선수 이름 직접 입력 (예: 홍길동)"
+                    className="w-full mt-2 bg-slate-900 border border-emerald-500/50 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
+                    autoFocus
+                  />
+                )}
+              </div>
+
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-1 mb-1.5">
+                  <label className="text-xs font-bold text-slate-400">
+                    ⏱️ 쿼터 선택 <span className="text-[10px] font-normal text-slate-500">(복수 터치 시 3~4Q 조합)</span>
+                  </label>
+                  <span className="text-[11px] font-black px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
+                    표시: {gpsRecordEditModal.quarterLabel}
+                  </span>
+                </div>
+                {(() => {
+                  const selectedNums = parseQuarterLabelToNums(gpsRecordEditModal.quarterLabel);
+                  const isAll = gpsRecordEditModal.quarterLabel === '전체';
+                  return (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {[1, 2, 3, 4, 5, 6].map(qNum => {
+                          const isSelected = !isAll && selectedNums.includes(qNum);
+                          return (
+                            <button
+                              key={qNum}
+                              type="button"
+                              onClick={() => {
+                                setGpsRecordEditModal(prev => {
+                                  if (!prev.quarterTouched) {
+                                    return { ...prev, quarterTouched: true, quarterLabel: `${qNum}Q` };
+                                  }
+                                  return {
+                                    ...prev,
+                                    quarterTouched: true,
+                                    quarterLabel: toggleQuarterInLabel(prev.quarterLabel, qNum)
+                                  };
+                                });
+                              }}
+                              className={`py-2 px-1 rounded-xl text-xs font-bold border transition min-w-0 overflow-hidden truncate ${isSelected ? 'bg-emerald-600 text-white border-emerald-500 shadow' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}`}
+                            >
+                              {qNum}쿼터
+                            </button>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          onClick={() => setGpsRecordEditModal(prev => ({ ...prev, quarterTouched: false, quarterLabel: '전체' }))}
+                          className={`col-span-2 py-2 px-1 rounded-xl text-xs font-bold border transition min-w-0 overflow-hidden truncate ${isAll ? 'bg-emerald-600 text-white border-emerald-500 shadow' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}`}
+                        >
+                          경기 전체
+                        </button>
+                      </div>
+
+                      {/* 자주 쓰는 연속 쿼터 원터치 버튼 */}
+                      <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar pt-0.5">
+                        <span className="text-[10px] text-slate-500 font-bold shrink-0">연속 측정:</span>
+                        {['1~2Q', '2~3Q', '3~4Q', '4~5Q', '5~6Q', '1~3Q', '2~4Q'].map(preset => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setGpsRecordEditModal(prev => ({ ...prev, quarterTouched: true, quarterLabel: preset }))}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition shrink-0 whitespace-nowrap ${gpsRecordEditModal.quarterLabel === preset ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-900/80 text-slate-400 border-slate-700 hover:text-white'}`}
+                          >
+                            {preset.replace('Q', '쿼터')}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
               <div>
-                <label className="text-[11px] text-slate-400 font-bold block mb-1">경기 일자</label>
-                <input
-                  type="date"
-                  value={gpsRecordEditModal.dateStr}
-                  onChange={(e) => setGpsRecordEditModal({ ...gpsRecordEditModal, dateStr: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-emerald-500"
-                />
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">🎯 출전 포지션</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {GPS_POSITIONS.map(pos => {
+                    const isSel = (gpsRecordEditModal.positionCode || 'AM') === pos.code;
+                    return (
+                      <button
+                        key={pos.code}
+                        type="button"
+                        onClick={() => setGpsRecordEditModal(prev => ({ ...prev, positionCode: pos.code }))}
+                        className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition flex items-center justify-center gap-1 min-w-0 overflow-hidden ${isSel ? 'bg-indigo-600 text-white border-indigo-400 shadow' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}`}
+                      >
+                        <span className="shrink-0">{pos.icon}</span>
+                        <span className="truncate">{pos.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
+
               <div>
-                <label className="text-[11px] text-slate-400 font-bold block mb-1">구분 / 쿼터명</label>
-                <input
-                  type="text"
-                  value={gpsRecordEditModal.quarterLabel}
-                  onChange={(e) => setGpsRecordEditModal({ ...gpsRecordEditModal, quarterLabel: e.target.value })}
-                  placeholder="예: 1쿼터, 2쿼터, 전반전, 전체"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] text-slate-400 font-bold block mb-1">적용 구장 규격</label>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">📅 연결할 경기 일정</label>
                 <select
-                  value={gpsRecordEditModal.pitchId}
-                  onChange={(e) => setGpsRecordEditModal({ ...gpsRecordEditModal, pitchId: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-emerald-500"
+                  value={gpsRecordEditModal.matchId}
+                  onChange={(e) => setGpsRecordEditModal(prev => ({ ...prev, matchId: e.target.value }))}
+                  className="w-full max-w-full min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-200 outline-none truncate"
                 >
-                  <option value="auto">자동 보정 (트랙 경계 기준)</option>
-                  {pitchPresets.map(p => (
-                    <option key={p.id} value={p.id}>📍 {p.name}</option>
-                  ))}
+                  <option value="">자유 기록 ({gpsRecordEditModal.record.date})</option>
+                  {[...currentTeamMatches]
+                    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+                    .map(m => {
+                      const typeLabel = m.matchType === 'external' ? `교류전` : m.matchType === 'futsal' ? '풋살' : '자체전';
+                      return (
+                        <option key={m.id} value={m.id}>
+                          {m.date} · [{typeLabel}] {m.location}
+                        </option>
+                      );
+                    })}
                 </select>
               </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setGpsRecordEditModal({ isOpen: false, record: null, playerId: '', customPlayerName: '', quarterLabel: '1Q', positionCode: 'AM', matchId: '' })}
+                  className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs rounded-xl transition"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition shadow"
+                >
+                  💾 수정 완료
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* 🤖 Google Gemini 무료 AI 키 설정 모달 */}
+      {geminiApiKeyModal.isOpen && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[265] p-3 sm:p-4 animate-in fade-in"
+          onClick={() => setGeminiApiKeyModal({ isOpen: false, keyInput: '' })}
+        >
+          <div
+            className="bg-slate-800 border border-slate-700 rounded-3xl w-full max-w-sm p-4 sm:p-5 space-y-4 shadow-2xl max-h-[88vh] overflow-y-auto overflow-x-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b border-slate-700 pb-3 gap-2 min-w-0">
+              <h3 className="text-base font-black text-white flex items-center gap-2 min-w-0 truncate">
+                🤖 Google Gemini AI 코치 연결
+              </h3>
+              <button
+                type="button"
+                onClick={() => setGeminiApiKeyModal({ isOpen: false, keyInput: '' })}
+                className="text-slate-400 hover:text-white p-1 shrink-0"
+              >
+                <X size={20} />
+              </button>
             </div>
-            <div className="flex gap-2 mt-5">
-              <button onClick={() => setGpsRecordEditModal(null)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 py-2.5 rounded-xl font-bold text-xs">취소</button>
-              <button onClick={handleSaveEditedGpsRecord} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-black text-xs shadow-lg">저장하기</button>
-            </div>
+
+            <form onSubmit={saveTeamGeminiApiKey} className="space-y-3.5 text-xs">
+              <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3 space-y-2 text-slate-300 leading-relaxed break-keep">
+                <div className="font-black text-indigo-300">💡 Google Gemini AI 코치 (무료 API 키)</div>
+                <p className="text-[11px] text-slate-400">
+                  Google AI Studio에서 무료로 발급받는 <strong className="text-white">Gemini API 키</strong>를 한 번만 등록해 두면, 우리 팀원 누구나 매 경기 완전히 새로운 문장의 생성형 AI 전술 코칭을 무제한(무료 등급 하루 1,500회) 이용할 수 있습니다.
+                </p>
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 text-[11px] font-black transition"
+                >
+                  🔗 Google AI Studio에서 무료 키 발급받기 &gt;
+                </a>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">🔑 Gemini API Key (AIza...로 시작)</label>
+                <input
+                  type="password"
+                  value={geminiApiKeyModal.keyInput}
+                  onChange={(e) => setGeminiApiKeyModal(prev => ({ ...prev, keyInput: e.target.value }))}
+                  placeholder="AIzaSy... 키 붙여넣기"
+                  className="w-full bg-slate-900 border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setGeminiApiKeyModal({ isOpen: false, keyInput: '' })}
+                  className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs rounded-xl transition"
+                >
+                  닫기
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl transition shadow"
+                >
+                  💾 저장 후 AI 분석 시작
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* Gemini API 키 설정 모달 */}
-      {geminiApiKeyModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[230] p-3 sm:p-4 animate-in fade-in zoom-in-95 break-keep">
-          <div className="bg-slate-800 p-4 sm:p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl flex flex-col">
-            <div className="flex justify-between items-center mb-3 gap-2">
-              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">🔑 Gemini AI API 키 설정</h2>
-              <button onClick={() => setGeminiApiKeyModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
-            </div>
-            <p className="text-xs text-slate-300 leading-relaxed mb-3">
-              Google AI Studio(<span className="text-indigo-400 font-bold">aistudio.google.com</span>)에서 무료로 발급받은 Gemini API 키를 입력하면, 내 브라우저에 안전하게 저장되어 언제든 <strong className="text-indigo-300">Gemini 2.5 Flash 실시간 퍼포먼스 분석</strong>을 사용할 수 있습니다.
-            </p>
-            <input
-              type="password"
-              value={geminiApiKeyInput}
-              onChange={(e) => setGeminiApiKeyInput(e.target.value)}
-              placeholder="AIzaSy... 로 시작하는 API 키 입력"
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono outline-none focus:border-indigo-500 mb-4"
-            />
-            <div className="flex gap-2">
-              <button onClick={() => setGeminiApiKeyModal(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 py-2.5 rounded-xl font-bold text-xs">취소</button>
-              <button onClick={() => handleSaveGeminiApiKey(geminiApiKeyInput)} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl font-black text-xs shadow-lg">저장하기</button>
+      {galleryModal.isOpen && (
+        <div className="fixed inset-0 bg-black z-[250] flex flex-col animate-in fade-in">
+          <div className="flex justify-between items-center p-4 absolute top-0 w-full z-10 bg-gradient-to-b from-black/80 to-transparent">
+            <div className="text-white font-bold text-sm bg-black/50 px-3 py-1.5 rounded-full">{galleryModal.currentIndex + 1} / {(galleryModal.photos||[]).length}</div>
+            <div className="flex gap-4">
+              {isAdmin && ( <button onClick={() => requestDeletePhoto((galleryModal.photos||[])[galleryModal.currentIndex].id)} className="text-white/70 hover:text-red-400 bg-black/50 p-2 rounded-full transition"><Trash2 size={20}/></button> )}
+              <button onClick={() => setGalleryModal({ isOpen: false, photos: [], currentIndex: 0, matchId: null })} className="text-white bg-black/50 p-2 rounded-full hover:bg-black/80 transition"><X size={20}/></button>
             </div>
           </div>
-        </div>
-      )}
+          <div className="flex-1 flex items-center justify-center relative overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+             <div className="hidden">
+               {galleryModal.currentIndex > 0 && <img src={(galleryModal.photos||[])[galleryModal.currentIndex - 1]?.url} alt="preload-prev" />}
+               {galleryModal.currentIndex < (galleryModal.photos||[]).length - 1 && <img src={(galleryModal.photos||[])[galleryModal.currentIndex + 1]?.url} alt="preload-next1" />}
+               {galleryModal.currentIndex < (galleryModal.photos||[]).length - 2 && <img src={(galleryModal.photos||[])[galleryModal.currentIndex + 2]?.url} alt="preload-next2" />}
+             </div>
 
-      {/* 명예의 전당 모달 */}
-      {galleryModal && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[110] p-4 animate-in fade-in zoom-in-95">
-          <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl max-h-[85vh] flex flex-col">
-            <div className="flex justify-between items-center mb-4 shrink-0">
-              <h2 className="text-lg font-black text-white flex items-center gap-2"><Award className="text-yellow-400" size={22}/> 명예의 전당 & 기록실</h2>
-              <button onClick={() => setGalleryModal(false)} className="text-slate-400 hover:text-white"><X size={20}/></button>
-            </div>
-            <div className="flex-1 overflow-y-auto space-y-3 pr-1 hide-scrollbar text-center text-slate-400 text-sm py-10">
-              시즌 누적 데이터가 이곳에 표시됩니다.
-            </div>
+             {galleryModal.currentIndex > 0 && ( <button onClick={() => setGalleryModal(p => ({...p, currentIndex: p.currentIndex - 1}))} className="absolute left-4 p-3 bg-black/50 text-white rounded-full z-10 hidden sm:block"><ChevronLeft size={24}/></button> )}
+             <img key={(galleryModal.photos||[])[galleryModal.currentIndex]?.id} src={(galleryModal.photos||[])[galleryModal.currentIndex]?.url} alt="gallery" className="max-w-full max-h-full object-contain animate-in fade-in zoom-in-95 duration-200" />
+             {galleryModal.currentIndex < (galleryModal.photos||[]).length - 1 && ( <button onClick={() => setGalleryModal(p => ({...p, currentIndex: p.currentIndex + 1}))} className="absolute right-4 p-3 bg-black/50 text-white rounded-full z-10 hidden sm:block"><ChevronRight size={24}/></button> )}
           </div>
         </div>
       )}
 
       {renderDetailModal()}
-      {renderConfirmModal()}
-      {renderAlertModal()}
-      {renderJoinModal()}
-      {renderUniformModal()}
+      {renderMatchModalForm()}
+      {renderAssignmentModal()}
+      {renderRosterModalForm()}
+      {renderAuthModal()}
+      {renderCreateTeamModal()}
+      {renderEditTeamModal()}
+      {renderAdminPwdChangeModal()}
+      {renderTeamSettingsModal()}
+      {renderTokenEditModal()}
+      {renderShareModal()}
+      {renderDateMemoModal()}
+      {renderGoalFlowModal()}
+      {renderLogEditModal()}
+      {renderQuarterEditModal()}
+      {renderHiddenCaptureArea()}
       {renderSystemModals()}
     </div>
   );
