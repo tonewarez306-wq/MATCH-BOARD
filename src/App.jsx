@@ -4027,10 +4027,11 @@ export default function App() {
     return Math.round((Math.acos(cosVal) * 180) / Math.PI);
   };
 
-  const computeAnglesFromLandmarks = (lm, isLeftFoot = false) => {
+  const computeAnglesFromLandmarks = (lm, isLeftFoot = false, isSynthetic = false) => {
     if (!Array.isArray(lm) || lm.length < 33) return null;
     // MediaPipe Pose 33 landmarks:
-    // 11:L_shoulder, 12:R_shoulder, 13:L_elbow, 14:R_elbow, 23:L_hip, 24:R_hip, 25:L_knee, 26:R_knee, 27:L_ankle, 28:R_ankle, 31:L_foot, 32:R_foot
+    // 11:L_shoulder, 12:R_shoulder, 13:L_elbow, 14:R_elbow, 15:L_wrist, 16:R_wrist
+    // 23:L_hip, 24:R_hip, 25:L_knee, 26:R_knee, 27:L_ankle, 28:R_ankle, 31:L_foot, 32:R_foot
     const kHip = isLeftFoot ? lm[23] : lm[24];
     const kKnee = isLeftFoot ? lm[25] : lm[26];
     const kAnkle = isLeftFoot ? lm[27] : lm[28];
@@ -4039,6 +4040,17 @@ export default function App() {
     const sKnee = isLeftFoot ? lm[26] : lm[25];
     const sAnkle = isLeftFoot ? lm[28] : lm[27];
     const kShoulder = isLeftFoot ? lm[11] : lm[12];
+
+    const vis = (pt) => (typeof pt?.visibility === 'number' ? pt.visibility : 0.9);
+    const inFrame = (pt) => pt && pt.x >= 0.02 && pt.x <= 0.98 && pt.y >= 0.02 && pt.y <= 0.97;
+    const lowerVisAvg = (vis(kHip) + vis(kKnee) + vis(kAnkle) + vis(sKnee) + vis(sAnkle)) / 5;
+    const isStandingLegGeometry =
+      inFrame(kHip) &&
+      inFrame(kKnee) &&
+      inFrame(kAnkle) &&
+      kKnee.y > kHip.y + 0.04 &&
+      kAnkle.y > kHip.y + 0.11;
+    const lowerBodyVisible = isSynthetic ? true : (lowerVisAvg >= 0.48 && isStandingLegGeometry);
 
     const midShoulder = { x: (lm[11].x + lm[12].x) / 2, y: (lm[11].y + lm[12].y) / 2 };
     const midHip = { x: (lm[23].x + lm[24].x) / 2, y: (lm[23].y + lm[24].y) / 2 };
@@ -4050,7 +4062,21 @@ export default function App() {
     const supportKnee = calcJointAngleDeg(sHip, sKnee, sAnkle) || 152;
     const hip = calcJointAngleDeg(kShoulder, kHip, kKnee) || 155;
     const ankle = calcJointAngleDeg(kKnee, kAnkle, kFoot) || 110;
-    return { knee, supportKnee, trunk: trunkLean, hip, ankle, detected: true };
+    return {
+      knee,
+      supportKnee,
+      trunk: trunkLean,
+      hip,
+      ankle,
+      detected: true,
+      lowerBodyVisible,
+      lowerVisAvg: Number(lowerVisAvg.toFixed(2)),
+      anklePos: { x: kAnkle?.x || 0.5, y: kAnkle?.y || 0.8 },
+      kneePos: { x: kKnee?.x || 0.5, y: kKnee?.y || 0.65 },
+      hipPos: { x: midHip.x, y: midHip.y },
+      wristL: { x: lm[15]?.x || 0.4, y: lm[15]?.y || 0.5 },
+      wristR: { x: lm[16]?.x || 0.6, y: lm[16]?.y || 0.5 }
+    };
   };
   const ensurePoseLandmarker = async () => {
     if (poseLandmarkerRef.current) return poseLandmarkerRef.current;
@@ -4146,8 +4172,10 @@ export default function App() {
   };
   const drawPoseSkeletonOverlay = (ctx, W, H, lm, angles, stepLabel = '', isLeftFoot = false) => {
     if (!ctx || !Array.isArray(lm) || lm.length < 33) return;
+    const isVis = (idx) => (lm[idx]?.visibility ?? 0.9) >= 0.42 && lm[idx].y <= 0.98;
     const pt = (idx) => ({ x: lm[idx].x * W, y: lm[idx].y * H });
     const drawBone = (i1, i2, color, width = 3) => {
+      if (!isVis(i1) || !isVis(i2)) return;
       const p1 = pt(i1);
       const p2 = pt(i2);
       ctx.save();
@@ -4164,16 +4192,18 @@ export default function App() {
     };
 
     // 골반 중심 수직 밸런스 기준선 (상체 기울기 비교용)
-    const midHip = { x: ((lm[23].x + lm[24].x) / 2) * W, y: ((lm[23].y + lm[24].y) / 2) * H };
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-    ctx.setLineDash([4, 4]);
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(midHip.x, Math.max(12, midHip.y - H * 0.36));
-    ctx.lineTo(midHip.x, Math.min(H - 12, midHip.y + H * 0.32));
-    ctx.stroke();
-    ctx.restore();
+    if (isVis(23) && isVis(24)) {
+      const midHip = { x: ((lm[23].x + lm[24].x) / 2) * W, y: ((lm[23].y + lm[24].y) / 2) * H };
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(midHip.x, Math.max(12, midHip.y - H * 0.36));
+      ctx.lineTo(midHip.x, Math.min(H - 12, midHip.y + H * 0.32));
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // 상체 및 양팔 스켈레톤 (스카이 블루)
     [[11, 12], [11, 23], [12, 24], [23, 24], [11, 13], [13, 15], [12, 14], [14, 16]].forEach(([a, b]) =>
@@ -4188,6 +4218,7 @@ export default function App() {
 
     // 주요 관절 노드 포인트 렌더링
     [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 31, 32].forEach((idx) => {
+      if (!isVis(idx)) return;
       const p = pt(idx);
       const isKickJoint = isLeftFoot ? [25, 27, 31].includes(idx) : [26, 28, 32].includes(idx);
       ctx.fillStyle = isKickJoint ? '#FACC15' : '#FFFFFF';
@@ -4219,9 +4250,15 @@ export default function App() {
         ctx.textBaseline = 'middle';
         ctx.fillText(text, bx + 5, by + 7.5);
       };
-      drawBadge(midShPt.x + 10, midShPt.y - 6, `상체 ${angles.trunk}°`, '#38BDF8');
-      drawBadge(kKneePt.x + 10, kKneePt.y - 8, `무릎 ${angles.knee}°`, '#FACC15');
-      drawBadge(kAnklePt.x + 10, kAnklePt.y - 4, `발목 ${angles.ankle}°`, '#F43F5E');
+      if (isVis(11) && isVis(12)) {
+        drawBadge(midShPt.x + 10, midShPt.y - 6, `상체 ${angles.trunk}°`, '#38BDF8');
+      }
+      if (angles.lowerBodyVisible !== false) {
+        drawBadge(kKneePt.x + 10, kKneePt.y - 8, `무릎 ${angles.knee}°`, '#FACC15');
+        drawBadge(kAnklePt.x + 10, kAnklePt.y - 4, `발목 ${angles.ankle}°`, '#F43F5E');
+      } else {
+        drawBadge(10, H - 24, '⚠️ 하체(무릎·발목) 미감지 · 전신 촬영 필요', '#FB7185');
+      }
     }
 
     if (stepLabel) {
@@ -4350,11 +4387,8 @@ export default function App() {
                   lm = res.landmarks[0];
                 }
               }
-              if (!lm) {
-                lm = buildKinematicLandmarksForFrame(offCtx, 320, 180, poseActiveFrameIdx, poseSkillType, isLeft);
-              }
               cachedLandmarks = lm;
-              cachedAngles = computeAnglesFromLandmarks(lm, isLeft);
+              cachedAngles = lm ? computeAnglesFromLandmarks(lm, isLeft, false) : null;
               if (cachedAngles) setPoseLiveAngles(cachedAngles);
             } catch {}
           }
@@ -4372,11 +4406,92 @@ export default function App() {
       if (poseLiveRafRef.current) cancelAnimationFrame(poseLiveRafRef.current);
     };
   }, [appState, activeTab, recordSubTab, isPoseCameraActive, poseRecordedVideoUrl, poseShowSkeleton, poseDominantFoot, poseSkillType, poseActiveFrameIdx]);
-  const buildBiomechanicalBaselineReport = (skillType, frames, playerName, dominantFoot) => {
+  const buildBiomechanicalBaselineReport = (skillType, frames, playerName, dominantFoot, isSample = false) => {
     const cfg = POSE_SKILL_CONFIG[skillType] || POSE_SKILL_CONFIG.shoot;
-    const impactFrame = frames[3] || frames[0] || {};
-    const backswingFrame = frames[2] || impactFrame;
-    const followFrame = frames[4] || impactFrame;
+    const validFrames = Array.isArray(frames) ? frames : [];
+
+    // 1. 실제 축구 하체 동작 유효성 검증 (앉아서 팔만 흔들거나 하체가 화면에 없는 경우 걸러냄)
+    const detectedCount = validFrames.filter((f) => f.angles?.detected).length;
+    const visibleLowerCount = validFrames.filter((f) => f.angles?.lowerBodyVisible).length;
+
+    // 6프레임 간 발목(anklePos) 이동 반경 및 무릎 각도 변화 폭 계산
+    const anklePoints = validFrames
+      .filter((f) => f.angles?.lowerBodyVisible && f.angles?.anklePos)
+      .map((f) => f.angles.anklePos);
+    let ankleSpan = 0;
+    for (let i = 0; i < anklePoints.length; i++) {
+      for (let j = i + 1; j < anklePoints.length; j++) {
+        const d = Math.hypot(anklePoints[i].x - anklePoints[j].x, anklePoints[i].y - anklePoints[j].y);
+        if (d > ankleSpan) ankleSpan = d;
+      }
+    }
+
+    // 손목(팔) 이동 반경 계산 (앉아서 팔만 휘두르는지 판별)
+    const wristPoints = validFrames
+      .filter((f) => f.angles?.wristL || f.angles?.wristR)
+      .map((f) => f.angles.wristR || f.angles.wristL);
+    let wristSpan = 0;
+    for (let i = 0; i < wristPoints.length; i++) {
+      for (let j = i + 1; j < wristPoints.length; j++) {
+        const d = Math.hypot(wristPoints[i].x - wristPoints[j].x, wristPoints[i].y - wristPoints[j].y);
+        if (d > wristSpan) wristSpan = d;
+      }
+    }
+
+    const validKnees = validFrames
+      .filter((f) => f.angles?.lowerBodyVisible && f.angles?.knee > 0)
+      .map((f) => f.angles.knee);
+    const kneeRange = validKnees.length >= 2 ? Math.max(...validKnees) - Math.min(...validKnees) : 0;
+
+    const avgLowerMotion = validFrames.reduce((acc, f) => acc + (f.lowerMotion || 0), 0) / Math.max(1, validFrames.length);
+    const avgUpperMotion = validFrames.reduce((acc, f) => acc + (f.upperMotion || 0), 0) / Math.max(1, validFrames.length);
+
+    const noLowerBody = !isSample && visibleLowerCount < 3;
+    const onlyArmOrStatic = !isSample && (
+      (ankleSpan < 0.055 && kneeRange < 12) ||
+      (avgLowerMotion < 4.2 && ankleSpan < 0.08) ||
+      (wristSpan > ankleSpan * 2.2 && ankleSpan < 0.085) ||
+      (avgUpperMotion > avgLowerMotion * 2.4 && ankleSpan < 0.09)
+    );
+
+    if (noLowerBody || onlyArmOrStatic || (!isSample && detectedCount < 2)) {
+      const invalidReason = noLowerBody
+        ? '화면에 하체(골반·무릎·발목)가 나오지 않거나 앉은 자세로 촬영되어 축구 동작을 계측할 수 없습니다.'
+        : '하체 스윙이나 킥/터치 움직임이 거의 감지되지 않았습니다 (상체나 팔 움직임만 감지됨).';
+      const lowScore = noLowerBody ? 12 : 18;
+      return {
+        isInvalidAction: true,
+        overallScore: lowScore,
+        grade: 'F (재촬영)',
+        styleTag: noLowerBody ? '⚠️ 하체(무릎·발목) 미감지 · 측정 무효' : '⚠️ 축구 하체 스윙 미감지 · 측정 무효',
+        summary: `${invalidReason} 정확한 ${cfg.label} 자세 코칭을 위해 카메라를 3~4m 거리에 두고 머리부터 발끝(공 포함)까지 전신이 모두 나오도록 서서 실제 동작을 촬영해 주세요.`,
+        strengths: [
+          '현재 영상에서는 유효한 축구 하체 스윙 메커니즘이 확인되지 않았습니다.'
+        ],
+        weakness: `${invalidReason} 앉아서 팔만 움직이거나 상체만 촬영된 영상으로는 디딤발·백스윙·발목 임팩트 각도를 평가할 수 없습니다.`,
+        correctionTip: '휴대폰을 허리~가슴 높이에 거치하고, 선수 전신(머리~양발 끝)과 축구공이 화면 안에 온전히 들어온 상태에서 실제 킥/터치 동작을 수행해 주세요.',
+        recommendedDrills: [
+          '카메라 3~4m 거리 전신 프레임 세팅 후 재촬영',
+          '공 옆 디딤발 짚기부터 팔로스루까지 전신 스윙 수행'
+        ],
+        axisScores: cfg.axes.map((name) => ({ name, score: lowScore })),
+        stepReviews: cfg.steps.map((stepTitle, idx) => {
+          const f = validFrames[idx];
+          const visMsg = f?.angles?.lowerBodyVisible
+            ? `하체 움직임 부족 (무릎 각도 변화 ${kneeRange}°, 스윙 폭 ${Math.round(ankleSpan * 100)}%)`
+            : '하체(무릎·발목) 관절이 화면 밖이거나 가려져 감지되지 않았습니다.';
+          return { stepTitle, comment: `⚠️ ${visMsg}` };
+        }),
+        impactAngles: validFrames[3]?.angles || { knee: 0, trunk: 0, ankle: 0, hip: 0, supportKnee: 0, lowerBodyVisible: false },
+        backswingAngles: validFrames[2]?.angles || { knee: 0, trunk: 0, ankle: 0, hip: 0, lowerBodyVisible: false },
+        source: 'biomechanics-validation',
+        generatedAt: new Date().toISOString()
+      };
+    }
+
+    const impactFrame = validFrames[3] || validFrames[0] || {};
+    const backswingFrame = validFrames[2] || impactFrame;
+    const followFrame = validFrames[4] || impactFrame;
     const impAngles = impactFrame.angles || { knee: 142, trunk: 13, ankle: 112, hip: 154, supportKnee: 150 };
     const backAngles = backswingFrame.angles || { knee: 108, trunk: 11, ankle: 105, hip: 162 };
 
@@ -4384,10 +4499,19 @@ export default function App() {
     const [minTrunk, maxTrunk] = cfg.idealTrunkLean;
     const [minAnkle, maxAnkle] = cfg.idealAnkleLock;
 
+    // 동적 스윙 진폭 계수 (실제 다리 스윙 폭과 무릎 굴신 폭이 작으면 점수 대폭 감점)
+    const swingFactor = isSample
+      ? 1.0
+      : Math.min(1.0, Math.max(0.45, (ankleSpan / 0.16) * 0.55 + (kneeRange / 28) * 0.45));
+
     const scoreRange = (val, low, high) => {
-      if (val >= low && val <= high) return 93;
-      const diff = val < low ? low - val : val - high;
-      return Math.max(66, Math.min(96, Math.round(92 - diff * 1.15)));
+      if (!val || val <= 0) return 30;
+      let raw = 93;
+      if (val < low || val > high) {
+        const diff = val < low ? low - val : val - high;
+        raw = Math.max(32, Math.min(95, Math.round(91 - diff * 1.45)));
+      }
+      return Math.max(25, Math.min(96, Math.round(raw * (0.35 + 0.65 * swingFactor))));
     };
 
     const s1 = scoreRange(impAngles.supportKnee || 150, 140, 162);
@@ -4397,10 +4521,10 @@ export default function App() {
     const s5 = scoreRange(followFrame?.angles?.knee || 156, 145, 172);
     const axisScores = cfg.axes.map((name, i) => ({
       name,
-      score: [s1, s2, s3, s4, s5][i] || 86
+      score: [s1, s2, s3, s4, s5][i] || 70
     }));
     const overallScore = Math.round(axisScores.reduce((acc, a) => acc + a.score, 0) / axisScores.length);
-    const grade = overallScore >= 92 ? 'S+' : overallScore >= 87 ? 'S' : overallScore >= 80 ? 'A' : 'B+';
+    const grade = overallScore >= 92 ? 'S+' : overallScore >= 85 ? 'S' : overallScore >= 78 ? 'A' : overallScore >= 68 ? 'B' : overallScore >= 50 ? 'C' : 'D';
 
     const trunkStatus = impAngles.trunk > maxTrunk
       ? `임팩트 순간 상체 기울기(${impAngles.trunk}°)가 다소 커서 볼이 뜰 위험이 있습니다.`
@@ -4413,46 +4537,49 @@ export default function App() {
       shoot: [
         `공을 향한 진입 각도와 시선 고정이 안정적입니다.`,
         `디딤발 무릎 각도(${impAngles.supportKnee || 150}°)가 체중을 단단히 지탱합니다.`,
-        `백스윙 무릎 굴곡(${backAngles.knee}°)으로 충분한 스윙 에너지를 축적했습니다.`,
+        `백스윙 무릎 굴곡(${backAngles.knee}°)으로 스윙 에너지를 준비했습니다.`,
         `임팩트 순간 무릎(${impAngles.knee}°)·발목(${impAngles.ankle}°) 각도가 포착되었습니다. ${ankleStatus}`,
-        `타격 직후 차는 발이 목표 방향으로 자연스럽게 뻗어 나갑니다.`,
-        `피니시 동작에서 양팔 밸런스와 코어 중심이 무너지지 않았습니다.`
+        `타격 직후 차는 발이 목표 방향으로 뻗어 나갑니다.`,
+        `피니시 동작에서 양팔 밸런스와 코어 중심을 유지했습니다.`
       ],
       pass: [
-        `패스 전 주변 공간 스캔 후 공에 부드럽게 접근합니다.`,
-        `디딤발 끝이 패스 목표 방향과 일직선으로 정렬되었습니다.`,
-        `고관절과 발목을 열어 넓은 인사이드 타격면을 확보했습니다.`,
-        `임팩트 발목 각도(${impAngles.ankle}°)로 공의 정중앙을 정확히 밀어냈습니다.`,
-        `타격 후 발이 바깥으로 돌아가지 않고 패스 결을 따라 진행합니다.`,
-        `체중이 앞쪽으로 이동하며 다음 움직임으로 즉시 연결 가능한 자세입니다.`
+        `패스 전 주변 공간 스캔 후 공에 접근합니다.`,
+        `디딤발 끝이 패스 목표 방향과 정렬되었습니다.`,
+        `고관절과 발목을 열어 인사이드 타격면을 확보했습니다.`,
+        `임팩트 발목 각도(${impAngles.ankle}°)로 공을 밀어냈습니다.`,
+        `타격 후 발이 패스 결을 따라 진행합니다.`,
+        `체중이 앞쪽으로 이동하며 다음 움직임으로 연결 가능한 자세입니다.`
       ],
       touch: [
-        `공이 도달하기 전 잔발 스텝으로 반응 속도를 높였습니다.`,
+        `공이 도달하기 전 스텝으로 반응 속도를 높였습니다.`,
         `공의 궤적과 속도를 읽고 상체 무게중심을 낮추었습니다.`,
         `마중 나가는 발의 힘을 빼고 첫 터치 각도를 준비했습니다.`,
         `터치 순간 무릎(${impAngles.knee}°)과 발목(${impAngles.ankle}°)의 쿠션감으로 속도를 흡수했습니다.`,
-        `공이 발밑 제어권(1m 이내)에 안정적으로 안착되었습니다.`,
-        `시선을 바로 들어 다음 패스·슈팅 동작으로 연결할 준비를 마쳤습니다.`
+        `공이 발밑 제어권에 안착되었습니다.`,
+        `시선을 바로 들어 다음 동작으로 연결할 준비를 마쳤습니다.`
       ]
     };
 
     const stepNotes = defaultStepNotes[skillType] || defaultStepNotes.shoot;
     return {
+      isInvalidAction: false,
       overallScore,
       grade,
       styleTag: skillType === 'shoot'
-        ? (overallScore >= 88 ? '⚡ 임팩트 밸런스가 잡힌 파워 스트라이커' : '🎯 코어 고정이 필요한 성장형 슈터')
+        ? (overallScore >= 85 ? '⚡ 임팩트 밸런스가 잡힌 파워 스트라이커' : overallScore >= 68 ? '🎯 코어 고정이 필요한 성장형 슈터' : '🔧 기본 하체 스윙 교정이 필요한 슈터')
         : skillType === 'pass'
-          ? (overallScore >= 88 ? '🧭 정교한 앵글의 마에스트로 패서' : '📐 디딤발 정렬을 다듬는 빌드업 플레이어')
-          : (overallScore >= 88 ? '🪶 벨벳 쿠션 퍼스트 터치 마스터' : '👟 감속 컨트롤을 익히는 테크니션'),
+          ? (overallScore >= 85 ? '🧭 정교한 앵글의 마에스트로 패서' : overallScore >= 68 ? '📐 디딤발 정렬을 다듬는 빌드업 플레이어' : '🔧 인사이드 임팩트 교정이 필요한 패서')
+          : (overallScore >= 85 ? '🪶 벨벳 쿠션 퍼스트 터치 마스터' : overallScore >= 68 ? '👟 감속 컨트롤을 익히는 테크니션' : '🔧 하체 쿠션 밸런스 연습이 필요한 플레이어'),
       summary: `${playerName} 선수의 ${dominantFoot} ${cfg.label} 6단계 바이오메카닉스 분석 결과, 종합 ${overallScore}점(${grade})을 기록했습니다. ${trunkStatus}`,
       strengths: [
-        `디딤발 무릎 지지 각도(${impAngles.supportKnee || 150}°)가 안정적이어서 하체 축이 흔들리지 않습니다.`,
+        `디딤발 무릎 지지 각도(${impAngles.supportKnee || 150}°)와 하체 축이 감지되었습니다.`,
         ankleStatus
       ],
-      weakness: impAngles.trunk > maxTrunk
-        ? `임팩트 순간 상체가 ${impAngles.trunk}° 기울어져 무게중심이 뒤로 빠지는 경향이 있습니다.`
-        : `백스윙 정점에서 임팩트까지 골반 회전 타이밍을 0.05초 더 빠르게 가져가면 파워가 한층 증가합니다.`,
+      weakness: swingFactor < 0.72
+        ? `하체 백스윙~팔로스루 스윙 폭(무릎 각도 변화 ${kneeRange}°)이 작아 볼에 충분한 운동 에너지가 전달되지 않았습니다.`
+        : impAngles.trunk > maxTrunk
+          ? `임팩트 순간 상체가 ${impAngles.trunk}° 기울어져 무게중심이 뒤로 빠지는 경향이 있습니다.`
+          : `백스윙 정점에서 임팩트까지 골반 회전 타이밍을 0.05초 더 빠르게 가져가면 파워가 한층 증가합니다.`,
       correctionTip: skillType === 'shoot'
         ? `공을 타격하는 순간 코어에 힘을 주고 가슴이 공 위를 덮는다는 느낌(상체 기울기 10~15° 유지)으로 임팩트 후 차는 발로 착지해 보세요.`
         : skillType === 'pass'
@@ -4474,45 +4601,62 @@ export default function App() {
       generatedAt: new Date().toISOString()
     };
   };
-  const enrichPoseReportWithGemini = async (baseReport, skillType, frames, playerName, dominantFoot, explicitApiKey = null) => {
+  const enrichPoseReportWithGemini = async (baseReport, skillType, frames, playerName, dominantFoot, explicitApiKey = null, isSample = false) => {
     const cfg = POSE_SKILL_CONFIG[skillType] || POSE_SKILL_CONFIG.shoot;
     const customApiKey = (explicitApiKey || geminiApiKey || import.meta.env?.VITE_GEMINI_API_KEY || '').trim();
     const angleSummaryLines = frames
-      .map((f, idx) => `- ${cfg.steps[idx]} (${f.timeSec}s): 무릎 ${f.angles?.knee}° / 상체기울기 ${f.angles?.trunk}° / 발목 ${f.angles?.ankle}° / 디딤발무릎 ${f.angles?.supportKnee}°`)
+      .map((f, idx) => {
+        const visTag = f.angles?.lowerBodyVisible ? '하체감지됨' : '⚠️하체미감지(화면밖/가려짐)';
+        return `- ${cfg.steps[idx]} (${f.timeSec}s) [${visTag}]: 무릎 ${f.angles?.knee || 0}° / 상체기울기 ${f.angles?.trunk || 0}° / 발목 ${f.angles?.ankle || 0}° / 디딤발무릎 ${f.angles?.supportKnee || 0}°`;
+      })
       .join('\n');
 
-    const prompt = `당신은 프로 축구 구단의 바이오메카닉스(운동역학) 및 자세 교정 전담 AI 코치입니다.
-첨부된 연속 프레임 이미지(1단계~6단계)와 관절 각도 계측 데이터를 바탕으로 [${playerName}] 선수의 [${dominantFoot} ${cfg.label}] 자세를 정밀 분석해 주세요.
+    const preValidationNote = baseReport?.isInvalidAction
+      ? `\n[중요 사전 검증 경고]: 스켈레톤 계측 결과 "${baseReport.summary}" 상태입니다. 실제 전신 축구 동작이 아니라면 절대 30점 이상을 주지 마세요.\n`
+      : '';
 
+    const prompt = `당신은 프로 축구 구단의 바이오메카닉스(운동역학) 및 자세 교정 전담 AI 코치입니다.
+첨부된 연속 프레임 이미지(1단계~6단계)와 관절 각도 계측 데이터를 바탕으로 [${playerName}] 선수의 [${dominantFoot} ${cfg.label}] 자세를 엄격하고 정밀하게 평가해 주세요.
+${preValidationNote}
 [측정된 6단계 관절 각도 데이터]
 ${angleSummaryLines}
+
+[엄격 채점 및 무효 판정 규칙 - 반드시 준수]
+1. 먼저 첨부된 이미지에서 선수가 서서 하체(골반·무릎·발목·발)가 화면에 나온 상태로 실제 축구 [${cfg.label}] 동작을 수행했는지 판별하세요 ("isValidAction": true 또는 false).
+2. 만약 의자에 앉아 있거나, 하체(다리·발)가 화면에 보이지 않거나, 가만히 서서 팔/손만 흔들거나, 축구 동작과 무관한 행동이라면:
+   - "isValidAction": false 로 설정하세요.
+   - "overallScore"는 반드시 5~25점 사이로 부여하세요 (절대 60~70점 이상 주지 마세요!).
+   - "axisScores"의 각 항목 점수도 모두 10~25점 사이로 부여하세요.
+   - "summary"와 "weakness"에 "앉아서 팔만 움직이거나 하체가 나오지 않아 축구 자세로 평가할 수 없으며 전신 재촬영이 필요합니다"라고 명확히 지적하세요.
+3. 실제 전신 축구 동작이 맞더라도 대충 다리만 살짝 흔든 수준이면 35~58점, 아마추어 보통 자세는 60~76점, 프로급의 정확한 밸런스와 임팩트만 80~96점을 부여하세요.
 
 [핵심 평가 항목 5가지]
 ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
 
 반드시 아래 JSON 스키마로만 응답하세요 (마크다운 코드블록 없이 순수 JSON 객체만 출력):
 {
-  "overallScore": 65에서 98 사이의 종합 자세 점수(숫자),
-  "styleTag": "자세 특징을 한눈에 보여주는 코칭 별명 (예: 임팩트 축이 단단한 인스텝 캐논슈터)",
-  "summary": "촬영된 영상의 전반적인 자세 밸런스와 임팩트 메커니즘 총평 2문장",
-  "strengths": ["영상에서 확인된 좋은 자세 포인트 1", "좋은 자세 포인트 2"],
-  "weakness": "가장 시급히 교정해야 할 자세 문제점 1~2문장 (디딤발, 상체 기울기, 발목 고정 등 구체적 언급)",
-  "correctionTip": "즉시 필드에서 따라할 수 있는 원포인트 교정 비법 1~2문장",
+  "isValidAction": true,
+  "overallScore": 0에서 98 사이의 엄격한 종합 자세 점수(숫자),
+  "styleTag": "자세 특징을 한눈에 보여주는 코칭 별명 (무효 동작일 경우 '⚠️ 축구 하체 동작 미감지 · 재촬영 필요')",
+  "summary": "촬영된 영상의 실제 동작 여부 및 전반적인 자세 밸런스 총평 2문장",
+  "strengths": ["영상에서 확인된 좋은 포인트 1 (무효 동작이면 '유효한 축구 하체 동작이 확인되지 않았습니다')"],
+  "weakness": "가장 시급히 교정해야 할 문제점 또는 무효 판정 사유 1~2문장",
+  "correctionTip": "즉시 따라할 수 있는 교정 비법 또는 올바른 전신 촬영 가이드 1~2문장",
   "recommendedDrills": ["맞춤 교정 훈련 드릴 1", "맞춤 교정 훈련 드릴 2"],
   "axisScores": [
-    { "name": "${cfg.axes[0]}", "score": 85 },
-    { "name": "${cfg.axes[1]}", "score": 88 },
-    { "name": "${cfg.axes[2]}", "score": 84 },
-    { "name": "${cfg.axes[3]}", "score": 86 },
-    { "name": "${cfg.axes[4]}", "score": 87 }
+    { "name": "${cfg.axes[0]}", "score": 75 },
+    { "name": "${cfg.axes[1]}", "score": 78 },
+    { "name": "${cfg.axes[2]}", "score": 74 },
+    { "name": "${cfg.axes[3]}", "score": 76 },
+    { "name": "${cfg.axes[4]}", "score": 77 }
   ],
   "stepComments": [
-    "1단계(${cfg.steps[0]}) 프레임 자세 코멘트",
-    "2단계(${cfg.steps[1]}) 프레임 자세 코멘트",
-    "3단계(${cfg.steps[2]}) 프레임 자세 코멘트",
-    "4단계(${cfg.steps[3]}) 프레임 자세 코멘트",
-    "5단계(${cfg.steps[4]}) 프레임 자세 코멘트",
-    "6단계(${cfg.steps[5]}) 프레임 자세 코멘트"
+    "1단계(${cfg.steps[0]}) 프레임 실제 관측 코멘트",
+    "2단계(${cfg.steps[1]}) 프레임 실제 관측 코멘트",
+    "3단계(${cfg.steps[2]}) 프레임 실제 관측 코멘트",
+    "4단계(${cfg.steps[3]}) 프레임 실제 관측 코멘트",
+    "5단계(${cfg.steps[4]}) 프레임 실제 관측 코멘트",
+    "6단계(${cfg.steps[5]}) 프레임 실제 관측 코멘트"
   ]
 }`;
 
@@ -4543,7 +4687,7 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
                 }
               ],
               generationConfig: {
-                temperature: 0.7,
+                temperature: 0.4,
                 responseMimeType: 'application/json'
               }
             })
@@ -4568,18 +4712,47 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
       }
 
       if (parsed && parsed.summary) {
-        const score = Number(parsed.overallScore) || baseReport.overallScore;
+        const rawScore = Number(parsed.overallScore);
+        const isInvalid = parsed.isValidAction === false || (!isSample && baseReport?.isInvalidAction);
+        let score = Number.isFinite(rawScore) ? Math.round(rawScore) : baseReport.overallScore;
+        if (isInvalid) {
+          score = Math.min(score, 24);
+        }
+        const grade = isInvalid || score < 35
+          ? 'F (재촬영)'
+          : score >= 92
+            ? 'S+'
+            : score >= 85
+              ? 'S'
+              : score >= 78
+                ? 'A'
+                : score >= 68
+                  ? 'B'
+                  : score >= 50
+                    ? 'C'
+                    : 'D';
+
+        const finalAxes = Array.isArray(parsed.axisScores) && parsed.axisScores.length === 5
+          ? parsed.axisScores.map((ax, idx) => ({
+              name: cfg.axes[idx] || ax.name,
+              score: isInvalid ? Math.min(25, Number(ax.score) || 15) : Math.max(10, Math.min(98, Number(ax.score) || score))
+            }))
+          : baseReport.axisScores;
+
         return {
           ...baseReport,
+          isInvalidAction: isInvalid,
           overallScore: score,
-          grade: score >= 92 ? 'S+' : score >= 87 ? 'S' : score >= 80 ? 'A' : 'B+',
-          styleTag: parsed.styleTag || baseReport.styleTag,
+          grade,
+          styleTag: isInvalid
+            ? (parsed.styleTag && parsed.styleTag.includes('⚠️') ? parsed.styleTag : '⚠️ 축구 하체 동작 미감지 · 재촬영 필요')
+            : (parsed.styleTag || baseReport.styleTag),
           summary: parsed.summary || baseReport.summary,
           strengths: Array.isArray(parsed.strengths) && parsed.strengths.length > 0 ? parsed.strengths : baseReport.strengths,
           weakness: parsed.weakness || baseReport.weakness,
           correctionTip: parsed.correctionTip || baseReport.correctionTip,
           recommendedDrills: Array.isArray(parsed.recommendedDrills) && parsed.recommendedDrills.length > 0 ? parsed.recommendedDrills : baseReport.recommendedDrills,
-          axisScores: Array.isArray(parsed.axisScores) && parsed.axisScores.length === 5 ? parsed.axisScores : baseReport.axisScores,
+          axisScores: finalAxes,
           stepReviews: Array.isArray(parsed.stepComments) && parsed.stepComments.length === 6
             ? cfg.steps.map((stepTitle, i) => ({ stepTitle, comment: parsed.stepComments[i] || baseReport.stepReviews[i]?.comment }))
             : baseReport.stepReviews,
@@ -4635,6 +4808,7 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
       const skelCtx = skelCanvas.getContext('2d');
 
       const extracted = [];
+      let prevGray = null;
       for (let i = 0; i < 6; i++) {
         const targetTime = Number(Math.max(0.05, Math.min(validDur - 0.05, validDur * ratios[i])).toFixed(2));
         await new Promise((resolve) => {
@@ -4655,7 +4829,41 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
           rawCtx.drawImage(tempVideo, 0, 0, W, H);
         } catch {}
 
-        setPoseAnalysisStatusText(`2/3 33관절 스켈레톤 및 각도 계측 중 (${i + 1}/6)...`);
+        // 상체 영역(상단 50%) vs 하체 영역(하단 50%) 픽셀 움직임 계측
+        let upperMotion = 0;
+        let lowerMotion = 0;
+        try {
+          const imgData = rawCtx.getImageData(0, 0, W, H).data;
+          const curGray = new Uint8Array(W * H);
+          let uDiff = 0;
+          let lDiff = 0;
+          let uCnt = 0;
+          let lCnt = 0;
+          const halfY = Math.floor(H * 0.52);
+          for (let y = 0; y < H; y += 2) {
+            for (let x = 0; x < W; x += 2) {
+              const idx = y * W + x;
+              const p = idx * 4;
+              const lum = (imgData[p] * 77 + imgData[p + 1] * 150 + imgData[p + 2] * 29) >> 8;
+              curGray[idx] = lum;
+              if (prevGray) {
+                const diff = Math.abs(lum - prevGray[idx]);
+                if (y < halfY) {
+                  uDiff += diff;
+                  uCnt++;
+                } else {
+                  lDiff += diff;
+                  lCnt++;
+                }
+              }
+            }
+          }
+          prevGray = curGray;
+          upperMotion = uCnt > 0 ? Number((uDiff / uCnt).toFixed(2)) : 0;
+          lowerMotion = lCnt > 0 ? Number((lDiff / lCnt).toFixed(2)) : 0;
+        } catch {}
+
+        setPoseAnalysisStatusText(`2/3 33관절 스켈레톤 및 하체 가시성 검증 중 (${i + 1}/6)...`);
         let lm = null;
         if (landmarker) {
           try {
@@ -4663,10 +4871,17 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
             if (res?.landmarks?.[0]?.length >= 33) lm = res.landmarks[0];
           } catch {}
         }
-        if (!lm) {
-          lm = buildKinematicLandmarksForFrame(rawCtx, W, H, i, poseSkillType, isLeft);
-        }
-        const angles = computeAnglesFromLandmarks(lm, isLeft) || { knee: 144, supportKnee: 151, trunk: 12, hip: 156, ankle: 110 };
+
+        const angles = (lm && computeAnglesFromLandmarks(lm, isLeft, false)) || {
+          knee: 0,
+          supportKnee: 0,
+          trunk: 0,
+          hip: 0,
+          ankle: 0,
+          detected: false,
+          lowerBodyVisible: false,
+          lowerVisAvg: 0
+        };
 
         skelCtx.clearRect(0, 0, W, H);
         skelCtx.drawImage(rawCanvas, 0, 0, W, H);
@@ -4678,14 +4893,16 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
           timeSec: targetTime,
           rawDataUrl: rawCanvas.toDataURL('image/jpeg', 0.72),
           skeletonDataUrl: skelCanvas.toDataURL('image/jpeg', 0.78),
-          angles
+          angles,
+          upperMotion,
+          lowerMotion
         });
       }
 
       setPoseKeyframes(extracted);
       setPoseActiveFrameIdx(3);
 
-      const baseReport = buildBiomechanicalBaselineReport(poseSkillType, extracted, playerName, poseDominantFoot);
+      const baseReport = buildBiomechanicalBaselineReport(poseSkillType, extracted, playerName, poseDominantFoot, false);
       const initialSession = {
         id: `pose_${Date.now()}`,
         teamId: activeTeamId,
@@ -4703,7 +4920,7 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
       setPoseCurrentSession(initialSession);
 
       setPoseAnalysisStatusText('3/3 Gemini 2.5 비전 AI 프로 코칭 리포트 생성 중...');
-      const finalReport = await enrichPoseReportWithGemini(baseReport, poseSkillType, extracted, playerName, poseDominantFoot);
+      const finalReport = await enrichPoseReportWithGemini(baseReport, poseSkillType, extracted, playerName, poseDominantFoot, null, false);
       setPoseCurrentSession((prev) => (prev ? { ...prev, aiReport: finalReport } : prev));
     } finally {
       setIsAnalyzingPose(false);
@@ -4819,7 +5036,7 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
       ctx.stroke();
 
       const lm = buildKinematicLandmarksForFrame(ctx, W, H, i, poseSkillType, isLeft);
-      const angles = computeAnglesFromLandmarks(lm, isLeft);
+      const angles = computeAnglesFromLandmarks(lm, isLeft, true);
       const rawDataUrl = canvas.toDataURL('image/jpeg', 0.75);
 
       // 축구공 위치 렌더링
@@ -4840,14 +5057,16 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
         timeSec: sampleTimes[i],
         rawDataUrl,
         skeletonDataUrl: canvas.toDataURL('image/jpeg', 0.8),
-        angles
+        angles,
+        upperMotion: 12,
+        lowerMotion: 18
       });
     }
 
     setPoseRecordedVideoUrl(null);
     setPoseKeyframes(extracted);
     setPoseActiveFrameIdx(3);
-    const baseReport = buildBiomechanicalBaselineReport(poseSkillType, extracted, playerName, poseDominantFoot);
+    const baseReport = buildBiomechanicalBaselineReport(poseSkillType, extracted, playerName, poseDominantFoot, true);
     const initialSession = {
       id: `pose_${Date.now()}`,
       teamId: activeTeamId,
@@ -4863,8 +5082,6 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
       createdAt: new Date().toISOString()
     };
     setPoseCurrentSession(initialSession);
-    const finalReport = await enrichPoseReportWithGemini(baseReport, poseSkillType, extracted, playerName, poseDominantFoot);
-    setPoseCurrentSession((prev) => (prev ? { ...prev, aiReport: finalReport } : prev));
     setIsAnalyzingPose(false);
     setPoseAnalysisStatusText('');
   };
@@ -9213,9 +9430,15 @@ const renderGoalFlowModal = () => {
                               <div className={`text-[10px] font-black truncate ${isSelected ? 'text-cyan-300' : 'text-slate-200'}`}>
                                 {kf.label}
                               </div>
-                              <div className="text-[9px] text-slate-400 font-bold truncate">
-                                무릎 {kf.angles?.knee}° · 상체 {kf.angles?.trunk}°
-                              </div>
+                              {kf.angles?.lowerBodyVisible ? (
+                                <div className="text-[9px] text-slate-400 font-bold truncate">
+                                  무릎 {kf.angles?.knee}° · 상체 {kf.angles?.trunk}°
+                                </div>
+                              ) : (
+                                <div className="text-[9px] text-rose-400 font-black truncate">
+                                  ⚠️ 하체(무릎·발) 미감지
+                                </div>
+                              )}
                             </div>
                           </button>
                         );
@@ -9239,20 +9462,21 @@ const renderGoalFlowModal = () => {
                 {/* 5. 영상 하단 즉석 AI 자세 코칭 리포트 */}
                 {poseCurrentSession?.aiReport && (() => {
                   const rep = poseCurrentSession.aiReport;
+                  const isInvalid = Boolean(rep.isInvalidAction || rep.overallScore < 35);
                   return (
-                    <div className="bg-gradient-to-b from-indigo-950/65 via-slate-900 to-slate-900 border border-cyan-500/40 rounded-3xl p-4 space-y-3.5 shadow-xl animate-in fade-in overflow-hidden">
+                    <div className={`bg-gradient-to-b ${isInvalid ? 'from-rose-950/65 via-slate-900 to-slate-900 border-rose-500/50' : 'from-indigo-950/65 via-slate-900 to-slate-900 border-cyan-500/40'} border rounded-3xl p-4 space-y-3.5 shadow-xl animate-in fade-in overflow-hidden`}>
                       {/* 상단 종합 자세 점수 & 스타일 별명 */}
                       <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3 min-w-0">
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 whitespace-nowrap">
-                              {poseCurrentSession.dominantFoot} {poseCurrentSession.skillLabel} AI 진단
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full whitespace-nowrap ${isInvalid ? 'bg-rose-500/20 text-rose-300 border border-rose-400/40' : 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/40'}`}>
+                              {isInvalid ? '⚠️ 유효 동작 미감지 · 재촬영 권고' : `${poseCurrentSession.dominantFoot} ${poseCurrentSession.skillLabel} AI 진단`}
                             </span>
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 whitespace-nowrap">
-                              {rep.source === 'gemini-vision-ai' ? '✨ Gemini 2.5 멀티모달 비전' : '🦴 33관절 바이오메카닉스 엔진'}
+                              {rep.source === 'gemini-vision-ai' ? '✨ Gemini 2.5 멀티모달 비전' : '🦴 33관절 바이오메카닉스 검증'}
                             </span>
                           </div>
-                          <div className="text-sm sm:text-base font-black text-amber-300 leading-snug break-keep">
+                          <div className={`text-sm sm:text-base font-black leading-snug break-keep ${isInvalid ? 'text-rose-300' : 'text-amber-300'}`}>
                             “{rep.styleTag}”
                           </div>
                           <div className="text-[11px] text-slate-400 font-bold truncate">
@@ -9260,16 +9484,16 @@ const renderGoalFlowModal = () => {
                           </div>
                         </div>
 
-                        <div className="bg-slate-950/90 border border-cyan-500/40 rounded-2xl px-3 py-2 text-center shrink-0">
-                          <div className="text-[9px] font-bold text-cyan-400">자세 종합점수</div>
-                          <div className="text-2xl font-black text-white tabular-nums leading-none mt-0.5">
+                        <div className={`bg-slate-950/90 border rounded-2xl px-3 py-2 text-center shrink-0 ${isInvalid ? 'border-rose-500/50' : 'border-cyan-500/40'}`}>
+                          <div className={`text-[9px] font-bold ${isInvalid ? 'text-rose-400' : 'text-cyan-400'}`}>자세 종합점수</div>
+                          <div className={`text-2xl font-black tabular-nums leading-none mt-0.5 ${isInvalid ? 'text-rose-400' : 'text-white'}`}>
                             {rep.overallScore}<span className="text-[10px] text-slate-400 font-bold ml-0.5">점</span>
                           </div>
-                          <div className="text-[10px] font-black text-amber-400 mt-0.5">GRADE {rep.grade}</div>
+                          <div className={`text-[10px] font-black mt-0.5 ${isInvalid ? 'text-rose-400' : 'text-amber-400'}`}>GRADE {rep.grade}</div>
                         </div>
                       </div>
                       {/* 종합 코칭 총평 */}
-                      <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 text-xs font-bold text-slate-100 leading-relaxed break-keep">
+                      <div className={`bg-slate-950/90 border rounded-2xl p-3 text-xs font-bold leading-relaxed break-keep ${isInvalid ? 'border-rose-500/40 text-rose-100' : 'border-slate-800 text-slate-100'}`}>
                         💬 {rep.summary}
                       </div>
 
@@ -9282,12 +9506,12 @@ const renderGoalFlowModal = () => {
                               <div key={i} className="space-y-1">
                                 <div className="flex justify-between text-[11px] font-bold">
                                   <span className="text-slate-300">{ax.name}</span>
-                                  <span className={ax.score >= 88 ? 'text-emerald-400 font-black' : 'text-amber-400 font-black'}>{ax.score}점</span>
+                                  <span className={ax.score >= 85 ? 'text-emerald-400 font-black' : ax.score >= 50 ? 'text-amber-400 font-black' : 'text-rose-400 font-black'}>{ax.score}점</span>
                                 </div>
                                 <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
                                   <div
-                                    style={{ width: `${Math.max(20, Math.min(100, ax.score))}%` }}
-                                    className={`h-full rounded-full ${ax.score >= 88 ? 'bg-gradient-to-r from-emerald-500 to-cyan-400' : 'bg-gradient-to-r from-amber-500 to-orange-400'}`}
+                                    style={{ width: `${Math.max(8, Math.min(100, ax.score))}%` }}
+                                    className={`h-full rounded-full ${ax.score >= 85 ? 'bg-gradient-to-r from-emerald-500 to-cyan-400' : ax.score >= 50 ? 'bg-gradient-to-r from-amber-500 to-orange-400' : 'bg-gradient-to-r from-rose-600 to-red-400'}`}
                                   />
                                 </div>
                               </div>
