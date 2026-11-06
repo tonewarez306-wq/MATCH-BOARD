@@ -4883,6 +4883,26 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
     }
   };
 
+  const resetPoseCoachingScreen = () => {
+    stopPoseCamera();
+    if (poseRecordedVideoUrl) {
+      try { URL.revokeObjectURL(poseRecordedVideoUrl); } catch {}
+    }
+    setPoseRecordedVideoUrl(null);
+    setPoseKeyframes([]);
+    setPoseActiveFrameIdx(3);
+    setPoseCurrentSession(null);
+    setIsAnalyzingPose(false);
+    setPoseAnalysisStatusText('');
+    setPoseLiveAngles({ knee: 156, trunk: 11, ankle: 106, hip: 162, detected: false });
+    [poseLiveCanvasRef.current, poseReviewCanvasRef.current].forEach((c) => {
+      if (c) {
+        const ctx = c.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, c.width, c.height);
+      }
+    });
+  };
+
   const requestDeletePoseRecord = (recordId) => {
     setSystemConfirm({
       isOpen: true,
@@ -9131,6 +9151,17 @@ const renderGoalFlowModal = () => {
                       >
                         🧪 샘플 체험
                       </button>
+
+                      {(poseRecordedVideoUrl || poseKeyframes.length > 0 || poseCurrentSession) && (
+                        <button
+                          type="button"
+                          onClick={resetPoseCoachingScreen}
+                          className="py-3 px-2.5 bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-500/40 font-bold text-xs rounded-xl transition shrink-0 whitespace-nowrap"
+                          title="현재 분석 결과 및 영상을 비우고 초기 화면으로 되돌립니다"
+                        >
+                          🔄 초기화
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -9294,19 +9325,27 @@ const renderGoalFlowModal = () => {
                         )}
                       </div>
 
-                      {/* 팀 기록장 저장 및 Gemini 재분석 버튼 */}
+                      {/* 팀 기록장 저장 및 화면 초기화 버튼 */}
                       <div className="flex gap-2 pt-1">
                         <button
                           type="button"
                           disabled={poseCurrentSession.saved || isProcessing}
                           onClick={saveCurrentPoseSessionToTeam}
-                          className={`flex-1 py-3 px-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 shadow ${
+                          className={`flex-1 py-3 px-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 shadow min-w-0 truncate ${
                             poseCurrentSession.saved
                               ? 'bg-slate-800 text-emerald-400 border border-emerald-500/40'
                               : 'bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white'
                           }`}
                         >
-                          {poseCurrentSession.saved ? '✅ 팀 기록장에 저장 완료' : '💾 팀 기록장에 이 코칭 리포트 저장'}
+                          <span className="truncate">{poseCurrentSession.saved ? '✅ 팀 기록장에 저장 완료' : '💾 팀 기록장에 리포트 저장'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={resetPoseCoachingScreen}
+                          className="py-3 px-3.5 rounded-xl bg-slate-800 hover:bg-rose-500/20 text-slate-200 hover:text-rose-300 border border-slate-700 hover:border-rose-500/40 text-xs font-bold transition shrink-0 whitespace-nowrap flex items-center gap-1"
+                        >
+                          <span>🔄</span>
+                          <span>화면 초기화</span>
                         </button>
                       </div>
                     </div>
