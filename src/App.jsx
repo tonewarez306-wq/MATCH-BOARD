@@ -2542,6 +2542,13 @@ export default function App() {
     };
   }, [activeTab, gpsSession, gpsSelectedPosition, gpsFlipVertical, gpsRotate90, gpsSelectedPitchId, allGpsPitches]);
 
+  const geminiApiKey = (
+    memos?.['__gemini_api_key__'] ||
+    (typeof window !== 'undefined' ? (localStorage.getItem('mb_gemini_api_key') || '') : '') ||
+    import.meta.env?.VITE_GEMINI_API_KEY ||
+    ''
+  ).trim();
+
   // Gemini AI 키 저장 (팀 공유 메모 + 로컬스토리지) 및 즉시 AI 리뷰 실행
   const saveTeamGeminiApiKey = async (e) => {
     e.preventDefault();
@@ -2560,7 +2567,25 @@ export default function App() {
         });
       }
       setGeminiApiKeyModal({ isOpen: false, keyInput: '' });
-      if (trimmed && gpsSession && currentGpsTacticalMetrics) {
+      if (trimmed && recordSubTab === 'pose' && poseCurrentSession?.aiReport && poseKeyframes.length > 0) {
+        setIsAnalyzingPose(true);
+        setPoseAnalysisStatusText('등록된 Gemini AI 키로 자세 코칭 리포트 업그레이드 중...');
+        try {
+          const upgraded = await enrichPoseReportWithGemini(
+            poseCurrentSession.aiReport,
+            poseCurrentSession.skillType || poseSkillType,
+            poseKeyframes,
+            poseCurrentSession.playerName || '선수',
+            poseCurrentSession.dominantFoot || poseDominantFoot,
+            trimmed
+          );
+          setPoseCurrentSession(prev => (prev ? { ...prev, aiReport: upgraded } : prev));
+        } finally {
+          setIsAnalyzingPose(false);
+          setPoseAnalysisStatusText('');
+        }
+        setSystemAlert({ isOpen: true, message: '🤖 Google Gemini API 키가 저장되어 AI 자세 코칭에 즉시 반영되었습니다!' });
+      } else if (trimmed && gpsSession && currentGpsTacticalMetrics) {
         // 키 저장 직후 바로 Gemini AI 코치 리뷰 자동 생성
         generateGpsAiCoachReview(null, false, trimmed);
       } else {
@@ -4449,9 +4474,9 @@ export default function App() {
       generatedAt: new Date().toISOString()
     };
   };
-  const enrichPoseReportWithGemini = async (baseReport, skillType, frames, playerName, dominantFoot) => {
+  const enrichPoseReportWithGemini = async (baseReport, skillType, frames, playerName, dominantFoot, explicitApiKey = null) => {
     const cfg = POSE_SKILL_CONFIG[skillType] || POSE_SKILL_CONFIG.shoot;
-    const customApiKey = (geminiApiKey || import.meta.env?.VITE_GEMINI_API_KEY || '').trim();
+    const customApiKey = (explicitApiKey || geminiApiKey || import.meta.env?.VITE_GEMINI_API_KEY || '').trim();
     const angleSummaryLines = frames
       .map((f, idx) => `- ${cfg.steps[idx]} (${f.timeSec}s): 무릎 ${f.angles?.knee}° / 상체기울기 ${f.angles?.trunk}° / 발목 ${f.angles?.ankle}° / 디딤발무릎 ${f.angles?.supportKnee}°`)
       .join('\n');
@@ -8761,10 +8786,21 @@ const renderGoalFlowModal = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setGeminiApiKeyModal({ isOpen: true, keyInput: geminiApiKey || '' })}
-                    className="text-xs bg-slate-800 hover:bg-slate-700 text-cyan-400 px-3 py-2 rounded-xl font-bold border border-cyan-500/30 flex items-center gap-1.5 transition shrink-0 whitespace-nowrap shadow-sm"
+                    onClick={() => {
+                      const currentKey = (
+                        memos?.['__gemini_api_key__'] ||
+                        (typeof window !== 'undefined' ? (localStorage.getItem('mb_gemini_api_key') || '') : '') ||
+                        ''
+                      ).trim();
+                      setGeminiApiKeyModal({ isOpen: true, keyInput: currentKey });
+                    }}
+                    className={`text-xs px-3 py-2 rounded-xl font-bold border flex items-center gap-1.5 transition shrink-0 whitespace-nowrap shadow-sm ${
+                      geminiApiKey
+                        ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40'
+                        : 'bg-slate-800 hover:bg-slate-700 text-cyan-400 border-cyan-500/30'
+                    }`}
                   >
-                    <span>🔑</span> AI 키 설정
+                    <span>🔑</span> {geminiApiKey ? 'Gemini 연결됨' : 'AI 키 설정'}
                   </button>
                 </div>
 
