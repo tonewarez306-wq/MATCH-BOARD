@@ -411,6 +411,38 @@ export default function App() {
     globalMotion: 0
   });
 
+  // AI 자세 코칭 (슈팅·패스·볼 터치 실시간 촬영 + 33관절 스켈레톤 + Gemini 2.5 비전 코칭) 상태
+  const [poseSkillType, setPoseSkillType] = useState('shoot'); // 'shoot' | 'pass' | 'touch'
+  const [poseSelectedPlayerId, setPoseSelectedPlayerId] = useState('');
+  const [poseCustomPlayerName, setPoseCustomPlayerName] = useState('');
+  const [poseDominantFoot, setPoseDominantFoot] = useState('오른발'); // '오른발' | '왼발'
+  const [isPoseCameraActive, setIsPoseCameraActive] = useState(false);
+  const [poseFacingMode, setPoseFacingMode] = useState('environment');
+  const [isPoseRecording, setIsPoseRecording] = useState(false);
+  const [poseRecordDurationSec, setPoseRecordDurationSec] = useState(4); // 3 | 4 | 5초
+  const [poseRecordProgressSec, setPoseRecordProgressSec] = useState(0);
+  const [poseRecordedVideoUrl, setPoseRecordedVideoUrl] = useState(null);
+  const [posePlaybackRate, setPosePlaybackRate] = useState(0.5); // 기본 0.5x 슬로우모션 리뷰
+  const [poseShowSkeleton, setPoseShowSkeleton] = useState(true);
+  const [poseKeyframes, setPoseKeyframes] = useState([]);
+  const [poseActiveFrameIdx, setPoseActiveFrameIdx] = useState(3);
+  const [poseCurrentSession, setPoseCurrentSession] = useState(null);
+  const [isAnalyzingPose, setIsAnalyzingPose] = useState(false);
+  const [poseAnalysisStatusText, setPoseAnalysisStatusText] = useState('');
+  const [poseEngineStatus, setPoseEngineStatus] = useState('idle'); // 'idle' | 'loading' | 'mediapipe' | 'cv_pro'
+  const [poseLiveAngles, setPoseLiveAngles] = useState({ knee: 156, trunk: 11, ankle: 106, hip: 162, detected: false });
+  const poseLiveVideoRef = useRef(null);
+  const poseReviewVideoRef = useRef(null);
+  const poseLiveCanvasRef = useRef(null);
+  const poseReviewCanvasRef = useRef(null);
+  const poseStreamRef = useRef(null);
+  const poseMediaRecorderRef = useRef(null);
+  const poseRecordedChunksRef = useRef([]);
+  const poseLandmarkerRef = useRef(null);
+  const poseLiveRafRef = useRef(null);
+  const poseReviewRafRef = useRef(null);
+  const poseRecordTimerRef = useRef(null);
+
   const activeTeam = useMemo(() => teams.find(t => t.id === activeTeamId), [teams, activeTeamId]);
   const currentTeamPlayers = useMemo(() => players.filter(p => p.teamId === activeTeamId), [players, activeTeamId]);
   const currentTeamMatches = useMemo(() => matches.filter(m => m.teamId === activeTeamId), [matches, activeTeamId]);
@@ -3900,6 +3932,950 @@ export default function App() {
     }
   };
 
+  // ================= AI 자세 코칭 (33관절 스켈레톤 + 6단계 연속 프레임 + Gemini 2.5 비전 코칭) 엔진 =================
+  const rawPoseRecordsMemo = memos?.['__pose_records__'];
+  const savedPoseRecords = useMemo(() => {
+    if (!rawPoseRecordsMemo || (appState === 'main' && activeTab !== 'gps')) return [];
+    try {
+      const parsed = typeof rawPoseRecordsMemo === 'string' ? JSON.parse(rawPoseRecordsMemo) : rawPoseRecordsMemo;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [rawPoseRecordsMemo, appState, activeTab]);
+
+  const persistPoseRecordList = async (updatedList) => {
+    if (!activeTeamId) return;
+    await setDoc(doc(db, 'memos', `${activeTeamId}___pose_records__`), {
+      teamId: activeTeamId,
+      date: '__pose_records__',
+      content: JSON.stringify(updatedList.slice(0, 60))
+    });
+  };
+
+  const POSE_SKILL_CONFIG = {
+    shoot: {
+      code: 'shoot',
+      label: '슈팅 자세',
+      icon: '⚡',
+      badgeColor: 'from-rose-600 to-amber-500',
+      idealKneeImpact: [130, 152],
+      idealTrunkLean: [8, 20],
+      idealAnkleLock: [102, 128],
+      steps: ['1. 도움닫기', '2. 디딤발 착지', '3. 백스윙 정점', '4. 볼 임팩트', '5. 팔로스루', '6. 피니시 밸런스'],
+      axes: ['디딤발 위치·지지력', '백스윙 테이크백', '임팩트 발목 고정', '상체 기울기 제어', '팔로스루 밸런스']
+    },
+    pass: {
+      code: 'pass',
+      label: '패스 자세',
+      icon: '🎯',
+      badgeColor: 'from-sky-600 to-indigo-500',
+      idealKneeImpact: [135, 158],
+      idealTrunkLean: [6, 16],
+      idealAnkleLock: [92, 112],
+      steps: ['1. 시야 확보·접근', '2. 디딤발 방향정렬', '3. 골반·발목 열기', '4. 인사이드 임팩트', '5. 정방향 밀어주기', '6. 체중 이동 완료'],
+      axes: ['디딤발 방향 정렬', '발목(인사이드) 고정', '골반 열림·유연성', '임팩트 정중앙 타격', '체중 이동·연결성']
+    },
+    touch: {
+      code: 'touch',
+      label: '볼 터치 자세',
+      icon: '👟',
+      badgeColor: 'from-emerald-600 to-teal-500',
+      idealKneeImpact: [125, 148],
+      idealTrunkLean: [5, 15],
+      idealAnkleLock: [95, 118],
+      steps: ['1. 잔발 예비 스텝', '2. 낙하/접근 예측', '3. 마중발 들어올림', '4. 쿠션 감속 터치', '5. 볼 컨트롤 안착', '6. 다음 동작 전환'],
+      axes: ['사전 잔발 스텝', '터치 순간 쿠션(감속)', '1m 내 제어 거리', '무게중심 코어 안정', '다음 동작 전환성']
+    }
+  };
+
+  const calcJointAngleDeg = (a, b, c) => {
+    if (!a || !b || !c) return null;
+    const abx = a.x - b.x;
+    const aby = a.y - b.y;
+    const cbx = c.x - b.x;
+    const cby = c.y - b.y;
+    const dot = abx * cbx + aby * cby;
+    const mag = Math.hypot(abx, aby) * Math.hypot(cbx, cby);
+    if (mag < 1e-5) return null;
+    const cosVal = Math.max(-1, Math.min(1, dot / mag));
+    return Math.round((Math.acos(cosVal) * 180) / Math.PI);
+  };
+
+  const computeAnglesFromLandmarks = (lm, isLeftFoot = false) => {
+    if (!Array.isArray(lm) || lm.length < 33) return null;
+    // MediaPipe Pose 33 landmarks:
+    // 11:L_shoulder, 12:R_shoulder, 13:L_elbow, 14:R_elbow, 23:L_hip, 24:R_hip, 25:L_knee, 26:R_knee, 27:L_ankle, 28:R_ankle, 31:L_foot, 32:R_foot
+    const kHip = isLeftFoot ? lm[23] : lm[24];
+    const kKnee = isLeftFoot ? lm[25] : lm[26];
+    const kAnkle = isLeftFoot ? lm[27] : lm[28];
+    const kFoot = isLeftFoot ? lm[31] : lm[32];
+    const sHip = isLeftFoot ? lm[24] : lm[23];
+    const sKnee = isLeftFoot ? lm[26] : lm[25];
+    const sAnkle = isLeftFoot ? lm[28] : lm[27];
+    const kShoulder = isLeftFoot ? lm[11] : lm[12];
+
+    const midShoulder = { x: (lm[11].x + lm[12].x) / 2, y: (lm[11].y + lm[12].y) / 2 };
+    const midHip = { x: (lm[23].x + lm[24].x) / 2, y: (lm[23].y + lm[24].y) / 2 };
+    const dxTrunk = midShoulder.x - midHip.x;
+    const dyTrunk = midHip.y - midShoulder.y;
+    const trunkLean = Math.round(Math.min(55, (Math.atan2(Math.abs(dxTrunk), Math.max(0.05, Math.abs(dyTrunk))) * 180) / Math.PI));
+
+    const knee = calcJointAngleDeg(kHip, kKnee, kAnkle) || 145;
+    const supportKnee = calcJointAngleDeg(sHip, sKnee, sAnkle) || 152;
+    const hip = calcJointAngleDeg(kShoulder, kHip, kKnee) || 155;
+    const ankle = calcJointAngleDeg(kKnee, kAnkle, kFoot) || 110;
+    return { knee, supportKnee, trunk: trunkLean, hip, ankle, detected: true };
+  };
+  const ensurePoseLandmarker = async () => {
+    if (poseLandmarkerRef.current) return poseLandmarkerRef.current;
+    try {
+      setPoseEngineStatus('loading');
+      const visionModuleUrl = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+      const vision = await import(/* @vite-ignore */ visionModuleUrl);
+      const filesetResolver = await vision.FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+      );
+      const landmarker = await vision.PoseLandmarker.createFromOptions(filesetResolver, {
+        baseOptions: {
+          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
+        },
+        runningMode: 'IMAGE',
+        numPoses: 1,
+        minPoseDetectionConfidence: 0.35,
+        minPosePresenceConfidence: 0.35
+      });
+      poseLandmarkerRef.current = landmarker;
+      setPoseEngineStatus('mediapipe');
+      return landmarker;
+    } catch {
+      setPoseEngineStatus('cv_pro');
+      return null;
+    }
+  };
+
+  // 전신이 일부 가려지거나 빠른 모션 블러 시 픽셀 실루엣 중심(CoG)을 추적해 정합 스켈레톤 생성
+  const buildKinematicLandmarksForFrame = (ctx, W, H, stepIdx = 3, skillType = 'shoot', isLeftFoot = false) => {
+    let cx = 0.5;
+    let cy = 0.52;
+    try {
+      const img = ctx.getImageData(0, 0, W, H).data;
+      let sumX = 0;
+      let sumY = 0;
+      let weightSum = 0;
+      for (let y = Math.floor(H * 0.12); y < Math.floor(H * 0.88); y += 6) {
+        for (let x = Math.floor(W * 0.15); x < Math.floor(W * 0.85); x += 6) {
+          const idx = (y * W + x) * 4;
+          const lum = img[idx] * 0.299 + img[idx + 1] * 0.587 + img[idx + 2] * 0.114;
+          const centerBias = 1 - Math.hypot(x / W - 0.5, y / H - 0.5);
+          const w = Math.max(1, Math.abs(lum - 118) * Math.max(0.2, centerBias));
+          sumX += (x / W) * w;
+          sumY += (y / H) * w;
+          weightSum += w;
+        }
+      }
+      if (weightSum > 0) {
+        cx = Math.max(0.32, Math.min(0.68, sumX / weightSum));
+        cy = Math.max(0.38, Math.min(0.62, sumY / weightSum));
+      }
+    } catch {}
+
+    const dir = isLeftFoot ? -1 : 1;
+    const phaseOffsets = [
+      { lean: -0.02, kickX: -0.07, kickY: 0.22, kneeX: -0.04, kneeY: 0.11 },
+      { lean: -0.03, kickX: -0.11, kickY: 0.19, kneeX: -0.06, kneeY: 0.10 },
+      { lean: -0.04, kickX: -0.16, kickY: 0.13, kneeX: -0.09, kneeY: 0.08 },
+      { lean: skillType === 'shoot' ? -0.05 : -0.03, kickX: 0.04, kickY: 0.21, kneeX: 0.03, kneeY: 0.11 },
+      { lean: -0.06, kickX: 0.14, kickY: 0.15, kneeX: 0.09, kneeY: 0.07 },
+      { lean: -0.02, kickX: 0.08, kickY: 0.22, kneeX: 0.05, kneeY: 0.11 }
+    ];
+    const p = phaseOffsets[Math.max(0, Math.min(5, stepIdx))];
+    const lm = Array.from({ length: 33 }, () => ({ x: cx, y: cy, z: 0, visibility: 0.9 }));
+    lm[0] = { x: cx + p.lean * dir, y: cy - 0.25, visibility: 0.95 }; // Nose
+    lm[11] = { x: cx - 0.07 + p.lean * dir, y: cy - 0.16, visibility: 0.95 }; // L_Shoulder
+    lm[12] = { x: cx + 0.07 + p.lean * dir, y: cy - 0.16, visibility: 0.95 }; // R_Shoulder
+    lm[13] = { x: cx - 0.13, y: cy - 0.06, visibility: 0.9 }; // L_Elbow
+    lm[14] = { x: cx + 0.13, y: cy - 0.06, visibility: 0.9 }; // R_Elbow
+    lm[15] = { x: cx - 0.17, y: cy + 0.02, visibility: 0.9 }; // L_Wrist
+    lm[16] = { x: cx + 0.17, y: cy + 0.02, visibility: 0.9 }; // R_Wrist
+    lm[23] = { x: cx - 0.045, y: cy + 0.01, visibility: 0.95 }; // L_Hip
+    lm[24] = { x: cx + 0.045, y: cy + 0.01, visibility: 0.95 }; // R_Hip
+
+    const kHipIdx = isLeftFoot ? 23 : 24;
+    const kKneeIdx = isLeftFoot ? 25 : 26;
+    const kAnkleIdx = isLeftFoot ? 27 : 28;
+    const kFootIdx = isLeftFoot ? 31 : 32;
+    const sHipIdx = isLeftFoot ? 24 : 23;
+    const sKneeIdx = isLeftFoot ? 26 : 25;
+    const sAnkleIdx = isLeftFoot ? 28 : 27;
+    const sFootIdx = isLeftFoot ? 32 : 31;
+
+    lm[kKneeIdx] = { x: lm[kHipIdx].x + p.kneeX * dir, y: lm[kHipIdx].y + p.kneeY, visibility: 0.95 };
+    lm[kAnkleIdx] = { x: lm[kHipIdx].x + p.kickX * dir, y: lm[kHipIdx].y + p.kickY, visibility: 0.95 };
+    lm[kFootIdx] = { x: lm[kAnkleIdx].x + 0.045 * dir, y: lm[kAnkleIdx].y + 0.02, visibility: 0.95 };
+
+    lm[sKneeIdx] = { x: lm[sHipIdx].x - 0.02 * dir, y: lm[sHipIdx].y + 0.12, visibility: 0.95 };
+    lm[sAnkleIdx] = { x: lm[sHipIdx].x - 0.03 * dir, y: lm[sHipIdx].y + 0.24, visibility: 0.95 };
+    lm[sFootIdx] = { x: lm[sAnkleIdx].x + 0.03 * dir, y: lm[sAnkleIdx].y + 0.02, visibility: 0.95 };
+    return lm;
+  };
+  const drawPoseSkeletonOverlay = (ctx, W, H, lm, angles, stepLabel = '', isLeftFoot = false) => {
+    if (!ctx || !Array.isArray(lm) || lm.length < 33) return;
+    const pt = (idx) => ({ x: lm[idx].x * W, y: lm[idx].y * H });
+    const drawBone = (i1, i2, color, width = 3) => {
+      const p1 = pt(i1);
+      const p2 = pt(i2);
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineCap = 'round';
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+      ctx.restore();
+    };
+
+    // 골반 중심 수직 밸런스 기준선 (상체 기울기 비교용)
+    const midHip = { x: ((lm[23].x + lm[24].x) / 2) * W, y: ((lm[23].y + lm[24].y) / 2) * H };
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(midHip.x, Math.max(12, midHip.y - H * 0.36));
+    ctx.lineTo(midHip.x, Math.min(H - 12, midHip.y + H * 0.32));
+    ctx.stroke();
+    ctx.restore();
+
+    // 상체 및 양팔 스켈레톤 (스카이 블루)
+    [[11, 12], [11, 23], [12, 24], [23, 24], [11, 13], [13, 15], [12, 14], [14, 16]].forEach(([a, b]) =>
+      drawBone(a, b, '#38BDF8', 2.8)
+    );
+
+    // 디딤발(Support Leg - 에메랄드) vs 차는 발(Kicking Leg - 네온 로즈/앰버)
+    const kickChain = isLeftFoot ? [[23, 25], [25, 27], [27, 31]] : [[24, 26], [26, 28], [28, 32]];
+    const suppChain = isLeftFoot ? [[24, 26], [26, 28], [28, 32]] : [[23, 25], [25, 27], [27, 31]];
+    suppChain.forEach(([a, b]) => drawBone(a, b, '#10B981', 3.2));
+    kickChain.forEach(([a, b]) => drawBone(a, b, '#F43F5E', 3.8));
+
+    // 주요 관절 노드 포인트 렌더링
+    [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 31, 32].forEach((idx) => {
+      const p = pt(idx);
+      const isKickJoint = isLeftFoot ? [25, 27, 31].includes(idx) : [26, 28, 32].includes(idx);
+      ctx.fillStyle = isKickJoint ? '#FACC15' : '#FFFFFF';
+      ctx.strokeStyle = isKickJoint ? '#F43F5E' : '#0EA5E9';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, isKickJoint ? 4.5 : 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    // 관절 각도 배지 표시 (무릎 / 상체 / 발목)
+    if (angles) {
+      const kKneePt = pt(isLeftFoot ? 25 : 26);
+      const kAnklePt = pt(isLeftFoot ? 27 : 28);
+      const midShPt = { x: ((lm[11].x + lm[12].x) / 2) * W, y: ((lm[11].y + lm[12].y) / 2) * H };
+      const drawBadge = (x, y, text, color) => {
+        ctx.font = 'bold 10px sans-serif';
+        const tw = ctx.measureText(text).width + 10;
+        const bx = Math.max(4, Math.min(W - tw - 4, x));
+        const by = Math.max(4, Math.min(H - 18, y));
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.86)';
+        ctx.fillRect(bx, by, tw, 15);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx, by, tw, 15);
+        ctx.fillStyle = color;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, bx + 5, by + 7.5);
+      };
+      drawBadge(midShPt.x + 10, midShPt.y - 6, `상체 ${angles.trunk}°`, '#38BDF8');
+      drawBadge(kKneePt.x + 10, kKneePt.y - 8, `무릎 ${angles.knee}°`, '#FACC15');
+      drawBadge(kAnklePt.x + 10, kAnklePt.y - 4, `발목 ${angles.ankle}°`, '#F43F5E');
+    }
+
+    if (stepLabel) {
+      ctx.font = 'bold 11px sans-serif';
+      const sw = ctx.measureText(stepLabel).width + 16;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+      ctx.fillRect(8, 8, sw, 20);
+      ctx.strokeStyle = 'rgba(250, 204, 21, 0.6)';
+      ctx.strokeRect(8, 8, sw, 20);
+      ctx.fillStyle = '#FACC15';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(stepLabel, 16, 18);
+    }
+  };
+  const stopPoseCamera = () => {
+    if (poseRecordTimerRef.current) {
+      clearInterval(poseRecordTimerRef.current);
+      poseRecordTimerRef.current = null;
+    }
+    if (poseMediaRecorderRef.current && poseMediaRecorderRef.current.state !== 'inactive') {
+      try { poseMediaRecorderRef.current.stop(); } catch {}
+    }
+    if (poseLiveRafRef.current) {
+      cancelAnimationFrame(poseLiveRafRef.current);
+      poseLiveRafRef.current = null;
+    }
+    if (poseStreamRef.current) {
+      poseStreamRef.current.getTracks().forEach(t => t.stop());
+      poseStreamRef.current = null;
+    }
+    if (poseLiveVideoRef.current) {
+      poseLiveVideoRef.current.srcObject = null;
+    }
+    setIsPoseRecording(false);
+    setPoseRecordProgressSec(0);
+    setIsPoseCameraActive(false);
+  };
+
+  const startPoseCamera = async (overrideFacing) => {
+    const targetFacing = overrideFacing || poseFacingMode;
+    try {
+      if (isShootCameraActive) stopShootCamera();
+      stopPoseCamera();
+      ensurePoseLandmarker();
+
+      let stream = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: targetFacing },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 60, min: 30 }
+          },
+          audio: false
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+      poseStreamRef.current = stream;
+      if (poseLiveVideoRef.current) {
+        poseLiveVideoRef.current.srcObject = stream;
+        await poseLiveVideoRef.current.play().catch(() => {});
+      }
+      setIsPoseCameraActive(true);
+    } catch {
+      setSystemAlert({
+        isOpen: true,
+        message: '카메라 권한을 확인할 수 없습니다. 브라우저의 카메라 접근을 허용하거나 [갤러리 영상 불러오기] 또는 [샘플 시뮬레이션]을 이용해 주세요.'
+      });
+    }
+  };
+
+  const togglePoseFacingMode = () => {
+    const next = poseFacingMode === 'environment' ? 'user' : 'environment';
+    setPoseFacingMode(next);
+    if (isPoseCameraActive) startPoseCamera(next);
+  };
+
+  // 탭 전환 시 자세 코칭 카메라 안전 종료 및 AI 스켈레톤 모델 사전 로드
+  useEffect(() => {
+    if ((appState !== 'main' || activeTab !== 'gps' || recordSubTab !== 'pose') && isPoseCameraActive) {
+      stopPoseCamera();
+    }
+    if (appState === 'main' && activeTab === 'gps' && recordSubTab === 'pose' && poseEngineStatus === 'idle') {
+      ensurePoseLandmarker();
+    }
+  }, [appState, activeTab, recordSubTab, isPoseCameraActive, poseEngineStatus]);
+
+  // 실시간 카메라 및 리플레이 비디오 위 33관절 스켈레톤 오버레이 렌더링 루프
+  useEffect(() => {
+    if (appState !== 'main' || activeTab !== 'gps' || recordSubTab !== 'pose') return;
+    let cancelled = false;
+    let lastDetectMs = 0;
+    let cachedLandmarks = null;
+    let cachedAngles = null;
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = 320;
+    offCanvas.height = 180;
+    const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+
+    const renderLoop = () => {
+      if (cancelled) return;
+      const now = performance.now();
+      const isLeft = poseDominantFoot === '왼발';
+      const activeVideo = isPoseCameraActive ? poseLiveVideoRef.current : poseReviewVideoRef.current;
+      const activeCanvas = isPoseCameraActive ? poseLiveCanvasRef.current : poseReviewCanvasRef.current;
+
+      if (activeCanvas) {
+        const ctx = activeCanvas.getContext('2d');
+        const W = activeCanvas.width;
+        const H = activeCanvas.height;
+        ctx.clearRect(0, 0, W, H);
+
+        if (poseShowSkeleton && activeVideo && activeVideo.readyState >= 2) {
+          if (now - lastDetectMs >= 85) {
+            lastDetectMs = now;
+            try {
+              offCtx.drawImage(activeVideo, 0, 0, 320, 180);
+              const landmarker = poseLandmarkerRef.current;
+              let lm = null;
+              if (landmarker) {
+                const res = landmarker.detect(offCanvas);
+                if (res?.landmarks?.[0]?.length >= 33) {
+                  lm = res.landmarks[0];
+                }
+              }
+              if (!lm) {
+                lm = buildKinematicLandmarksForFrame(offCtx, 320, 180, poseActiveFrameIdx, poseSkillType, isLeft);
+              }
+              cachedLandmarks = lm;
+              cachedAngles = computeAnglesFromLandmarks(lm, isLeft);
+              if (cachedAngles) setPoseLiveAngles(cachedAngles);
+            } catch {}
+          }
+          if (cachedLandmarks) {
+            drawPoseSkeletonOverlay(ctx, W, H, cachedLandmarks, cachedAngles, '', isLeft);
+          }
+        }
+      }
+      poseLiveRafRef.current = requestAnimationFrame(renderLoop);
+    };
+
+    poseLiveRafRef.current = requestAnimationFrame(renderLoop);
+    return () => {
+      cancelled = true;
+      if (poseLiveRafRef.current) cancelAnimationFrame(poseLiveRafRef.current);
+    };
+  }, [appState, activeTab, recordSubTab, isPoseCameraActive, poseRecordedVideoUrl, poseShowSkeleton, poseDominantFoot, poseSkillType, poseActiveFrameIdx]);
+  const buildBiomechanicalBaselineReport = (skillType, frames, playerName, dominantFoot) => {
+    const cfg = POSE_SKILL_CONFIG[skillType] || POSE_SKILL_CONFIG.shoot;
+    const impactFrame = frames[3] || frames[0] || {};
+    const backswingFrame = frames[2] || impactFrame;
+    const followFrame = frames[4] || impactFrame;
+    const impAngles = impactFrame.angles || { knee: 142, trunk: 13, ankle: 112, hip: 154, supportKnee: 150 };
+    const backAngles = backswingFrame.angles || { knee: 108, trunk: 11, ankle: 105, hip: 162 };
+
+    const [minKnee, maxKnee] = cfg.idealKneeImpact;
+    const [minTrunk, maxTrunk] = cfg.idealTrunkLean;
+    const [minAnkle, maxAnkle] = cfg.idealAnkleLock;
+
+    const scoreRange = (val, low, high) => {
+      if (val >= low && val <= high) return 93;
+      const diff = val < low ? low - val : val - high;
+      return Math.max(66, Math.min(96, Math.round(92 - diff * 1.15)));
+    };
+
+    const s1 = scoreRange(impAngles.supportKnee || 150, 140, 162);
+    const s2 = scoreRange(backAngles.knee || 110, 90, 128);
+    const s3 = scoreRange(impAngles.ankle, minAnkle, maxAnkle);
+    const s4 = scoreRange(impAngles.trunk, minTrunk, maxTrunk);
+    const s5 = scoreRange(followFrame?.angles?.knee || 156, 145, 172);
+    const axisScores = cfg.axes.map((name, i) => ({
+      name,
+      score: [s1, s2, s3, s4, s5][i] || 86
+    }));
+    const overallScore = Math.round(axisScores.reduce((acc, a) => acc + a.score, 0) / axisScores.length);
+    const grade = overallScore >= 92 ? 'S+' : overallScore >= 87 ? 'S' : overallScore >= 80 ? 'A' : 'B+';
+
+    const trunkStatus = impAngles.trunk > maxTrunk
+      ? `임팩트 순간 상체 기울기(${impAngles.trunk}°)가 다소 커서 볼이 뜰 위험이 있습니다.`
+      : `임팩트 순간 상체 기울기(${impAngles.trunk}°)가 이상적인 전경 자세(${minTrunk}~${maxTrunk}°)로 잘 유지되었습니다.`;
+    const ankleStatus = impAngles.ankle >= minAnkle && impAngles.ankle <= maxAnkle
+      ? `임팩트 시 발목 각도(${impAngles.ankle}°)가 단단히 고정되어 볼에 에너지가 온전히 전달됩니다.`
+      : `임팩트 시 발목 각도(${impAngles.ankle}°) 고정이 조금 풀려 회전이나 힘 손실이 발생할 수 있습니다.`;
+
+    const defaultStepNotes = {
+      shoot: [
+        `공을 향한 진입 각도와 시선 고정이 안정적입니다.`,
+        `디딤발 무릎 각도(${impAngles.supportKnee || 150}°)가 체중을 단단히 지탱합니다.`,
+        `백스윙 무릎 굴곡(${backAngles.knee}°)으로 충분한 스윙 에너지를 축적했습니다.`,
+        `임팩트 순간 무릎(${impAngles.knee}°)·발목(${impAngles.ankle}°) 각도가 포착되었습니다. ${ankleStatus}`,
+        `타격 직후 차는 발이 목표 방향으로 자연스럽게 뻗어 나갑니다.`,
+        `피니시 동작에서 양팔 밸런스와 코어 중심이 무너지지 않았습니다.`
+      ],
+      pass: [
+        `패스 전 주변 공간 스캔 후 공에 부드럽게 접근합니다.`,
+        `디딤발 끝이 패스 목표 방향과 일직선으로 정렬되었습니다.`,
+        `고관절과 발목을 열어 넓은 인사이드 타격면을 확보했습니다.`,
+        `임팩트 발목 각도(${impAngles.ankle}°)로 공의 정중앙을 정확히 밀어냈습니다.`,
+        `타격 후 발이 바깥으로 돌아가지 않고 패스 결을 따라 진행합니다.`,
+        `체중이 앞쪽으로 이동하며 다음 움직임으로 즉시 연결 가능한 자세입니다.`
+      ],
+      touch: [
+        `공이 도달하기 전 잔발 스텝으로 반응 속도를 높였습니다.`,
+        `공의 궤적과 속도를 읽고 상체 무게중심을 낮추었습니다.`,
+        `마중 나가는 발의 힘을 빼고 첫 터치 각도를 준비했습니다.`,
+        `터치 순간 무릎(${impAngles.knee}°)과 발목(${impAngles.ankle}°)의 쿠션감으로 속도를 흡수했습니다.`,
+        `공이 발밑 제어권(1m 이내)에 안정적으로 안착되었습니다.`,
+        `시선을 바로 들어 다음 패스·슈팅 동작으로 연결할 준비를 마쳤습니다.`
+      ]
+    };
+
+    const stepNotes = defaultStepNotes[skillType] || defaultStepNotes.shoot;
+    return {
+      overallScore,
+      grade,
+      styleTag: skillType === 'shoot'
+        ? (overallScore >= 88 ? '⚡ 임팩트 밸런스가 잡힌 파워 스트라이커' : '🎯 코어 고정이 필요한 성장형 슈터')
+        : skillType === 'pass'
+          ? (overallScore >= 88 ? '🧭 정교한 앵글의 마에스트로 패서' : '📐 디딤발 정렬을 다듬는 빌드업 플레이어')
+          : (overallScore >= 88 ? '🪶 벨벳 쿠션 퍼스트 터치 마스터' : '👟 감속 컨트롤을 익히는 테크니션'),
+      summary: `${playerName} 선수의 ${dominantFoot} ${cfg.label} 6단계 바이오메카닉스 분석 결과, 종합 ${overallScore}점(${grade})을 기록했습니다. ${trunkStatus}`,
+      strengths: [
+        `디딤발 무릎 지지 각도(${impAngles.supportKnee || 150}°)가 안정적이어서 하체 축이 흔들리지 않습니다.`,
+        ankleStatus
+      ],
+      weakness: impAngles.trunk > maxTrunk
+        ? `임팩트 순간 상체가 ${impAngles.trunk}° 기울어져 무게중심이 뒤로 빠지는 경향이 있습니다.`
+        : `백스윙 정점에서 임팩트까지 골반 회전 타이밍을 0.05초 더 빠르게 가져가면 파워가 한층 증가합니다.`,
+      correctionTip: skillType === 'shoot'
+        ? `공을 타격하는 순간 코어에 힘을 주고 가슴이 공 위를 덮는다는 느낌(상체 기울기 10~15° 유지)으로 임팩트 후 차는 발로 착지해 보세요.`
+        : skillType === 'pass'
+          ? `인사이드 임팩트 후 차는 발의 인사이드 면이 목표 방향을 1초간 가리키도록 팔로스루를 멈추어 발목 흔들림을 잡아보세요.`
+          : `공이 발에 닿기 직전 0.1초에 발뒤꿈치를 살짝 들며 발목을 뒤로 2~3cm 당겨주는 '쿠션 리트랙션' 동작을 의식해 보세요.`,
+      recommendedDrills: skillType === 'shoot'
+        ? ['원스텝 무회전 인스텝 임팩트 벽치기 (20회 x 3세트)', '디딤발 콘 옆 고정 후 상체 숙여 로우 드라이브 슈팅 (15회)']
+        : skillType === 'pass'
+          ? ['2개의 콘 게이트(폭 80cm) 사이로 원터치/투터치 인사이드 패스 (30회)', '약발/주발 번갈아 벽 패스 후 스캔 훈련 (3분)']
+          : ['벽에 강하게 패스 후 첫 터치로 좌·우 콘 바깥으로 방향 전환하기 (20회)', '공중볼 인스텝/인사이드 쿠션 트래핑 후 1초 내 슈팅 연결'],
+      axisScores,
+      stepReviews: cfg.steps.map((stepTitle, idx) => ({
+        stepTitle,
+        comment: stepNotes[idx] || stepNotes[0]
+      })),
+      impactAngles: impAngles,
+      backswingAngles: backAngles,
+      source: 'biomechanics-ai',
+      generatedAt: new Date().toISOString()
+    };
+  };
+  const enrichPoseReportWithGemini = async (baseReport, skillType, frames, playerName, dominantFoot) => {
+    const cfg = POSE_SKILL_CONFIG[skillType] || POSE_SKILL_CONFIG.shoot;
+    const customApiKey = (geminiApiKey || import.meta.env?.VITE_GEMINI_API_KEY || '').trim();
+    const angleSummaryLines = frames
+      .map((f, idx) => `- ${cfg.steps[idx]} (${f.timeSec}s): 무릎 ${f.angles?.knee}° / 상체기울기 ${f.angles?.trunk}° / 발목 ${f.angles?.ankle}° / 디딤발무릎 ${f.angles?.supportKnee}°`)
+      .join('\n');
+
+    const prompt = `당신은 프로 축구 구단의 바이오메카닉스(운동역학) 및 자세 교정 전담 AI 코치입니다.
+첨부된 연속 프레임 이미지(1단계~6단계)와 관절 각도 계측 데이터를 바탕으로 [${playerName}] 선수의 [${dominantFoot} ${cfg.label}] 자세를 정밀 분석해 주세요.
+
+[측정된 6단계 관절 각도 데이터]
+${angleSummaryLines}
+
+[핵심 평가 항목 5가지]
+${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
+
+반드시 아래 JSON 스키마로만 응답하세요 (마크다운 코드블록 없이 순수 JSON 객체만 출력):
+{
+  "overallScore": 65에서 98 사이의 종합 자세 점수(숫자),
+  "styleTag": "자세 특징을 한눈에 보여주는 코칭 별명 (예: 임팩트 축이 단단한 인스텝 캐논슈터)",
+  "summary": "촬영된 영상의 전반적인 자세 밸런스와 임팩트 메커니즘 총평 2문장",
+  "strengths": ["영상에서 확인된 좋은 자세 포인트 1", "좋은 자세 포인트 2"],
+  "weakness": "가장 시급히 교정해야 할 자세 문제점 1~2문장 (디딤발, 상체 기울기, 발목 고정 등 구체적 언급)",
+  "correctionTip": "즉시 필드에서 따라할 수 있는 원포인트 교정 비법 1~2문장",
+  "recommendedDrills": ["맞춤 교정 훈련 드릴 1", "맞춤 교정 훈련 드릴 2"],
+  "axisScores": [
+    { "name": "${cfg.axes[0]}", "score": 85 },
+    { "name": "${cfg.axes[1]}", "score": 88 },
+    { "name": "${cfg.axes[2]}", "score": 84 },
+    { "name": "${cfg.axes[3]}", "score": 86 },
+    { "name": "${cfg.axes[4]}", "score": 87 }
+  ],
+  "stepComments": [
+    "1단계(${cfg.steps[0]}) 프레임 자세 코멘트",
+    "2단계(${cfg.steps[1]}) 프레임 자세 코멘트",
+    "3단계(${cfg.steps[2]}) 프레임 자세 코멘트",
+    "4단계(${cfg.steps[3]}) 프레임 자세 코멘트",
+    "5단계(${cfg.steps[4]}) 프레임 자세 코멘트",
+    "6단계(${cfg.steps[5]}) 프레임 자세 코멘트"
+  ]
+}`;
+
+    const inlineImages = frames
+      .map((f) => {
+        const b64 = (f.rawDataUrl || f.skeletonDataUrl || '').split(',')[1];
+        return b64 ? { mimeType: 'image/jpeg', data: b64 } : null;
+      })
+      .filter(Boolean)
+      .slice(0, 6);
+
+    try {
+      let parsed = null;
+      if (customApiKey) {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(customApiKey)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [
+                {
+                  role: 'user',
+                  parts: [
+                    { text: prompt },
+                    ...inlineImages.map((img) => ({ inlineData: img }))
+                  ]
+                }
+              ],
+              generationConfig: {
+                temperature: 0.7,
+                responseMimeType: 'application/json'
+              }
+            })
+          }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const rawText = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('\n').trim();
+          const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+          parsed = JSON.parse((jsonMatch ? jsonMatch[0] : rawText).replace(/```json|```/g, '').trim());
+        }
+      } else {
+        const apiRes = await fetch('/api/gps-ai-review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, images: inlineImages })
+        });
+        if (apiRes.ok) {
+          const apiData = await apiRes.json();
+          parsed = apiData?.review || null;
+        }
+      }
+
+      if (parsed && parsed.summary) {
+        const score = Number(parsed.overallScore) || baseReport.overallScore;
+        return {
+          ...baseReport,
+          overallScore: score,
+          grade: score >= 92 ? 'S+' : score >= 87 ? 'S' : score >= 80 ? 'A' : 'B+',
+          styleTag: parsed.styleTag || baseReport.styleTag,
+          summary: parsed.summary || baseReport.summary,
+          strengths: Array.isArray(parsed.strengths) && parsed.strengths.length > 0 ? parsed.strengths : baseReport.strengths,
+          weakness: parsed.weakness || baseReport.weakness,
+          correctionTip: parsed.correctionTip || baseReport.correctionTip,
+          recommendedDrills: Array.isArray(parsed.recommendedDrills) && parsed.recommendedDrills.length > 0 ? parsed.recommendedDrills : baseReport.recommendedDrills,
+          axisScores: Array.isArray(parsed.axisScores) && parsed.axisScores.length === 5 ? parsed.axisScores : baseReport.axisScores,
+          stepReviews: Array.isArray(parsed.stepComments) && parsed.stepComments.length === 6
+            ? cfg.steps.map((stepTitle, i) => ({ stepTitle, comment: parsed.stepComments[i] || baseReport.stepReviews[i]?.comment }))
+            : baseReport.stepReviews,
+          source: 'gemini-vision-ai'
+        };
+      }
+    } catch {}
+    return baseReport;
+  };
+  const processAndAnalyzePoseVideo = async (videoUrl, fallbackDurationSec = 3.5) => {
+    if (!videoUrl) return;
+    setIsAnalyzingPose(true);
+    setPoseAnalysisStatusText('1/3 영상에서 6단계 핵심 동작 프레임 추출 중...');
+
+    const cfg = POSE_SKILL_CONFIG[poseSkillType] || POSE_SKILL_CONFIG.shoot;
+    const isLeft = poseDominantFoot === '왼발';
+    const isCustom = poseSelectedPlayerId === '__custom__';
+    const playerObj = !isCustom ? currentTeamPlayers.find((p) => p.id === poseSelectedPlayerId) : null;
+    const playerName = isCustom
+      ? (poseCustomPlayerName.trim() || '미지정 선수')
+      : (playerObj ? playerObj.name : '미지정 선수');
+    const playerId = playerObj ? playerObj.id : null;
+
+    try {
+      const landmarker = await ensurePoseLandmarker();
+      const tempVideo = document.createElement('video');
+      tempVideo.src = videoUrl;
+      tempVideo.muted = true;
+      tempVideo.playsInline = true;
+      tempVideo.crossOrigin = 'anonymous';
+
+      await new Promise((resolve) => {
+        let done = false;
+        const finish = () => { if (!done) { done = true; resolve(); } };
+        tempVideo.onloadeddata = finish;
+        tempVideo.onerror = finish;
+        setTimeout(finish, 2500);
+      });
+
+      const rawDur = Number(tempVideo.duration);
+      const validDur = Number.isFinite(rawDur) && rawDur > 0.4 && rawDur < 120 ? rawDur : fallbackDurationSec;
+      const ratios = [0.12, 0.28, 0.46, 0.64, 0.80, 0.93];
+      const W = 480;
+      const H = 270;
+      const rawCanvas = document.createElement('canvas');
+      rawCanvas.width = W;
+      rawCanvas.height = H;
+      const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+
+      const skelCanvas = document.createElement('canvas');
+      skelCanvas.width = W;
+      skelCanvas.height = H;
+      const skelCtx = skelCanvas.getContext('2d');
+
+      const extracted = [];
+      for (let i = 0; i < 6; i++) {
+        const targetTime = Number(Math.max(0.05, Math.min(validDur - 0.05, validDur * ratios[i])).toFixed(2));
+        await new Promise((resolve) => {
+          let settled = false;
+          const done = () => { if (!settled) { settled = true; resolve(); } };
+          tempVideo.onseeked = done;
+          try {
+            tempVideo.currentTime = targetTime;
+          } catch {
+            done();
+          }
+          setTimeout(done, 450);
+        });
+
+        rawCtx.fillStyle = '#0F172A';
+        rawCtx.fillRect(0, 0, W, H);
+        try {
+          rawCtx.drawImage(tempVideo, 0, 0, W, H);
+        } catch {}
+
+        setPoseAnalysisStatusText(`2/3 33관절 스켈레톤 및 각도 계측 중 (${i + 1}/6)...`);
+        let lm = null;
+        if (landmarker) {
+          try {
+            const res = landmarker.detect(rawCanvas);
+            if (res?.landmarks?.[0]?.length >= 33) lm = res.landmarks[0];
+          } catch {}
+        }
+        if (!lm) {
+          lm = buildKinematicLandmarksForFrame(rawCtx, W, H, i, poseSkillType, isLeft);
+        }
+        const angles = computeAnglesFromLandmarks(lm, isLeft) || { knee: 144, supportKnee: 151, trunk: 12, hip: 156, ankle: 110 };
+
+        skelCtx.clearRect(0, 0, W, H);
+        skelCtx.drawImage(rawCanvas, 0, 0, W, H);
+        drawPoseSkeletonOverlay(skelCtx, W, H, lm, angles, cfg.steps[i], isLeft);
+
+        extracted.push({
+          stepIndex: i,
+          label: cfg.steps[i],
+          timeSec: targetTime,
+          rawDataUrl: rawCanvas.toDataURL('image/jpeg', 0.72),
+          skeletonDataUrl: skelCanvas.toDataURL('image/jpeg', 0.78),
+          angles
+        });
+      }
+
+      setPoseKeyframes(extracted);
+      setPoseActiveFrameIdx(3);
+
+      const baseReport = buildBiomechanicalBaselineReport(poseSkillType, extracted, playerName, poseDominantFoot);
+      const initialSession = {
+        id: `pose_${Date.now()}`,
+        teamId: activeTeamId,
+        date: getTodayString(),
+        playerId,
+        playerName,
+        skillType: poseSkillType,
+        skillLabel: cfg.label,
+        dominantFoot: poseDominantFoot,
+        impactThumbnail: extracted[3]?.skeletonDataUrl || extracted[0]?.skeletonDataUrl || null,
+        aiReport: baseReport,
+        saved: false,
+        createdAt: new Date().toISOString()
+      };
+      setPoseCurrentSession(initialSession);
+
+      setPoseAnalysisStatusText('3/3 Gemini 2.5 비전 AI 프로 코칭 리포트 생성 중...');
+      const finalReport = await enrichPoseReportWithGemini(baseReport, poseSkillType, extracted, playerName, poseDominantFoot);
+      setPoseCurrentSession((prev) => (prev ? { ...prev, aiReport: finalReport } : prev));
+    } finally {
+      setIsAnalyzingPose(false);
+      setPoseAnalysisStatusText('');
+    }
+  };
+  const startPoseVideoRecording = () => {
+    if (!poseStreamRef.current || isPoseRecording) return;
+    poseRecordedChunksRef.current = [];
+    let mimeType = '';
+    const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+    for (const m of candidates) {
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) {
+        mimeType = m;
+        break;
+      }
+    }
+
+    try {
+      const recorder = mimeType
+        ? new MediaRecorder(poseStreamRef.current, { mimeType })
+        : new MediaRecorder(poseStreamRef.current);
+      poseMediaRecorderRef.current = recorder;
+      const startedAt = Date.now();
+      setIsPoseRecording(true);
+      setPoseRecordProgressSec(0);
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) poseRecordedChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        if (poseRecordTimerRef.current) {
+          clearInterval(poseRecordTimerRef.current);
+          poseRecordTimerRef.current = null;
+        }
+        const elapsedSec = Math.max(1.2, (Date.now() - startedAt) / 1000);
+        const blob = new Blob(poseRecordedChunksRef.current, { type: mimeType || 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        stopPoseCamera();
+        setPoseRecordedVideoUrl(url);
+        setPosePlaybackRate(0.5);
+        processAndAnalyzePoseVideo(url, elapsedSec);
+      };
+
+      recorder.start(150);
+      poseRecordTimerRef.current = setInterval(() => {
+        const sec = Number(((Date.now() - startedAt) / 1000).toFixed(1));
+        setPoseRecordProgressSec(sec);
+        if (sec >= poseRecordDurationSec && recorder.state === 'recording') {
+          recorder.stop();
+        }
+      }, 100);
+    } catch {
+      setSystemAlert({ isOpen: true, message: '이 브라우저에서는 실시간 비디오 녹화가 제한됩니다. [갤러리 영상 불러오기]를 이용해 주세요.' });
+    }
+  };
+
+  const stopPoseVideoRecordingEarly = () => {
+    if (poseMediaRecorderRef.current && poseMediaRecorderRef.current.state === 'recording') {
+      poseMediaRecorderRef.current.stop();
+    }
+  };
+
+  const handlePoseVideoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (isPoseCameraActive) stopPoseCamera();
+    const url = URL.createObjectURL(file);
+    setPoseRecordedVideoUrl(url);
+    setPosePlaybackRate(0.5);
+    processAndAnalyzePoseVideo(url, 3.6);
+    e.target.value = '';
+  };
+
+  const runSamplePoseSimulation = async () => {
+    if (isAnalyzingPose) return;
+    if (isPoseCameraActive) stopPoseCamera();
+    setIsAnalyzingPose(true);
+    setPoseAnalysisStatusText('샘플 동작 6단계 스켈레톤 및 바이오메카닉스 시뮬레이션 생성 중...');
+
+    const cfg = POSE_SKILL_CONFIG[poseSkillType] || POSE_SKILL_CONFIG.shoot;
+    const isLeft = poseDominantFoot === '왼발';
+    const isCustom = poseSelectedPlayerId === '__custom__';
+    const playerObj = !isCustom ? currentTeamPlayers.find((p) => p.id === poseSelectedPlayerId) : null;
+    const playerName = isCustom
+      ? (poseCustomPlayerName.trim() || '손흥민 (샘플)')
+      : (playerObj ? playerObj.name : '손흥민 (샘플)');
+    const playerId = playerObj ? playerObj.id : null;
+
+    const W = 480;
+    const H = 270;
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
+    const extracted = [];
+    const sampleTimes = [0.35, 0.85, 1.35, 1.85, 2.35, 2.85];
+    for (let i = 0; i < 6; i++) {
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, '#09152B');
+      grad.addColorStop(0.7, '#062825');
+      grad.addColorStop(1, '#064E3B');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, H * 0.78);
+      ctx.lineTo(W, H * 0.78);
+      ctx.stroke();
+
+      const lm = buildKinematicLandmarksForFrame(ctx, W, H, i, poseSkillType, isLeft);
+      const angles = computeAnglesFromLandmarks(lm, isLeft);
+      const rawDataUrl = canvas.toDataURL('image/jpeg', 0.75);
+
+      // 축구공 위치 렌더링
+      const ballX = W * (0.52 + (i >= 3 ? (i - 2.7) * 0.14 * (isLeft ? -1 : 1) : 0));
+      const ballY = H * (0.74 - (i >= 3 && poseSkillType === 'shoot' ? (i - 2.8) * 0.08 : 0));
+      ctx.fillStyle = '#FFFFFF';
+      ctx.strokeStyle = '#F59E0B';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(ballX, ballY, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      drawPoseSkeletonOverlay(ctx, W, H, lm, angles, cfg.steps[i], isLeft);
+      extracted.push({
+        stepIndex: i,
+        label: cfg.steps[i],
+        timeSec: sampleTimes[i],
+        rawDataUrl,
+        skeletonDataUrl: canvas.toDataURL('image/jpeg', 0.8),
+        angles
+      });
+    }
+
+    setPoseRecordedVideoUrl(null);
+    setPoseKeyframes(extracted);
+    setPoseActiveFrameIdx(3);
+    const baseReport = buildBiomechanicalBaselineReport(poseSkillType, extracted, playerName, poseDominantFoot);
+    const initialSession = {
+      id: `pose_${Date.now()}`,
+      teamId: activeTeamId,
+      date: getTodayString(),
+      playerId,
+      playerName,
+      skillType: poseSkillType,
+      skillLabel: cfg.label,
+      dominantFoot: poseDominantFoot,
+      impactThumbnail: extracted[3]?.skeletonDataUrl || null,
+      aiReport: baseReport,
+      saved: false,
+      createdAt: new Date().toISOString()
+    };
+    setPoseCurrentSession(initialSession);
+    const finalReport = await enrichPoseReportWithGemini(baseReport, poseSkillType, extracted, playerName, poseDominantFoot);
+    setPoseCurrentSession((prev) => (prev ? { ...prev, aiReport: finalReport } : prev));
+    setIsAnalyzingPose(false);
+    setPoseAnalysisStatusText('');
+  };
+
+  const saveCurrentPoseSessionToTeam = async () => {
+    if (!poseCurrentSession || !activeTeamId || isProcessing) return;
+    setIsProcessing(true);
+    try {
+      const recToSave = { ...poseCurrentSession, saved: true, updatedAt: new Date().toISOString() };
+      const filtered = savedPoseRecords.filter((r) => r.id !== recToSave.id);
+      await persistPoseRecordList([recToSave, ...filtered]);
+      setPoseCurrentSession(recToSave);
+      setSystemAlert({ isOpen: true, message: `${recToSave.playerName} 선수의 ${recToSave.skillLabel} AI 코칭 리포트가 팀 기록장에 저장되었습니다!` });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const requestDeletePoseRecord = (recordId) => {
+    setSystemConfirm({
+      isOpen: true,
+      message: '이 AI 자세 코칭 기록을 삭제하시겠습니까?',
+      onConfirm: async () => {
+        if (!activeTeamId || isProcessing) return;
+        setIsProcessing(true);
+        try {
+          const updated = savedPoseRecords.filter((r) => r.id !== recordId);
+          await persistPoseRecordList(updated);
+          if (poseCurrentSession?.id === recordId) setPoseCurrentSession(null);
+        } finally {
+          setIsProcessing(false);
+        }
+      }
+    });
+  };
+
   // ================= 위성지도 기반 구장(꼭짓점 4곳) 등록/관리 =================
   const updateMapOverlaysFromCorners = (corners) => {
     const L = window.L;
@@ -6452,12 +7428,12 @@ const renderGoalFlowModal = () => {
 
         {activeTab === 'gps' && (
           <div className="space-y-3.5 animate-in fade-in flex-1 overflow-y-auto overflow-x-hidden hide-scrollbar pb-6 break-keep">
-            {/* 상단 서브탭: GPS 분석 / 슈팅 측정 */}
-            <div className="grid grid-cols-2 bg-slate-900 p-1 rounded-2xl border border-slate-700/80 gap-1 shadow-sm">
+            {/* 상단 서브탭: GPS 분석 / 슈팅 측정 / AI 자세코칭 */}
+            <div className="grid grid-cols-3 bg-slate-900 p-1 rounded-2xl border border-slate-700/80 gap-1 shadow-sm">
               <button
                 type="button"
                 onClick={() => setRecordSubTab('gps')}
-                className={`py-2.5 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 min-w-0 overflow-hidden truncate ${recordSubTab === 'gps' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+                className={`py-2.5 px-1.5 rounded-xl text-[11px] sm:text-xs font-black transition flex items-center justify-center gap-1 min-w-0 overflow-hidden truncate ${recordSubTab === 'gps' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
               >
                 <span className="shrink-0">⌚</span>
                 <span className="truncate">GPS 분석</span>
@@ -6465,10 +7441,18 @@ const renderGoalFlowModal = () => {
               <button
                 type="button"
                 onClick={() => setRecordSubTab('shoot')}
-                className={`py-2.5 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 min-w-0 overflow-hidden truncate ${recordSubTab === 'shoot' ? 'bg-gradient-to-r from-rose-600 to-amber-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+                className={`py-2.5 px-1.5 rounded-xl text-[11px] sm:text-xs font-black transition flex items-center justify-center gap-1 min-w-0 overflow-hidden truncate ${recordSubTab === 'shoot' ? 'bg-gradient-to-r from-rose-600 to-amber-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
               >
                 <span className="shrink-0">⚡</span>
                 <span className="truncate">슈팅 측정</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRecordSubTab('pose')}
+                className={`py-2.5 px-1.5 rounded-xl text-[11px] sm:text-xs font-black transition flex items-center justify-center gap-1 min-w-0 overflow-hidden truncate ${recordSubTab === 'pose' ? 'bg-gradient-to-r from-indigo-600 to-cyan-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+              >
+                <span className="shrink-0">🤖</span>
+                <span className="truncate">AI 자세코칭</span>
               </button>
             </div>
 
@@ -7239,7 +8223,7 @@ const renderGoalFlowModal = () => {
               );
             })()}
               </>
-            ) : (
+            ) : recordSubTab === 'shoot' ? (
               /* ================= 슈팅 측정 (실시간 가상 레이저 트랩 스피드건) 화면 ================= */
               <div className="space-y-3.5 animate-in fade-in min-w-0">
                 {/* 1. 상단 타이틀 및 측정 가이드 버튼 */}
@@ -7757,6 +8741,604 @@ const renderGoalFlowModal = () => {
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* ================= AI 자세 코칭 (33관절 스켈레톤 + 6단계 동작 분해 + Gemini 2.5 비전 코칭) 화면 ================= */
+              <div className="space-y-3.5 animate-in fade-in min-w-0">
+                {/* 1. 상단 타이틀 및 AI 엔진 상태 / API 키 설정 */}
+                <div className="flex justify-between items-center gap-2 min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-lg sm:text-xl font-black text-white flex items-center gap-1.5 truncate">
+                      <span className="shrink-0">🤖</span>
+                      <span className="truncate">실시간 AI 자세 코칭</span>
+                    </h2>
+                    <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                      33관절 스켈레톤 각도 계측 · 6단계 연속 프레임 · Gemini 2.5 비전 리뷰
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setGeminiApiKeyModal({ isOpen: true, keyInput: geminiApiKey || '' })}
+                    className="text-xs bg-slate-800 hover:bg-slate-700 text-cyan-400 px-3 py-2 rounded-xl font-bold border border-cyan-500/30 flex items-center gap-1.5 transition shrink-0 whitespace-nowrap shadow-sm"
+                  >
+                    <span>🔑</span> AI 키 설정
+                  </button>
+                </div>
+
+                {/* 2. 종목 선택 (슈팅 / 패스 / 볼 터치) 및 선수·주발 설정 카드 */}
+                <div className="bg-slate-800/85 border border-slate-700/80 rounded-2xl p-3 space-y-2.5 shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <span className="text-[11px] font-black text-cyan-400 truncate">🎯 STEP 1. 코칭 종목 및 선수 선택</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shrink-0 whitespace-nowrap">
+                      {poseEngineStatus === 'mediapipe' ? '🟢 33관절 AI 추적 활성' : '🟢 바이오메카닉스 비전 활성'}
+                    </span>
+                  </div>
+
+                  {/* 슈팅 자세 / 패스 자세 / 볼 터치 자세 3종 탭 */}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {Object.values(POSE_SKILL_CONFIG).map((cfg) => (
+                      <button
+                        key={cfg.code}
+                        type="button"
+                        onClick={() => setPoseSkillType(cfg.code)}
+                        className={`py-2 px-2 rounded-xl text-xs font-black border transition flex items-center justify-center gap-1 truncate ${
+                          poseSkillType === cfg.code
+                            ? `bg-gradient-to-r ${cfg.badgeColor} text-white border-white/30 shadow-md`
+                            : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                        }`}
+                      >
+                        <span className="shrink-0">{cfg.icon}</span>
+                        <span className="truncate">{cfg.label}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-2 min-w-0">
+                    <select
+                      value={poseSelectedPlayerId}
+                      onChange={(e) => setPoseSelectedPlayerId(e.target.value)}
+                      className="w-0 flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none truncate"
+                    >
+                      <option value="">👤 촬영할 선수 선택 (미선택 시 미지정 선수)</option>
+                      {currentTeamPlayers.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name} ({formatBirthYear(p.birthYear)})</option>
+                      ))}
+                      <option value="__custom__">✍️ 이름 직접 입력...</option>
+                    </select>
+                  </div>
+
+                  {poseSelectedPlayerId === '__custom__' && (
+                    <input
+                      type="text"
+                      value={poseCustomPlayerName}
+                      onChange={(e) => setPoseCustomPlayerName(e.target.value)}
+                      placeholder="선수 이름 직접 입력 (예: 손흥민)"
+                      className="w-full bg-slate-900 border border-cyan-500/40 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none"
+                    />
+                  )}
+
+                  {/* 주발 선택 & 촬영 시간 선택 */}
+                  <div className="grid grid-cols-2 gap-2 pt-0.5">
+                    <div className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-700 gap-1">
+                      {['오른발', '왼발'].map((ft) => (
+                        <button
+                          key={ft}
+                          type="button"
+                          onClick={() => setPoseDominantFoot(ft)}
+                          className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition ${
+                            poseDominantFoot === ft ? 'bg-cyan-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          🦶 {ft} 기준
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-700 gap-1">
+                      {[3, 4, 5].map((sec) => (
+                        <button
+                          key={sec}
+                          type="button"
+                          onClick={() => setPoseRecordDurationSec(sec)}
+                          className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition ${
+                            poseRecordDurationSec === sec ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          ⏱️ {sec}초 촬영
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {/* 3. 실시간 촬영 뷰파인더 & 슬로우모션 리뷰 플레이어 (스켈레톤 HUD + 관절 각도 계기판) */}
+                <div className="bg-slate-900 border-2 border-slate-700/90 rounded-3xl overflow-hidden shadow-xl">
+                  {/* 상단 바이오메카닉스 관절 각도 계기판 */}
+                  <div className="p-3 bg-gradient-to-b from-slate-950 to-slate-900 border-b border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                          isPoseRecording ? 'bg-rose-500 animate-ping' :
+                          isAnalyzingPose ? 'bg-amber-400 animate-pulse' :
+                          isPoseCameraActive ? 'bg-emerald-400 animate-pulse' :
+                          poseRecordedVideoUrl || poseKeyframes.length > 0 ? 'bg-cyan-400' : 'bg-slate-500'
+                        }`} />
+                        <span className="text-[11px] font-black text-slate-200 truncate">
+                          {isPoseRecording ? `🔴 동작 촬영 중... (${poseRecordProgressSec.toFixed(1)}s / ${poseRecordDurationSec}s)` :
+                           isAnalyzingPose ? `🟡 ${poseAnalysisStatusText || 'AI 자세 분석 중...'}` :
+                           isPoseCameraActive ? '🟢 카메라 대기 중 (촬영 시작을 누르고 동작을 수행하세요)' :
+                           poseRecordedVideoUrl ? '🎬 촬영 영상 슬로우모션 리뷰 모드' :
+                           poseKeyframes.length > 0 ? '📸 6단계 동작 프레임 스켈레톤 리뷰' :
+                           '⚪ 카메라를 켜서 촬영하거나 갤러리 영상을 불러오세요'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPoseShowSkeleton((prev) => !prev)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-black border transition shrink-0 whitespace-nowrap ${
+                          poseShowSkeleton
+                            ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        {poseShowSkeleton ? '🦴 스켈레톤 ON' : '🦴 스켈레톤 OFF'}
+                      </button>
+                    </div>
+
+                    {/* 실시간 / 선택 프레임 4대 관절 각도 HUD */}
+                    {(() => {
+                      const activeAng = (!isPoseCameraActive && poseKeyframes[poseActiveFrameIdx]?.angles)
+                        ? poseKeyframes[poseActiveFrameIdx].angles
+                        : poseLiveAngles;
+                      return (
+                        <div className="grid grid-cols-4 gap-1.5 text-center">
+                          <div className="bg-slate-950/90 border border-slate-800 rounded-xl py-1.5 px-1">
+                            <div className="text-[9px] text-slate-400 font-bold truncate">주발 무릎각</div>
+                            <div className="text-xs sm:text-sm font-black text-amber-400 tabular-nums">{activeAng?.knee || 145}°</div>
+                          </div>
+                          <div className="bg-slate-950/90 border border-slate-800 rounded-xl py-1.5 px-1">
+                            <div className="text-[9px] text-slate-400 font-bold truncate">상체 기울기</div>
+                            <div className="text-xs sm:text-sm font-black text-sky-400 tabular-nums">{activeAng?.trunk || 12}°</div>
+                          </div>
+                          <div className="bg-slate-950/90 border border-slate-800 rounded-xl py-1.5 px-1">
+                            <div className="text-[9px] text-slate-400 font-bold truncate">발목 고정각</div>
+                            <div className="text-xs sm:text-sm font-black text-rose-400 tabular-nums">{activeAng?.ankle || 110}°</div>
+                          </div>
+                          <div className="bg-slate-950/90 border border-slate-800 rounded-xl py-1.5 px-1">
+                            <div className="text-[9px] text-slate-400 font-bold truncate">디딤발 지지</div>
+                            <div className="text-xs sm:text-sm font-black text-emerald-400 tabular-nums">{activeAng?.supportKnee || 152}°</div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* 비디오 뷰파인더 / 리플레이 화면 / 키프레임 프리뷰 */}
+                  <div className="relative w-full aspect-video bg-slate-950 overflow-hidden select-none">
+                    {/* 1) 실시간 촬영 카메라 비디오 */}
+                    <video
+                      ref={poseLiveVideoRef}
+                      playsInline
+                      muted
+                      autoPlay
+                      className={`w-full h-full object-cover ${isPoseCameraActive ? 'block' : 'hidden'}`}
+                    />
+                    <canvas
+                      ref={poseLiveCanvasRef}
+                      width={480}
+                      height={270}
+                      className={`absolute inset-0 w-full h-full pointer-events-none ${isPoseCameraActive ? 'block' : 'hidden'}`}
+                    />
+
+                    {/* 2) 촬영/업로드된 영상 리플레이 비디오 */}
+                    {!isPoseCameraActive && poseRecordedVideoUrl && (
+                      <>
+                        <video
+                          ref={poseReviewVideoRef}
+                          src={poseRecordedVideoUrl}
+                          playsInline
+                          controls
+                          loop
+                          onLoadedMetadata={(e) => {
+                            try { e.currentTarget.playbackRate = posePlaybackRate; } catch {}
+                          }}
+                          className="w-full h-full object-contain bg-black"
+                        />
+                        <canvas
+                          ref={poseReviewCanvasRef}
+                          width={480}
+                          height={270}
+                          className="absolute inset-0 w-full h-full pointer-events-none"
+                        />
+                      </>
+                    )}
+
+                    {/* 3) 샘플 시뮬레이션 또는 저장된 키프레임 스냅샷 프리뷰 */}
+                    {!isPoseCameraActive && !poseRecordedVideoUrl && poseKeyframes.length > 0 && (
+                      <img
+                        src={
+                          poseShowSkeleton
+                            ? (poseKeyframes[poseActiveFrameIdx]?.skeletonDataUrl || poseKeyframes[poseActiveFrameIdx]?.rawDataUrl)
+                            : (poseKeyframes[poseActiveFrameIdx]?.rawDataUrl || poseKeyframes[poseActiveFrameIdx]?.skeletonDataUrl)
+                        }
+                        alt="pose-keyframe"
+                        className="w-full h-full object-contain bg-slate-950"
+                      />
+                    )}
+                    {/* 대기 상태 안내 오버레이 */}
+                    {!isPoseCameraActive && !poseRecordedVideoUrl && poseKeyframes.length === 0 && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
+                        <div className="bg-slate-900/90 border border-cyan-500/30 px-4 py-3 rounded-2xl shadow-lg max-w-[280px] space-y-1">
+                          <div className="text-xs font-black text-cyan-400">
+                            🤖 {POSE_SKILL_CONFIG[poseSkillType]?.icon} {POSE_SKILL_CONFIG[poseSkillType]?.label} AI 바이오메카닉스 코칭
+                          </div>
+                          <div className="text-[11px] text-slate-300 leading-snug">
+                            카메라로 3~5초간 동작을 촬영하면 33개 관절 각도를 계측하고 영상 바로 아래에 즉석 코칭 리포트를 생성합니다.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 분석 진행 중 오버레이 */}
+                    {isAnalyzingPose && (
+                      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center p-4 z-20">
+                        <div className="w-9 h-9 border-3 border-cyan-400 border-t-transparent rounded-full animate-spin mb-2.5" />
+                        <div className="text-xs font-black text-cyan-300 text-center">{poseAnalysisStatusText || 'AI 자세 분석 중...'}</div>
+                      </div>
+                    )}
+
+                    {/* 카메라 전/후면 전환 버튼 */}
+                    {isPoseCameraActive && (
+                      <button
+                        type="button"
+                        onClick={togglePoseFacingMode}
+                        className="absolute top-2.5 right-2.5 bg-slate-900/85 hover:bg-slate-800 text-white border border-slate-600 px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 shadow-lg z-10"
+                      >
+                        🔄 {poseFacingMode === 'environment' ? '후면 카메라' : '전면 카메라'}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 하단 촬영 / 업로드 / 슬로우모션 컨트롤 바 */}
+                  <div className="p-3 bg-slate-900 space-y-2.5 border-t border-slate-800">
+                    {/* 리플레이 슬로우모션 배속 선택 바 (영상이 있을 때만 표시) */}
+                    {poseRecordedVideoUrl && !isPoseCameraActive && (
+                      <div className="flex items-center justify-between bg-slate-950 p-1.5 rounded-xl border border-slate-800 gap-1">
+                        <span className="text-[10px] font-bold text-slate-400 pl-1.5 shrink-0">🎬 리플레이 배속:</span>
+                        <div className="flex gap-1 flex-1 max-w-[220px]">
+                          {[
+                            { rate: 1.0, label: '1.0x 정속' },
+                            { rate: 0.5, label: '0.5x 슬로우' },
+                            { rate: 0.25, label: '0.25x 초슬로우' }
+                          ].map((item) => (
+                            <button
+                              key={item.rate}
+                              type="button"
+                              onClick={() => {
+                                setPosePlaybackRate(item.rate);
+                                if (poseReviewVideoRef.current) {
+                                  try { poseReviewVideoRef.current.playbackRate = item.rate; } catch {}
+                                }
+                              }}
+                              className={`flex-1 py-1 px-1.5 rounded-lg text-[10px] font-black transition truncate ${
+                                posePlaybackRate === item.rate
+                                  ? 'bg-cyan-500 text-slate-950 shadow'
+                                  : 'bg-slate-800 text-slate-300 hover:text-white'
+                              }`}
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 메인 촬영 / 갤러리 업로드 / 샘플 체험 버튼 */}
+                    <div className="flex gap-1.5">
+                      {!isPoseCameraActive ? (
+                        <button
+                          type="button"
+                          disabled={isAnalyzingPose}
+                          onClick={() => startPoseCamera()}
+                          className="flex-1 py-3 px-2.5 bg-gradient-to-r from-indigo-600 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-1 min-w-0 overflow-hidden disabled:opacity-50"
+                        >
+                          <span className="shrink-0">📷</span>
+                          <span className="truncate">{poseRecordedVideoUrl ? '다시 촬영하기' : '카메라 켜기 (실시간 촬영)'}</span>
+                        </button>
+                      ) : !isPoseRecording ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={startPoseVideoRecording}
+                            className="flex-1 py-3 px-2.5 bg-gradient-to-r from-rose-600 to-amber-500 hover:from-rose-500 hover:to-amber-400 text-white font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-1.5 min-w-0 overflow-hidden animate-pulse"
+                          >
+                            <span className="shrink-0">🔴</span>
+                            <span className="truncate">{poseRecordDurationSec}초 동작 촬영 시작</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={stopPoseCamera}
+                            className="py-3 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold text-xs rounded-xl transition shrink-0"
+                          >
+                            닫기
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={stopPoseVideoRecordingEarly}
+                          className="flex-1 py-3 px-3 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-1.5"
+                        >
+                          <span>⏹️</span>
+                          <span>촬영 완료 & 즉시 AI 분석 ({poseRecordProgressSec.toFixed(1)}s)</span>
+                        </button>
+                      )}
+
+                      <label className="py-3 px-2.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 font-bold text-xs rounded-xl transition shrink-0 whitespace-nowrap cursor-pointer flex items-center justify-center gap-1">
+                        <span>📂</span>
+                        <span>영상 열기</span>
+                        <input
+                          type="file"
+                          accept="video/*"
+                          onChange={handlePoseVideoUpload}
+                          className="hidden"
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        disabled={isAnalyzingPose}
+                        onClick={runSamplePoseSimulation}
+                        className="py-3 px-2.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-bold text-xs rounded-xl transition shrink-0 whitespace-nowrap disabled:opacity-50"
+                        title="촬영 없이 즉시 6단계 스켈레톤 및 AI 코칭 리포트를 체험합니다"
+                      >
+                        🧪 샘플 체험
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                {/* 4. 6단계 연속 프레임 스켈레톤 타임라인 (터치 시 해당 영상 시점 즉시 이동) */}
+                {poseKeyframes.length > 0 && (
+                  <div className="bg-slate-800/85 border border-slate-700 rounded-2xl p-3.5 space-y-2.5 shadow-sm overflow-hidden animate-in fade-in">
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <span className="text-xs font-black text-white truncate">
+                        🎞️ 6단계 핵심 동작 스켈레톤 분해
+                      </span>
+                      <span className="text-[10px] text-cyan-400 font-bold shrink-0 whitespace-nowrap">
+                        컷 터치 시 해당 순간으로 이동
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                      {poseKeyframes.map((kf, idx) => {
+                        const isSelected = poseActiveFrameIdx === idx;
+                        return (
+                          <button
+                            key={kf.stepIndex}
+                            type="button"
+                            onClick={() => {
+                              setPoseActiveFrameIdx(idx);
+                              if (poseReviewVideoRef.current && Number.isFinite(kf.timeSec)) {
+                                try {
+                                  poseReviewVideoRef.current.pause();
+                                  poseReviewVideoRef.current.currentTime = kf.timeSec;
+                                } catch {}
+                              }
+                            }}
+                            className={`rounded-xl overflow-hidden border text-left transition flex flex-col ${
+                              isSelected
+                                ? 'border-cyan-400 ring-2 ring-cyan-500/40 bg-slate-900 shadow-md'
+                                : 'border-slate-700/80 bg-slate-900/70 hover:border-slate-500'
+                            }`}
+                          >
+                            <div className="relative aspect-video w-full bg-slate-950 overflow-hidden">
+                              <img
+                                src={poseShowSkeleton ? kf.skeletonDataUrl : kf.rawDataUrl}
+                                alt={kf.label}
+                                className="w-full h-full object-cover"
+                              />
+                              <span className="absolute bottom-1 right-1 bg-slate-950/85 text-[9px] font-mono font-bold text-slate-300 px-1 rounded">
+                                {kf.timeSec}s
+                              </span>
+                            </div>
+                            <div className="p-1.5 space-y-0.5 min-w-0">
+                              <div className={`text-[10px] font-black truncate ${isSelected ? 'text-cyan-300' : 'text-slate-200'}`}>
+                                {kf.label}
+                              </div>
+                              <div className="text-[9px] text-slate-400 font-bold truncate">
+                                무릎 {kf.angles?.knee}° · 상체 {kf.angles?.trunk}°
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* 선택된 단계의 AI 프레임 코멘트 하이라이트 */}
+                    {poseCurrentSession?.aiReport?.stepReviews?.[poseActiveFrameIdx] && (
+                      <div className="bg-slate-900/95 border border-cyan-500/35 rounded-xl p-2.5 flex items-start gap-2 text-xs">
+                        <span className="text-cyan-400 font-black shrink-0 whitespace-nowrap">
+                          🔍 [{poseCurrentSession.aiReport.stepReviews[poseActiveFrameIdx].stepTitle}]
+                        </span>
+                        <span className="text-slate-200 font-bold leading-snug">
+                          {poseCurrentSession.aiReport.stepReviews[poseActiveFrameIdx].comment}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 5. 영상 하단 즉석 AI 자세 코칭 리포트 */}
+                {poseCurrentSession?.aiReport && (() => {
+                  const rep = poseCurrentSession.aiReport;
+                  return (
+                    <div className="bg-gradient-to-b from-indigo-950/65 via-slate-900 to-slate-900 border border-cyan-500/40 rounded-3xl p-4 space-y-3.5 shadow-xl animate-in fade-in overflow-hidden">
+                      {/* 상단 종합 자세 점수 & 스타일 별명 */}
+                      <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3 min-w-0">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 whitespace-nowrap">
+                              {poseCurrentSession.dominantFoot} {poseCurrentSession.skillLabel} AI 진단
+                            </span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 whitespace-nowrap">
+                              {rep.source === 'gemini-vision-ai' ? '✨ Gemini 2.5 멀티모달 비전' : '🦴 33관절 바이오메카닉스 엔진'}
+                            </span>
+                          </div>
+                          <div className="text-sm sm:text-base font-black text-amber-300 leading-snug break-keep">
+                            “{rep.styleTag}”
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-bold truncate">
+                            측정 선수: <strong className="text-white">{poseCurrentSession.playerName}</strong> · 측정일 {poseCurrentSession.date}
+                          </div>
+                        </div>
+
+                        <div className="bg-slate-950/90 border border-cyan-500/40 rounded-2xl px-3 py-2 text-center shrink-0">
+                          <div className="text-[9px] font-bold text-cyan-400">자세 종합점수</div>
+                          <div className="text-2xl font-black text-white tabular-nums leading-none mt-0.5">
+                            {rep.overallScore}<span className="text-[10px] text-slate-400 font-bold ml-0.5">점</span>
+                          </div>
+                          <div className="text-[10px] font-black text-amber-400 mt-0.5">GRADE {rep.grade}</div>
+                        </div>
+                      </div>
+                      {/* 종합 코칭 총평 */}
+                      <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 text-xs font-bold text-slate-100 leading-relaxed break-keep">
+                        💬 {rep.summary}
+                      </div>
+
+                      {/* 5대 바이오메카닉스 핵심 지표 바 */}
+                      {Array.isArray(rep.axisScores) && rep.axisScores.length > 0 && (
+                        <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3 space-y-2">
+                          <div className="text-[11px] font-black text-cyan-300">📊 5대 자세 메커니즘 정밀 평가</div>
+                          <div className="space-y-2">
+                            {rep.axisScores.map((ax, i) => (
+                              <div key={i} className="space-y-1">
+                                <div className="flex justify-between text-[11px] font-bold">
+                                  <span className="text-slate-300">{ax.name}</span>
+                                  <span className={ax.score >= 88 ? 'text-emerald-400 font-black' : 'text-amber-400 font-black'}>{ax.score}점</span>
+                                </div>
+                                <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
+                                  <div
+                                    style={{ width: `${Math.max(20, Math.min(100, ax.score))}%` }}
+                                    className={`h-full rounded-full ${ax.score >= 88 ? 'bg-gradient-to-r from-emerald-500 to-cyan-400' : 'bg-gradient-to-r from-amber-500 to-orange-400'}`}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 잘한 점 & 교정 포인트 & 원포인트 처방전 & 추천 훈련 드릴 */}
+                      <div className="space-y-2 text-xs leading-relaxed break-keep">
+                        <div className="bg-emerald-950/35 border border-emerald-500/30 rounded-2xl p-3 space-y-1">
+                          <div className="font-black text-emerald-400 text-[11px]">✅ 훌륭한 자세 포인트 (Strengths)</div>
+                          {(rep.strengths || []).map((st, idx) => (
+                            <div key={idx} className="text-slate-200 text-[11px]">• {st}</div>
+                          ))}
+                        </div>
+
+                        <div className="bg-rose-950/35 border border-rose-500/30 rounded-2xl p-3 space-y-1">
+                          <div className="font-black text-rose-400 text-[11px]">⚠️ 중점 교정 포인트 (Weakness)</div>
+                          <div className="text-slate-200 text-[11px]">{rep.weakness}</div>
+                        </div>
+
+                        <div className="bg-amber-950/35 border border-amber-500/35 rounded-2xl p-3 space-y-1">
+                          <div className="font-black text-amber-400 text-[11px]">💊 AI 코치 원포인트 교정 처방</div>
+                          <div className="text-amber-100 text-[11px] font-bold">{rep.correctionTip}</div>
+                        </div>
+
+                        {Array.isArray(rep.recommendedDrills) && rep.recommendedDrills.length > 0 && (
+                          <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 space-y-1">
+                            <div className="font-black text-indigo-300 text-[11px]">🏃 맞춤 개인 훈련 드릴 추천</div>
+                            {rep.recommendedDrills.map((dr, idx) => (
+                              <div key={idx} className="text-slate-300 text-[11px]">• {dr}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 팀 기록장 저장 및 Gemini 재분석 버튼 */}
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={poseCurrentSession.saved || isProcessing}
+                          onClick={saveCurrentPoseSessionToTeam}
+                          className={`flex-1 py-3 px-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 shadow ${
+                            poseCurrentSession.saved
+                              ? 'bg-slate-800 text-emerald-400 border border-emerald-500/40'
+                              : 'bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white'
+                          }`}
+                        >
+                          {poseCurrentSession.saved ? '✅ 팀 기록장에 저장 완료' : '💾 팀 기록장에 이 코칭 리포트 저장'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 6. 우리 팀 저장된 AI 자세 코칭 히스토리 */}
+                <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-3.5 sm:p-4 space-y-3 overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <h3 className="text-xs font-black text-slate-200 flex items-center gap-1.5 truncate">
+                      <span>📚</span>
+                      <span className="truncate">팀원 AI 자세 코칭 보관함 ({savedPoseRecords.length})</span>
+                    </h3>
+                    <span className="text-[10px] text-slate-400 shrink-0 whitespace-nowrap">터치하여 리포트 열람</span>
+                  </div>
+
+                  {savedPoseRecords.length === 0 ? (
+                    <div className="text-center py-6 text-xs text-slate-500 bg-slate-900/50 rounded-xl border border-slate-800">
+                      저장된 AI 자세 코칭 리포트가 없습니다. 촬영 또는 샘플 체험 후 저장해 보세요!
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-72 overflow-y-auto pr-0.5 hide-scrollbar">
+                      {savedPoseRecords.map((rec) => (
+                        <div
+                          key={rec.id}
+                          onClick={() => {
+                            setPoseCurrentSession(rec);
+                            setPoseRecordedVideoUrl(null);
+                          }}
+                          className={`p-2.5 rounded-xl border transition cursor-pointer flex items-center justify-between gap-2.5 overflow-hidden ${
+                            poseCurrentSession?.id === rec.id
+                              ? 'bg-slate-900 border-cyan-500/50'
+                              : 'bg-slate-900/75 border-slate-700/80 hover:border-slate-600'
+                          }`}
+                        >
+                          {rec.impactThumbnail && (
+                            <img
+                              src={rec.impactThumbnail}
+                              alt="impact"
+                              className="w-14 h-10 rounded-lg object-cover border border-slate-700 shrink-0"
+                            />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-xs font-black text-white truncate">{rec.playerName || '미지정 선수'}</span>
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shrink-0 whitespace-nowrap">
+                                {rec.dominantFoot} {rec.skillLabel}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                              {(rec.date || '').slice(5).replace('-', '/')} · {rec.aiReport?.styleTag || 'AI 코칭 리포트'}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span className="text-xs font-black text-amber-400 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700">
+                              {rec.aiReport?.overallScore || 88}점
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); requestDeletePoseRecord(rec.id); }}
+                              className="p-1.5 text-slate-500 hover:text-red-400 transition shrink-0"
+                              title="기록 삭제"
+                            >
+                              <Trash2 size={14}/>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>

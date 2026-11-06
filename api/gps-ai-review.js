@@ -17,9 +17,23 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { prompt } = req.body || {};
+    const { prompt, images } = req.body || {};
     if (!prompt) {
       return res.status(400).json({ error: 'Missing prompt' });
+    }
+
+    const requestParts = [{ text: prompt }];
+    if (Array.isArray(images)) {
+      images.slice(0, 6).forEach((img) => {
+        if (img && typeof img.data === 'string' && img.data.length > 0) {
+          requestParts.push({
+            inlineData: {
+              mimeType: img.mimeType || 'image/jpeg',
+              data: img.data
+            }
+          });
+        }
+      });
     }
 
     const response = await fetch(
@@ -28,9 +42,9 @@ export default async function handler(req, res) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          contents: [{ parts: requestParts }],
           generationConfig: {
-            temperature: 0.85,
+            temperature: 0.75,
             responseMimeType: 'application/json'
           }
         })
