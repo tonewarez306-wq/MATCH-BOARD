@@ -308,9 +308,10 @@ export default function App() {
   
   const [animationFrames, setAnimationFrames] = useState([]);
   const [activeFrameIndex, setActiveFrameIndex] = useState(0);
-  const [selectedTacticTemplateId, setSelectedTacticTemplateId] = useState('442_base');
-  const [tacticScenarioTitle, setTacticScenarioTitle] = useState('4-4-2 기본 스탠다드 대형');
+  const [selectedTacticTemplateId, setSelectedTacticTemplateId] = useState('442_attack_counter');
+  const [tacticScenarioTitle, setTacticScenarioTitle] = useState('[4-4-2] 두 줄 수비 후 측면 고속 역습');
   const [tacticScenarioSummary, setTacticScenarioSummary] = useState('');
+  const [showTacticAdvanced, setShowTacticAdvanced] = useState(false);
   const [tacticAiModal, setTacticAiModal] = useState({
     isOpen: false,
     formation: '4-3-3',
@@ -1700,6 +1701,12 @@ export default function App() {
     setPastState([]);
     setFutureState([]);
   };
+
+  useEffect(() => {
+    if (activeTab === 'tactics' && (animationFrames || []).length === 0 && selectedTacticTemplateId && !selectedTacticTemplateId.startsWith('custom_') && selectedTacticTemplateId !== 'ai_generated') {
+      applyTacticTemplateById(selectedTacticTemplateId);
+    }
+  }, [activeTab]);
 
   const selectTacticFrame = (idx) => {
     if (isPlaying || idx < 0 || idx >= (animationFrames || []).length) return;
@@ -8571,17 +8578,17 @@ const renderGoalFlowModal = () => {
         {}
         {activeTab === 'tactics' && (
           <div className="animate-in fade-in flex-1 flex flex-col min-h-0 overflow-y-auto hide-scrollbar relative pb-4 -mx-3 px-2">
-            {/* 상단 통합 컨트롤 패널 */}
-            <div className="bg-slate-800/70 border border-slate-700/80 rounded-2xl p-2 space-y-1.5 shrink-0 mb-2 shadow-sm overflow-hidden">
-              {/* 0단: 4-4-2 / 4-3-3 전술 템플릿 드롭다운 + AI 전술 생성 + 커스텀 저장 */}
-              <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700/80">
+            {/* 상단 간결 컨트롤 패널 (핵심 2줄 구조 + 상세설정 접기) */}
+            <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-2 space-y-1.5 shrink-0 mb-2 shadow-sm">
+              {/* 1줄: 전술 템플릿 선택 + AI 추천 + ▶ 재생 + 🎬 영상공유 */}
+              <div className="flex items-center gap-1">
                 <select
                   value={selectedTacticTemplateId}
                   onChange={(e) => applyTacticTemplateById(e.target.value)}
                   disabled={isPlaying}
-                  className="flex-1 min-w-0 h-8 px-2 bg-slate-950 border border-slate-700/90 rounded-lg text-[11px] font-bold text-emerald-300 outline-none focus:border-emerald-500 truncate"
+                  className="flex-1 min-w-0 h-9 px-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs font-black text-emerald-300 outline-none focus:border-emerald-500 truncate"
                 >
-                  <option value="">📋 4-4-2 / 4-3-3 전술 템플릿 선택...</option>
+                  <option value="">📋 자유 배치 모드 (전술 선택...)</option>
                   {selectedTacticTemplateId === 'ai_generated' && (
                     <option value="ai_generated">{tacticScenarioTitle || '🤖 AI 맞춤 생성 전술'}</option>
                   )}
@@ -8596,188 +8603,158 @@ const renderGoalFlowModal = () => {
                     ))}
                   </optgroup>
                   {savedCustomTactics.length > 0 && (
-                    <optgroup label="⭐ 우리 팀 저장 커스텀 전술">
+                    <optgroup label="⭐ 우리 팀 저장 전술">
                       {savedCustomTactics.map(ct => (
-                        <option key={ct.id} value={ct.id}>⭐ {ct.title} ({(ct.frames || []).length}컷)</option>
+                        <option key={ct.id} value={ct.id}>⭐ {ct.title}</option>
                       ))}
                     </optgroup>
                   )}
                 </select>
+
                 <button
                   type="button"
                   onClick={() => setTacticAiModal(prev => ({ ...prev, isOpen: true }))}
                   disabled={isPlaying}
-                  className="h-8 px-2.5 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black text-[11px] flex items-center gap-1 shrink-0 shadow-sm transition disabled:opacity-40 whitespace-nowrap"
+                  className="h-9 px-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black text-xs flex items-center gap-1 shrink-0 shadow-sm transition disabled:opacity-40 whitespace-nowrap"
                 >
-                  <span>🤖 AI 전술</span>
+                  <span>🤖 AI추천</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={saveCurrentTacticAsCustomTemplate}
-                  disabled={isPlaying}
-                  className="h-8 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold text-[11px] flex items-center gap-1 shrink-0 transition disabled:opacity-40 whitespace-nowrap"
-                  title="현재 수정한 전술을 템플릿에 저장"
-                >
-                  <span>💾 저장</span>
-                </button>
-                {selectedTacticTemplateId?.startsWith('custom_') && (
+
+                {isPlaying ? (
                   <button
                     type="button"
-                    onClick={() => deleteCustomTacticTemplate(selectedTacticTemplateId)}
-                    disabled={isPlaying}
-                    className="h-8 w-7 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 flex items-center justify-center shrink-0 transition"
-                    title="커스텀 템플릿 삭제"
+                    onClick={stopTacticPlayback}
+                    className="h-9 px-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs flex items-center gap-1 shrink-0 shadow-sm transition whitespace-nowrap"
                   >
-                    <Trash2 size={12}/>
-                  </button>
-                )}
-              </div>
-
-              {/* 1단: 코트 전환 + 실행취소/초기화 + 캡처/가이드 (단일 통합 바) */}
-              <div className="flex items-center justify-between bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-0.5">
-                <button onClick={() => { stopTacticPlayback(); setPitchType('full'); setSelectedTacticTemplateId(''); setTacticScenarioTitle(''); setTacticScenarioSummary(''); setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens('full'), []); setIsAutoRecording(false); }} className={`flex-1 h-7 px-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center ${pitchType === 'full' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>풀코트</button>
-                <button onClick={() => { stopTacticPlayback(); setPitchType('half'); setSelectedTacticTemplateId(''); setTacticScenarioTitle(''); setTacticScenarioSummary(''); setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens('half'), []); setIsAutoRecording(false); }} className={`flex-1 h-7 px-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center ${pitchType === 'half' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>하프</button>
-
-                <div className="w-px h-3.5 bg-slate-800 mx-0.5 shrink-0"></div>
-
-                <button onClick={() => {if(pastState.length > 0) { const prev = pastState[pastState.length - 1]; setPastState(p => p.slice(0, -1)); setFutureState(p => [{ tokens: tacticTokens || [], drawings: drawings || [] }, ...p]); setTacticTokens(prev.tokens || []); setDrawings(prev.drawings || []); }}} disabled={pastState.length === 0 || isPlaying} className="h-7 w-6 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-800 transition flex items-center justify-center shrink-0" title="실행 취소"><Undo size={13}/></button>
-                <button onClick={() => {if(futureState.length > 0) { const next = futureState[0]; setFutureState(p => p.slice(1)); setPastState(p => [...p, { tokens: tacticTokens || [], drawings: drawings || [] }]); setTacticTokens(next.tokens || []); setDrawings(next.drawings || []); }}} disabled={futureState.length === 0 || isPlaying} className="h-7 w-6 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-800 transition flex items-center justify-center shrink-0" title="다시 실행"><Redo size={13}/></button>
-                <button onClick={() => { stopTacticPlayback(); if (selectedTacticTemplateId && selectedTacticTemplateId !== 'ai_generated') { applyTacticTemplateById(selectedTacticTemplateId); } else { setPitchType(pitchType); setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens(pitchType), []); setIsAutoRecording(false); } }} className="flex-1 h-7 px-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg font-bold text-[11px] transition whitespace-nowrap flex items-center justify-center">초기화</button>
-
-                <div className="w-px h-3.5 bg-slate-800 mx-0.5 shrink-0"></div>
-
-                <button onClick={triggerTacticShare} className="flex-1 h-7 px-1 text-slate-200 hover:text-white hover:bg-slate-800 rounded-lg font-bold text-[11px] transition flex items-center justify-center gap-1 whitespace-nowrap"><Share2 size={11} className="text-emerald-400 shrink-0"/>캡처</button>
-                <button onClick={() => setTacticsTutorialModal(true)} className="flex-1 h-7 px-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg font-bold text-[11px] transition flex items-center justify-center gap-1 whitespace-nowrap"><MessageCircle size={11} className="text-blue-400 shrink-0"/>가이드</button>
-              </div>
-
-              {/* 2단: 팀 인원 조절 (단일 슬림 바) */}
-              <div className="grid grid-cols-2 bg-slate-900 rounded-xl border border-slate-700/80 divide-x divide-slate-800">
-                <div className="flex items-center justify-between px-2.5 py-1 min-w-0">
-                  <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5 whitespace-nowrap">
-                    <span className="w-2 h-2 rounded-full bg-red-500 shrink-0"></span>A팀 인원
-                  </span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => handleUpdatePlayerCount('A', (tacticTokens||[]).filter(t=>t.team==='A').length - 1)} disabled={isPlaying} className="w-6 h-6 flex items-center justify-center bg-slate-800 text-slate-300 rounded-md hover:bg-slate-700 hover:text-white transition font-bold text-xs disabled:opacity-40">-</button>
-                    <span className="w-5 text-center text-white text-xs font-black">{(tacticTokens||[]).filter(t=>t.team==='A').length}</span>
-                    <button onClick={() => handleUpdatePlayerCount('A', (tacticTokens||[]).filter(t=>t.team==='A').length + 1)} disabled={isPlaying} className="w-6 h-6 flex items-center justify-center bg-slate-800 text-slate-300 rounded-md hover:bg-slate-700 hover:text-white transition font-bold text-xs disabled:opacity-40">+</button>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between px-2.5 py-1 min-w-0">
-                  <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5 whitespace-nowrap">
-                    <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>B팀 인원
-                  </span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => handleUpdatePlayerCount('B', (tacticTokens||[]).filter(t=>t.team==='B').length - 1)} disabled={isPlaying} className="w-6 h-6 flex items-center justify-center bg-slate-800 text-slate-300 rounded-md hover:bg-slate-700 hover:text-white transition font-bold text-xs disabled:opacity-40">-</button>
-                    <span className="w-5 text-center text-white text-xs font-black">{(tacticTokens||[]).filter(t=>t.team==='B').length}</span>
-                    <button onClick={() => handleUpdatePlayerCount('B', (tacticTokens||[]).filter(t=>t.team==='B').length + 1)} disabled={isPlaying} className="w-6 h-6 flex items-center justify-center bg-slate-800 text-slate-300 rounded-md hover:bg-slate-700 hover:text-white transition font-bold text-xs disabled:opacity-40">+</button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 3단: 애니메이션 스튜디오 바 (녹화 / 재생 / 영상공유 / 삭제) */}
-              <div className="flex items-center gap-1 bg-slate-900 rounded-xl p-1 border border-slate-700/80">
-                <div className="h-7 px-2.5 rounded-lg bg-slate-800/80 text-[11px] font-black text-emerald-400 flex items-center justify-center shrink-0 whitespace-nowrap">
-                  {(animationFrames||[]).length > 0 ? `${activeFrameIndex + 1}/${animationFrames.length}컷` : '0컷'}
-                </div>
-                <button onClick={() => {
-                  if (!isAutoRecording) {
-                    setAnimationFrames([{
-                      tokens: JSON.parse(JSON.stringify(tacticTokens||[])),
-                      drawings: JSON.parse(JSON.stringify(drawings||[])),
-                      stepTitle: '1단계',
-                      coachingNote: tacticScenarioTitle || '기본 배치'
-                    }]);
-                    setActiveFrameIndex(0);
-                    setIsAutoRecording(true);
-                  } else {
-                    setIsAutoRecording(false);
-                  }
-                }} disabled={isPlaying} className={`flex-1 h-7 px-2 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5 disabled:opacity-40 whitespace-nowrap ${isAutoRecording ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'}`}>
-                  <span className={`w-2 h-2 rounded-full ${isAutoRecording ? 'bg-red-400' : 'bg-red-500'}`}></span>
-                  <span>{isAutoRecording ? '녹화중지' : '자동녹화'}</span>
-                </button>
-                {isPlaying ? (
-                  <button onClick={stopTacticPlayback} className="flex-1 h-7 px-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 rounded-lg text-[11px] font-black transition flex items-center justify-center gap-1 whitespace-nowrap">
-                    <XCircle size={13} className="shrink-0"/> <span>정지</span>
+                    <XCircle size={14} className="shrink-0" />
+                    <span>정지</span>
                   </button>
                 ) : (
-                  <button onClick={playTacticAnimation} disabled={(animationFrames||[]).length < 2 || isAutoRecording} className="flex-1 h-7 px-2 bg-blue-600/25 hover:bg-blue-600/35 text-blue-300 border border-blue-500/40 rounded-lg text-[11px] font-black transition flex items-center justify-center gap-1 disabled:opacity-35 whitespace-nowrap">
-                    <PlayCircle size={13} className="shrink-0"/> <span>재생</span>
+                  <button
+                    type="button"
+                    onClick={playTacticAnimation}
+                    disabled={(animationFrames || []).length < 2 || isAutoRecording}
+                    className="h-9 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1 shrink-0 shadow-sm transition disabled:opacity-35 whitespace-nowrap"
+                  >
+                    <PlayCircle size={14} className="shrink-0" />
+                    <span>재생</span>
                   </button>
                 )}
-                <button onClick={exportAnimationToVideo} disabled={isPlaying || (animationFrames||[]).length < 2 || isAutoRecording} className="flex-1 h-7 px-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-[11px] font-black transition flex items-center justify-center gap-1 disabled:opacity-35 whitespace-nowrap">
-                  <Video size={13} className="shrink-0"/> <span>영상공유</span>
-                </button>
-                <button onClick={() => { stopTacticPlayback(); setAnimationFrames([]); setActiveFrameIndex(0); setSelectedTacticTemplateId(''); setTacticScenarioTitle(''); setTacticScenarioSummary(''); setIsAutoRecording(false); }} disabled={isPlaying || (animationFrames||[]).length === 0} className="w-7 h-7 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-lg flex items-center justify-center transition disabled:opacity-35 shrink-0" title="녹화 컷 비우기">
-                  <Trash2 size={13}/>
+
+                <button
+                  type="button"
+                  onClick={(animationFrames || []).length >= 2 ? exportAnimationToVideo : triggerTacticShare}
+                  disabled={isPlaying || isAutoRecording}
+                  className="h-9 px-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-black text-xs flex items-center gap-1 shrink-0 transition disabled:opacity-35 whitespace-nowrap"
+                  title={(animationFrames || []).length >= 2 ? '전술 애니메이션 영상 공유' : '현재 전술판 이미지 공유'}
+                >
+                  <Video size={14} className="shrink-0" />
+                  <span>공유</span>
                 </button>
               </div>
 
-              {/* 4단: 드로잉 도구 탭 */}
-              <div className="grid grid-cols-5 bg-slate-900 rounded-xl p-1 border border-slate-700/80 gap-1">
-                <button onClick={() => setCurrentTool('move')} className={`h-8 px-1 rounded-lg flex items-center justify-center gap-1 transition whitespace-nowrap ${currentTool === 'move' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}><MousePointer size={13} className="shrink-0"/><span className="text-[11px] font-bold">이동</span></button>
-                <button onClick={() => setCurrentTool('arrow')} className={`h-8 px-1 rounded-lg flex items-center justify-center gap-1 transition whitespace-nowrap ${currentTool === 'arrow' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}><ArrowUpRight size={13} className="shrink-0"/><span className="text-[11px] font-bold">화살표</span></button>
-                <button onClick={() => setCurrentTool('pass')} className={`h-8 px-1 rounded-lg flex items-center justify-center gap-1 transition whitespace-nowrap ${currentTool === 'pass' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}><TrendingUp size={13} className="shrink-0"/><span className="text-[11px] font-bold">패스</span></button>
-                <button onClick={() => setCurrentTool('zone')} className={`h-8 px-1 rounded-lg flex items-center justify-center gap-1 transition whitespace-nowrap ${currentTool === 'zone' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}><Square size={13} className="shrink-0"/><span className="text-[11px] font-bold">지역</span></button>
-                <button onClick={() => setCurrentTool('erase')} className={`h-8 px-1 rounded-lg flex items-center justify-center gap-1 transition whitespace-nowrap ${currentTool === 'erase' ? 'bg-red-500/90 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}><XCircle size={13} className="shrink-0"/><span className="text-[11px] font-bold">지우기</span></button>
+              {/* 2줄: 직관적 편집 도구 탭 + 실행취소 + ⚙️ 더보기(접기/펼치기) */}
+              <div className="flex items-center gap-1 bg-slate-900 rounded-xl p-1 border border-slate-700/80">
+                <button onClick={() => setCurrentTool('move')} className={`flex-1 h-7 px-1 rounded-lg flex items-center justify-center gap-1 transition whitespace-nowrap ${currentTool === 'move' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}><MousePointer size={12} className="shrink-0"/><span className="text-[11px] font-bold">선수이동</span></button>
+                <button onClick={() => setCurrentTool('arrow')} className={`flex-1 h-7 px-1 rounded-lg flex items-center justify-center gap-1 transition whitespace-nowrap ${currentTool === 'arrow' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}><ArrowUpRight size={12} className="shrink-0"/><span className="text-[11px] font-bold">이동선</span></button>
+                <button onClick={() => setCurrentTool('pass')} className={`flex-1 h-7 px-1 rounded-lg flex items-center justify-center gap-1 transition whitespace-nowrap ${currentTool === 'pass' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}><TrendingUp size={12} className="shrink-0"/><span className="text-[11px] font-bold">패스선</span></button>
+                <button onClick={() => setCurrentTool('zone')} className={`flex-1 h-7 px-1 rounded-lg flex items-center justify-center gap-1 transition whitespace-nowrap ${currentTool === 'zone' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}><Square size={12} className="shrink-0"/><span className="text-[11px] font-bold">구역</span></button>
+                <button onClick={() => setCurrentTool('erase')} className={`flex-1 h-7 px-1 rounded-lg flex items-center justify-center gap-1 transition whitespace-nowrap ${currentTool === 'erase' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}><XCircle size={12} className="shrink-0"/><span className="text-[11px] font-bold">지우개</span></button>
+                <button onClick={() => {if(pastState.length > 0) { const prev = pastState[pastState.length - 1]; setPastState(p => p.slice(0, -1)); setFutureState(p => [{ tokens: tacticTokens || [], drawings: drawings || [] }, ...p]); setTacticTokens(prev.tokens || []); setDrawings(prev.drawings || []); }}} disabled={pastState.length === 0 || isPlaying} className="h-7 w-7 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-800 transition flex items-center justify-center shrink-0" title="실행 취소"><Undo size={13}/></button>
+                <button
+                  type="button"
+                  onClick={() => setShowTacticAdvanced(prev => !prev)}
+                  className={`h-7 px-2 rounded-lg text-[11px] font-bold transition flex items-center gap-0.5 shrink-0 whitespace-nowrap ${showTacticAdvanced ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                >
+                  <span>⚙️ 설정</span>
+                </button>
               </div>
+
+              {/* 접이식 상세 설정 패널 (평소에는 숨겨서 화면을 깔끔하게 유지) */}
+              {showTacticAdvanced && (
+                <div className="pt-1 border-t border-slate-700/70 space-y-1.5 animate-in fade-in">
+                  <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700/80">
+                    <button onClick={() => { stopTacticPlayback(); setPitchType('full'); setSelectedTacticTemplateId(''); setTacticScenarioTitle(''); setTacticScenarioSummary(''); setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens('full'), []); setIsAutoRecording(false); }} className={`flex-1 h-7 px-2 rounded-lg text-[11px] font-bold transition ${pitchType === 'full' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>풀코트</button>
+                    <button onClick={() => { stopTacticPlayback(); setPitchType('half'); setSelectedTacticTemplateId(''); setTacticScenarioTitle(''); setTacticScenarioSummary(''); setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens('half'), []); setIsAutoRecording(false); }} className={`flex-1 h-7 px-2 rounded-lg text-[11px] font-bold transition ${pitchType === 'half' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>하프코트</button>
+                    <button onClick={saveCurrentTacticAsCustomTemplate} disabled={isPlaying} className="flex-1 h-7 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-[11px] font-bold transition">💾 내 전술 저장</button>
+                    {selectedTacticTemplateId?.startsWith('custom_') && (
+                      <button onClick={() => deleteCustomTacticTemplate(selectedTacticTemplateId)} className="h-7 px-2 rounded-lg bg-red-500/20 text-red-300 text-[11px] font-bold">삭제</button>
+                    )}
+                    <button onClick={triggerTacticShare} className="h-7 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold">📸 이미지캡처</button>
+                    <button onClick={() => { stopTacticPlayback(); if (selectedTacticTemplateId && selectedTacticTemplateId !== 'ai_generated') { applyTacticTemplateById(selectedTacticTemplateId); } else { setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens(pitchType), []); setIsAutoRecording(false); } }} className="h-7 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold">초기화</button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700/80">
+                    <div className="flex items-center justify-between px-2 py-0.5 bg-slate-950 rounded-lg">
+                      <span className="text-[10px] font-bold text-red-400">우리팀</span>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => handleUpdatePlayerCount('A', (tacticTokens||[]).filter(t=>t.team==='A').length - 1)} disabled={isPlaying} className="w-5 h-5 bg-slate-800 text-white rounded text-xs font-bold">-</button>
+                        <span className="text-xs font-black text-white w-4 text-center">{(tacticTokens||[]).filter(t=>t.team==='A').length}</span>
+                        <button onClick={() => handleUpdatePlayerCount('A', (tacticTokens||[]).filter(t=>t.team==='A').length + 1)} disabled={isPlaying} className="w-5 h-5 bg-slate-800 text-white rounded text-xs font-bold">+</button>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between px-2 py-0.5 bg-slate-950 rounded-lg">
+                      <span className="text-[10px] font-bold text-blue-400">상대팀</span>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => handleUpdatePlayerCount('B', (tacticTokens||[]).filter(t=>t.team==='B').length - 1)} disabled={isPlaying} className="w-5 h-5 bg-slate-800 text-white rounded text-xs font-bold">-</button>
+                        <span className="text-xs font-black text-white w-4 text-center">{(tacticTokens||[]).filter(t=>t.team==='B').length}</span>
+                        <button onClick={() => handleUpdatePlayerCount('B', (tacticTokens||[]).filter(t=>t.team==='B').length + 1)} disabled={isPlaying} className="w-5 h-5 bg-slate-800 text-white rounded text-xs font-bold">+</button>
+                      </div>
+                    </div>
+                    <button onClick={() => {
+                      if (!isAutoRecording) {
+                        setAnimationFrames([{ tokens: JSON.parse(JSON.stringify(tacticTokens||[])), drawings: JSON.parse(JSON.stringify(drawings||[])), stepTitle: '1단계', coachingNote: '직접 녹화한 전술' }]);
+                        setActiveFrameIndex(0);
+                        setIsAutoRecording(true);
+                      } else {
+                        setIsAutoRecording(false);
+                      }
+                    }} disabled={isPlaying} className={`h-7 px-2 rounded-lg text-[10px] font-black flex items-center justify-center gap-1 ${isAutoRecording ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse' : 'bg-slate-800 text-slate-300'}`}>
+                      <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                      <span>{isAutoRecording ? '녹화중지' : '수동녹화'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* 구장 외부 분리형 전술 단계 타임라인 & 코칭 설명 패널 (선수 아이콘 가림 방지) */}
+            {/* 구장 외부 분리형 단계 선택 & 한 줄 설명 바 (심플 & 직관적) */}
             {(animationFrames || []).length > 0 && animationFrames[activeFrameIndex] && (
-              <div className="bg-slate-900/95 border border-emerald-500/40 rounded-2xl p-2.5 mb-2 shrink-0 shadow-md space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
-                      STEP {activeFrameIndex + 1}/{animationFrames.length}
-                    </span>
-                    <span className="text-xs font-black text-emerald-400 truncate">
-                      {animationFrames[activeFrameIndex].stepTitle || `${activeFrameIndex + 1}단계`}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
+              <div className="bg-slate-900/95 border border-slate-700/90 rounded-2xl px-2.5 py-2 mb-1.5 shrink-0 shadow-sm space-y-1.5">
+                <div className="flex items-center justify-between gap-1 overflow-x-auto hide-scrollbar">
+                  <div className="flex items-center gap-1">
                     {animationFrames.map((fr, idx) => (
                       <button
                         key={idx}
                         type="button"
                         onClick={() => selectTacticFrame(idx)}
-                        className={`h-6 px-2 rounded-md text-[10px] font-black transition shrink-0 ${activeFrameIndex === idx ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                        className={`h-6 px-2.5 rounded-lg text-[11px] font-black transition shrink-0 ${activeFrameIndex === idx ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
                       >
-                        {idx + 1}컷
+                        {idx + 1}단계
                       </button>
                     ))}
-                    <button
-                      type="button"
-                      onClick={duplicateCurrentTacticFrame}
-                      disabled={isPlaying}
-                      className="h-6 px-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 text-[10px] font-bold transition disabled:opacity-40 whitespace-nowrap"
-                      title="현재 컷을 복제하여 다음 단계 추가"
-                    >
-                      +추가
-                    </button>
-                    {animationFrames.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={deleteCurrentTacticFrame}
-                        disabled={isPlaying}
-                        className="h-6 px-1.5 rounded-md bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-300 border border-slate-700 text-[10px] font-bold transition disabled:opacity-40 whitespace-nowrap"
-                        title="현재 선택된 컷 삭제"
-                      >
-                        삭제
-                      </button>
-                    )}
                   </div>
+                  {showTacticAdvanced && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button type="button" onClick={duplicateCurrentTacticFrame} disabled={isPlaying} className="h-6 px-2 rounded-lg bg-slate-800 text-emerald-300 text-[10px] font-bold">+단계추가</button>
+                      {animationFrames.length > 1 && (
+                        <button type="button" onClick={deleteCurrentTacticFrame} disabled={isPlaying} className="h-6 px-2 rounded-lg bg-slate-800 text-red-300 text-[10px] font-bold">삭제</button>
+                      )}
+                    </div>
+                  )}
                 </div>
-
-                <div className="bg-slate-950/90 border border-slate-800 rounded-xl px-2.5 py-1.5 flex items-center gap-2">
-                  <span className="text-[11px] shrink-0">💡</span>
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-[11px] font-black text-emerald-400 shrink-0">
+                    {animationFrames[activeFrameIndex].stepTitle || `${activeFrameIndex + 1}단계`}
+                  </span>
+                  <span className="text-slate-600 shrink-0">|</span>
                   <input
                     type="text"
                     value={animationFrames[activeFrameIndex]?.coachingNote || ''}
                     onChange={(e) => updateCurrentFrameCoachingNote(e.target.value)}
                     disabled={isPlaying}
-                    placeholder="이 단계의 전술 설명/코칭 포인트를 입력하세요 (클릭하여 수정 가능)"
-                    className="flex-1 min-w-0 bg-transparent text-xs font-bold text-amber-200 outline-none placeholder:text-slate-600"
+                    placeholder="단계 설명을 입력하세요"
+                    className="flex-1 min-w-0 bg-transparent text-[11px] font-bold text-amber-200 outline-none placeholder:text-slate-600 truncate focus:text-white"
                   />
                 </div>
               </div>
