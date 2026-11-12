@@ -316,6 +316,13 @@ export default function App() {
     isOpen: false,
     formation: '4-3-3',
     theme: 'attack',
+    fmBuildUp: 'halfspace',      // 'short_buildup' | 'halfspace' | 'switch_play' | 'direct_counter' | ''
+    fmDirection: 'right',        // 'right' | 'left' | 'center' | ''
+    fmFinalThird: 'low_cutback', // 'low_cutback' | 'early_cross' | 'through_ball' | 'shoot_on_sight' | ''
+    fmDefense: '',               // 'high_gegenpress' | 'mid_trap' | 'low_block' | ''
+    fmWide: false,               // boolean: 공격 폭 넓게
+    fmSetPiece: '',              // 'corner_kick' | 'free_kick' | ''
+    fmOppStyle: 'opp_balanced',  // 'opp_balanced' | 'opp_5back' | 'opp_highpress'
     includeOpponent: true,
     customRequest: ''
   });
@@ -1885,7 +1892,19 @@ export default function App() {
     }
   };
 
-  const buildLocalAiTacticScenario = ({ formation, theme, includeOpponent, customRequest }) => {
+  const buildLocalAiTacticScenario = ({
+    formation,
+    theme,
+    fmBuildUp,
+    fmDirection,
+    fmFinalThird,
+    fmDefense,
+    fmWide,
+    fmSetPiece,
+    fmOppStyle,
+    includeOpponent,
+    customRequest
+  }) => {
     const is433 = formation === '4-3-3';
     const roles = is433 ? TACTIC_ROLES_433 : TACTIC_ROLES_442;
     const reqText = (customRequest || '').trim();
@@ -1894,9 +1913,15 @@ export default function App() {
       if (t.team === 'A' && t.name) nameMap[t.id] = t.name;
     });
 
-    // 테마 미선택(자유 설명 모드) 시 입력 문장에서 핵심 전술 흐름 자동 추론
+    // FM 지침 조합 + 텍스트 설명에서 기본 5단계 전술 뼈대 결정
     let effectiveTheme = theme;
-    if (!effectiveTheme || effectiveTheme === 'free') {
+    if (fmBuildUp === 'switch_play') effectiveTheme = 'switch';
+    else if (fmBuildUp === 'direct_counter') effectiveTheme = 'counter';
+    else if (fmBuildUp === 'short_buildup') effectiveTheme = 'possession';
+    else if (fmBuildUp === 'halfspace') effectiveTheme = 'attack';
+    else if (!fmBuildUp && fmDefense === 'high_gegenpress') effectiveTheme = 'pressing';
+    else if (!fmBuildUp && (fmDefense === 'mid_trap' || fmDefense === 'low_block')) effectiveTheme = 'defense';
+    else if (!effectiveTheme || effectiveTheme === 'free' || !fmBuildUp) {
       if (/전환|반대편|사이드\s*체인지|롱패스/.test(reqText)) effectiveTheme = 'switch';
       else if (/역습|속공|카운터|뒷공간/.test(reqText)) effectiveTheme = 'counter';
       else if (/압박|게겐|전방에서|뺏/.test(reqText)) effectiveTheme = 'pressing';
@@ -2075,8 +2100,8 @@ export default function App() {
       };
     }
 
-    // 세트피스(코너킥 / 프리킥) 자유 설명 전용 5단계 시나리오
-    if (reqText && /코너킥|코너/.test(reqText)) {
+    // 세트피스(코너킥 / 프리킥) 지침 또는 자유 설명 전용 5단계 시나리오
+    if (fmSetPiece === 'corner_kick' || (reqText && /코너킥|코너/.test(reqText))) {
       const opp = includeOpponent ? [
         [[50,5,'GK'],[42,10,'CB'],[50,10,'CB'],[58,10,'CB'],[36,14,'LB'],[64,14,'RB'],[48,20,'DM']],
         [[50,5,'GK'],[43,9,'CB'],[50,9,'CB'],[57,10,'CB'],[38,13,'LB'],[62,14,'RB'],[48,19,'DM']],
@@ -2086,7 +2111,7 @@ export default function App() {
       ] : [[],[],[],[],[]];
       scenario = {
         title: `🤖 AI ${formation} 코너킥 세트피스 전술`,
-        summary: `[자유 설명 반영: ${reqText}] 코너킥 상황에서 약속된 스크린 움직임과 공간 침투로 득점을 노립니다.`,
+        summary: `코너킥 상황에서 약속된 스크린 움직임과 공간 침투로 득점을 노립니다.`,
         frames: is433 ? [
           makeTacticFrame(roles, [[50,92],[30,52],[46,16],[54,16],[70,52],[50,26],[38,22],[62,22],[38,13],[50,11],[94,6]], [94,6], [['arrow',46,16,44,9],['arrow',50,11,50,8],['zone',38,6,62,16]], '1단계: 우측 코너킥 키커(RW) 준비 & 박스 타겟 정렬', '우측 윙어(RW)가 코너플랙에 서고 장신 센터백(CB)과 원톱(CF), 좌측 윙어(LW)가 박스 안에 정렬합니다.', nameMap, opp[0]),
           makeTacticFrame(roles, [[50,92],[30,52],[44,12],[54,13],[70,52],[50,24],[38,20],[62,20],[38,11],[50,9],[94,6]], [94,6], [['pass',94,6,48,10],['arrow',44,12,48,10]], '2단계: 니어포스트 스크린 & 정밀 크로스 궤적', 'CF가 앞선 수비를 유인하는 사이 센터백(CB)이 빈 골문 정면 공간으로 쇄도하며 크로스가 올라갑니다.', nameMap, opp[1]),
@@ -2101,7 +2126,7 @@ export default function App() {
           makeTacticFrame(roles, [[50,92],[30,52],[48,9],[54,10],[70,52],[38,20],[48,18],[60,20],[88,12],[43,8],[55,8]], [50,4], [], '5단계: 코너킥 세트피스 득점 완성!', '약속된 세트피스 동선으로 상대 밀집 수비를 무너뜨리고 득점에 성공합니다.', nameMap, opp[4])
         ]
       };
-    } else if (reqText && /프리킥/.test(reqText)) {
+    } else if (fmSetPiece === 'free_kick' || (reqText && /프리킥/.test(reqText))) {
       const opp = includeOpponent ? [
         [[50,5,'GK'],[44,18,'DF'],[48,18,'DF'],[52,18,'DF'],[56,18,'DF'],[36,14,'CB'],[64,14,'CB']],
         [[50,5,'GK'],[44,18,'DF'],[48,18,'DF'],[52,18,'DF'],[56,18,'DF'],[38,12,'CB'],[62,12,'CB']],
@@ -2111,7 +2136,7 @@ export default function App() {
       ] : [[],[],[],[],[]];
       scenario = {
         title: `🤖 AI ${formation} 프리킥 세트피스 전술`,
-        summary: `[자유 설명 반영: ${reqText}] 상대 수비벽을 속이는 세트피스 패스 패턴으로 득점을 만듭니다.`,
+        summary: `상대 수비벽을 속이는 세트피스 패스 패턴으로 득점을 만듭니다.`,
         frames: is433 ? [
           makeTacticFrame(roles, [[50,92],[24,54],[38,22],[62,22],[76,54],[50,34],[44,28],[54,28],[30,18],[48,16],[68,24]], [50,28], [['arrow',68,24,66,14],['arrow',48,16,48,10]], '1단계: 프리킥 키커(CM) 2인 배치 & 수비벽 교란', '아크 정면 프리킥 상황에서 양 CM이 키커로 서고 우측 윙어(RW)가 수비벽 뒤쪽 공간 침투를 준비합니다.', nameMap, opp[0]),
           makeTacticFrame(roles, [[50,92],[24,54],[38,18],[62,18],[76,54],[50,32],[44,28],[54,26],[32,14],[48,12],[66,16]], [54,26], [['pass',50,28,66,14],['arrow',48,12,48,9]], '2단계: 수비벽 우회 RW 침투 패스 공급', '직접 슈팅 대신 수비벽 옆으로 돌아 들어가는 우측 윙어(RW)에게 땅볼 스루패스를 찔러 넣습니다.', nameMap, opp[1]),
@@ -2128,13 +2153,132 @@ export default function App() {
       };
     }
 
-    // 사용자 추가 요청사항(customRequest) 키워드 분석 및 실제 동선 변형 적용
-    if (reqText) {
-      const wantLeft = /좌측|왼쪽|레프트|LW|LM|LB/i.test(reqText) && !/우측|오른쪽/.test(reqText);
-      const wantLongShot = /중거리|원거리|세컨볼|2선\s*슛|박스\s*밖/.test(reqText);
-      const want5Back = /5백|파이브백|밀집\s*수비|내려앉/.test(reqText);
-      if (wantLeft && effectiveTheme !== 'switch' && !/코너킥|프리킥/.test(reqText)) {
-        // 좌우 반전 시 선수 고유 포지션(LB↔RB, LW↔RW, LM↔RM 등)이 뒤바뀌지 않도록 대칭 포지션끼리 좌표를 교환
+    const isSetPieceScenario = fmSetPiece === 'corner_kick' || fmSetPiece === 'free_kick' || /코너킥|코너|프리킥/.test(reqText);
+    const wantCenter = fmDirection === 'center' || /중앙\s*돌파|중앙\s*집중|언더래핑/.test(reqText);
+    const wantLeft = fmDirection === 'left' || (!fmDirection && /좌측|왼쪽|레프트|LW|LM|LB/i.test(reqText) && !/우측|오른쪽/.test(reqText));
+    const wantWide = Boolean(fmWide) || /넓게|터치라인|아이솔레이션/.test(reqText);
+    const wantEarlyCross = fmFinalThird === 'early_cross' || /얼리\s*크로스/.test(reqText);
+    const wantThroughBall = fmFinalThird === 'through_ball' || /스루\s*패스|킬패스/.test(reqText);
+    const wantLongShot = fmFinalThird === 'shoot_on_sight' || /중거리|원거리|세컨볼|2선\s*슛|박스\s*밖/.test(reqText);
+    const want5Back = fmOppStyle === 'opp_5back' || /5백|파이브백|밀집\s*수비|내려앉|텐백/.test(reqText);
+    const wantOppHighPress = fmOppStyle === 'opp_highpress' || /상대\s*전방\s*압박|상대\s*하이\s*라인/.test(reqText);
+
+    if (!isSetPieceScenario) {
+      // 1) 수비 라인 높이 지침(하이 라인 vs 로우 블록) 반영
+      if (fmDefense === 'high_gegenpress' && effectiveTheme !== 'pressing') {
+        scenario.frames = scenario.frames.map((fr, fIdx) => ({
+          ...fr,
+          tokens: fr.tokens.map(tk => {
+            if (tk.team === 'A' && tk.id !== 'A_GK' && fIdx <= 2) {
+              return { ...tk, y: Math.max(10, tk.y - 6) };
+            }
+            return tk;
+          })
+        }));
+      } else if (fmDefense === 'low_block' && effectiveTheme !== 'defense') {
+        scenario.frames = scenario.frames.map((fr, fIdx) => ({
+          ...fr,
+          tokens: fr.tokens.map(tk => {
+            if (tk.team === 'A' && tk.id !== 'A_GK' && fIdx <= 1) {
+              return { ...tk, y: Math.min(86, tk.y + 6) };
+            }
+            return tk;
+          })
+        }));
+      }
+
+      // 2) 공격 폭 넓게(fmWide) 지침 반영: 측면 풀백·윙어를 터치라인 가까이 확장
+      if (wantWide) {
+        const leftWideIds = is433 ? ['A_LB', 'A_RM'] : ['A_LB', 'A_LM'];
+        const rightWideIds = is433 ? ['A_RB', 'A_FW2'] : ['A_RB', 'A_RM'];
+        scenario.frames = scenario.frames.map(fr => ({
+          ...fr,
+          tokens: fr.tokens.map(tk => {
+            if (leftWideIds.includes(tk.id)) return { ...tk, x: Math.max(8, tk.x - 5) };
+            if (rightWideIds.includes(tk.id)) return { ...tk, x: Math.min(92, tk.x + 5) };
+            return tk;
+          })
+        }));
+      }
+
+      // 3) 중앙 집중 돌파(wantCenter) 지침 반영: 3~4단계에서 중앙 아크(Zone 14) 직결 침투
+      if (wantCenter && scenario.frames.length >= 5) {
+        const f3 = scenario.frames[2];
+        const f4 = scenario.frames[3];
+        f3.tokens = f3.tokens.map(tk => {
+          if (tk.id === 'A_CM2') return { ...tk, x: 54, y: 28 };
+          if (tk.id === 'ball') return { ...tk, x: 54, y: 28 };
+          return tk;
+        });
+        f3.drawings = [
+          { id: 'd_cnt_1', type: 'pass', start: { x: 54, y: 28 }, end: { x: 50, y: 12 } },
+          { id: 'd_cnt_2', type: 'arrow', start: { x: 50, y: 18 }, end: { x: 50, y: 11 } }
+        ];
+        f3.stepTitle = '3단계: 중앙 Zone 14 직결 침투 패스';
+        f3.coachingNote = '측면으로 돌리지 않고 중원(CM)이 상대 수비 블록 정중앙 아크 공간을 돌파해 직선 스루패스를 찔러 넣습니다.';
+        f4.tokens = f4.tokens.map(tk => {
+          if (tk.id === 'A_FW1') return { ...tk, x: 50, y: 11 };
+          if (tk.id === 'ball') return { ...tk, x: 50, y: 11 };
+          return tk;
+        });
+        f4.drawings = [
+          { id: 'd_cnt_3', type: 'pass', start: { x: 50, y: 11 }, end: { x: 50, y: 4 } }
+        ];
+        f4.stepTitle = '4단계: 중앙 수비 라인 파괴 & 1:1 단독 찬스';
+        f4.coachingNote = '중앙을 파고든 스트라이커가 골키퍼와 1:1 단독 찬스를 맞이합니다.';
+      }
+
+      // 4) 파이널서드 마무리 지침 반영 (얼리 크로스 / 뒷공간 스루패스 / 중거리 슛)
+      if (wantEarlyCross && scenario.frames.length >= 5) {
+        const f4 = scenario.frames[3];
+        const crosserId = is433 ? 'A_FW2' : 'A_RM';
+        const targetId = 'A_FW1';
+        f4.tokens = f4.tokens.map(tk => {
+          if (tk.id === crosserId) return { ...tk, x: 84, y: 26 };
+          if (tk.id === targetId) return { ...tk, x: 50, y: 11 };
+          if (tk.id === 'ball') return { ...tk, x: 84, y: 26 };
+          return tk;
+        });
+        f4.drawings = [
+          { id: 'd_ec_1', type: 'pass', start: { x: 84, y: 26 }, end: { x: 50, y: 11 } },
+          { id: 'd_ec_2', type: 'arrow', start: { x: 50, y: 18 }, end: { x: 50, y: 10 } }
+        ];
+        f4.stepTitle = '4단계: 하프스페이스 얼리 크로스(Early Cross) 공급';
+        f4.coachingNote = '상대 수비 라인이 박스 안으로 완전히 내려앉기 전에 측면(y=26)에서 골문 앞 뒷공간으로 빠른 얼리 크로스를 올립니다.';
+      } else if (wantThroughBall && scenario.frames.length >= 5) {
+        const f4 = scenario.frames[3];
+        f4.tokens = f4.tokens.map(tk => {
+          if (tk.id === 'A_CM2') return { ...tk, x: 56, y: 24 };
+          if (tk.id === 'A_FW1') return { ...tk, x: 48, y: 11 };
+          if (tk.id === 'ball') return { ...tk, x: 48, y: 11 };
+          return tk;
+        });
+        f4.drawings = [
+          { id: 'd_tb_1', type: 'pass', start: { x: 56, y: 24 }, end: { x: 48, y: 11 } },
+          { id: 'd_tb_2', type: 'arrow', start: { x: 48, y: 16 }, end: { x: 48, y: 10 } }
+        ];
+        f4.stepTitle = '4단계: 수비 라인 파괴 킬패스(스루패스)';
+        f4.coachingNote = '2선 플레이메이커(CM)가 상대 센터백 사이의 좁은 틈으로 오프사이드 트랩을 무너뜨리는 스루패스를 찔러 넣습니다.';
+      }
+
+      if (wantLongShot && scenario.frames.length >= 5) {
+        const lastIdx = scenario.frames.length - 1;
+        const lastFrame = scenario.frames[lastIdx];
+        lastFrame.tokens = lastFrame.tokens.map(tk => {
+          if (tk.id === 'A_CM2') return { ...tk, x: 50, y: 22 };
+          if (tk.id === 'ball') return { ...tk, x: 50, y: 4 };
+          return tk;
+        });
+        lastFrame.drawings = [
+          { id: 'd_ls_1', type: 'pass', start: { x: 54, y: 12 }, end: { x: 50, y: 22 } },
+          { id: 'd_ls_2', type: 'pass', start: { x: 50, y: 22 }, end: { x: 50, y: 4 } }
+        ];
+        lastFrame.stepTitle = '5단계: 아크 정면 2선 레이오프 & 중거리포 득점!';
+        lastFrame.coachingNote = '박스 안에서 2선 중앙(CM)으로 내준 볼을 아크 정면에서 논스톱 중거리 슈팅으로 연결해 골망을 가릅니다!';
+      }
+
+      // 5) 좌측 집중 공격(wantLeft) 반영: 대칭 포지션 좌표를 맞바꾸어 포지션 꼬임 없이 왼쪽 공격 전개
+      if (wantLeft && effectiveTheme !== 'switch') {
         const swapPairs = is433
           ? [['A_LB', 'A_RB'], ['A_CB1', 'A_CB2'], ['A_CM1', 'A_CM2'], ['A_RM', 'A_FW2']]
           : [['A_LB', 'A_RB'], ['A_CB1', 'A_CB2'], ['A_LM', 'A_RM'], ['A_CM1', 'A_CM2'], ['A_FW1', 'A_FW2']];
@@ -2166,42 +2310,93 @@ export default function App() {
               start: { x: Math.round(100 - d.start.x), y: d.start.y },
               end: { x: Math.round(100 - d.end.x), y: d.end.y }
             })),
+            stepTitle: fr.stepTitle.replace(/우측/g, '좌측').replace(/RW/g, 'LW').replace(/RM/g, 'LM').replace(/RB/g, 'LB'),
             coachingNote: fr.coachingNote.replace(/우측/g, '좌측').replace(/오른쪽/g, '왼쪽').replace(/RB/g, 'LB').replace(/RM/g, 'LM').replace(/RW/g, 'LW')
           };
         });
       }
-      if (want5Back && includeOpponent) {
+
+      // 6) 상대팀 전술 스타일(5백 밀집수비 vs 전방 하이프레싱) 반영
+      if (includeOpponent && want5Back) {
+        const fiveBackFrames = [
+          [[50,5,'GK'],[16,22,'RWB'],[32,20,'CB'],[50,19,'CB'],[68,20,'CB'],[84,22,'LWB'],[50,28,'DM']],
+          [[50,5,'GK'],[18,20,'RWB'],[34,18,'CB'],[50,18,'CB'],[66,18,'CB'],[82,20,'LWB'],[52,26,'DM']],
+          [[50,5,'GK'],[20,18,'RWB'],[36,16,'CB'],[50,16,'CB'],[66,16,'CB'],[80,18,'LWB'],[52,24,'DM']],
+          [[50,4,'GK'],[24,15,'RWB'],[38,14,'CB'],[50,14,'CB'],[64,14,'CB'],[78,16,'LWB'],[50,21,'DM']],
+          [[50,4,'GK'],[26,14,'RWB'],[40,13,'CB'],[50,13,'CB'],[62,13,'CB'],[76,15,'LWB'],[50,19,'DM']]
+        ];
+        scenario.frames = scenario.frames.map((fr, idx) => {
+          const nonB = fr.tokens.filter(t => t.team !== 'B');
+          const bList = (fiveBackFrames[idx] || fiveBackFrames[4]).map((pt, bi) => ({
+            id: `B_OPP_${bi + 1}`,
+            position: pt[2],
+            name: '',
+            x: pt[0],
+            y: pt[1],
+            team: 'B'
+          }));
+          return { ...fr, tokens: [...nonB.filter(t => t.team === 'A'), ...bList, ...nonB.filter(t => t.team === 'ball')] };
+        });
+      } else if (includeOpponent && wantOppHighPress) {
         scenario.frames = scenario.frames.map(fr => ({
           ...fr,
           tokens: fr.tokens.map(tk => {
             if (tk.team === 'B' && tk.position !== 'GK') {
-              return { ...tk, y: Math.min(26, Math.max(12, Math.round(tk.y * 0.72))) };
+              return { ...tk, y: Math.min(76, tk.y + 8) };
             }
             return tk;
           })
         }));
       }
-      if (wantLongShot && scenario.frames.length >= 5) {
-        const lastIdx = scenario.frames.length - 1;
-        const lastFrame = scenario.frames[lastIdx];
-        lastFrame.tokens = lastFrame.tokens.map(tk => {
-          if (tk.id === 'A_CM2') return { ...tk, x: 50, y: 22 };
-          if (tk.id === 'ball') return { ...tk, x: 50, y: 4 };
-          return tk;
-        });
-        lastFrame.drawings = [
-          { id: `d_ls_1`, type: 'pass', start: { x: 54, y: 12 }, end: { x: 50, y: 22 } },
-          { id: `d_ls_2`, type: 'pass', start: { x: 50, y: 22 }, end: { x: 50, y: 4 } }
-        ];
-        lastFrame.stepTitle = '5단계: 2선 레이오프 & 중거리포 득점!';
-        lastFrame.coachingNote = `[요청 반영: ${reqText}] 박스 안에서 2선 중앙(CM)으로 내준 공을 논스톱 중거리 슈팅으로 연결해 골망을 가릅니다!`;
-      } else {
-        scenario.frames[0].coachingNote = `[맞춤 설계: ${reqText}] ${scenario.frames[0].coachingNote}`;
+    }
+
+    // 7) FM 지침 조합 배지 및 사용자 설명을 제목·요약·1단계 코칭노트에 통합 표시
+    const fmTags = [];
+    const buildUpLabels = {
+      short_buildup: '짧은 빌드업',
+      halfspace: '하프스페이스 침투',
+      switch_play: '좌우 전환',
+      direct_counter: '직선 고속역습'
+    };
+    const dirLabels = { right: '우측 집중', left: '좌측 집중', center: '중앙 돌파' };
+    const finalLabels = {
+      low_cutback: '낮은 컷백',
+      early_cross: '얼리 크로스',
+      through_ball: '뒷공간 스루패스',
+      shoot_on_sight: '아크 중거리슛'
+    };
+    const defLabels = {
+      high_gegenpress: '하이라인 게겐프레싱',
+      mid_trap: '미드블록 압박트랩',
+      low_block: '로우블록 밀집수비'
+    };
+    const setPieceLabels = { corner_kick: '코너킥 세트피스', free_kick: '프리킥 세트피스' };
+    const oppLabels = { opp_5back: '상대 5백 밀집', opp_highpress: '상대 전방압박' };
+
+    if (fmSetPiece && setPieceLabels[fmSetPiece]) fmTags.push(setPieceLabels[fmSetPiece]);
+    if (fmBuildUp && buildUpLabels[fmBuildUp]) fmTags.push(buildUpLabels[fmBuildUp]);
+    if (fmDirection && dirLabels[fmDirection]) fmTags.push(dirLabels[fmDirection]);
+    if (fmWide) fmTags.push('공격폭 넓게');
+    if (fmFinalThird && finalLabels[fmFinalThird]) fmTags.push(finalLabels[fmFinalThird]);
+    if (fmDefense && defLabels[fmDefense]) fmTags.push(defLabels[fmDefense]);
+    if (includeOpponent && fmOppStyle && oppLabels[fmOppStyle]) fmTags.push(oppLabels[fmOppStyle]);
+
+    const fmTagStr = fmTags.join(' · ');
+    if (fmTags.length > 0) {
+      scenario.title = `🤖 AI ${formation} FM전술: ${fmTags.slice(0, 3).join(' + ')}`;
+    } else if (reqText) {
+      scenario.title = `🤖 AI ${formation} 자유 설계: ${reqText.slice(0, 18)}${reqText.length > 18 ? '...' : ''}`;
+    }
+
+    const prefixNotes = [];
+    if (fmTagStr) prefixNotes.push(`FM조합: ${fmTagStr}`);
+    if (reqText) prefixNotes.push(`요청: ${reqText}`);
+    if (prefixNotes.length > 0) {
+      const badge = `[${prefixNotes.join(' | ')}]`;
+      scenario.summary = `${badge} ${scenario.summary}`;
+      if (scenario.frames[0]) {
+        scenario.frames[0].coachingNote = `${badge} ${scenario.frames[0].coachingNote}`;
       }
-      scenario.title = theme === 'free'
-        ? `🤖 AI ${formation} 자유 설계: ${reqText.slice(0, 18)}${reqText.length > 18 ? '...' : ''}`
-        : `${scenario.title} (맞춤 설계)`;
-      scenario.summary = `[자유 설명 반영: ${reqText}] ${scenario.summary}`;
     }
 
     return scenario;
@@ -2210,9 +2405,22 @@ export default function App() {
   const generateAiTacticScenario = async (e) => {
     if (e) e.preventDefault();
     if (isGeneratingTacticAi) return;
-    const { formation, theme, includeOpponent, customRequest } = tacticAiModal;
-    if ((!theme || theme === 'free') && !(customRequest || '').trim()) {
-      alert('테마를 선택하지 않은 경우, 3번 입력창에 원하시는 전술 설명을 자유롭게 적어주세요!');
+    const {
+      formation,
+      theme,
+      fmBuildUp,
+      fmDirection,
+      fmFinalThird,
+      fmDefense,
+      fmWide,
+      fmSetPiece,
+      fmOppStyle,
+      includeOpponent,
+      customRequest
+    } = tacticAiModal;
+    const hasAnyFmChip = Boolean(fmBuildUp || fmDirection || fmFinalThird || fmDefense || fmWide || fmSetPiece);
+    if (!hasAnyFmChip && !(customRequest || '').trim()) {
+      alert('풋볼매니저 전술 지침을 1개 이상 선택하거나, 아래 전술 설명 입력창에 원하시는 전술을 적어주세요!');
       return;
     }
     stopTacticPlayback();
@@ -2223,15 +2431,15 @@ export default function App() {
     (tacticTokens || []).forEach(t => {
       if (t.team === 'A' && t.name) nameMap[t.id] = t.name;
     });
-    const themeLabelMap = {
-      free: '테마 제한 없음 (아래 사용자 전술 설명 시나리오를 100% 그대로 구현)',
-      attack: '공격 전개 (상대 GK+4백+2미드필더를 허무는 박스 침투)',
-      defense: '지역 수비 블록 (상대 빌드업·AM·CF 침투 패스 차단 후 전개)',
-      possession: '점유율 확보 (상대 전방 압박 CF·윙어·CM을 벗겨내는 후방 빌드업)',
-      counter: '고속 역습 (우리 수비 진영에서 차단 직후 상대 높은 수비 뒷공간 3패스 타격)',
-      pressing: '전방 게겐프레싱 (상대 GK·4백·DM 후방 빌드업을 가두어 볼 탈취 후 즉시 득점)',
-      switch: '좌우 측면 전환 (한쪽 측면으로 상대 수비를 유인한 뒤 반대편 넓은 공간 전환 타격)'
-    };
+    const fmSummaryParts = [
+      fmSetPiece === 'corner_kick' ? '코너킥 세트피스' : fmSetPiece === 'free_kick' ? '프리킥 세트피스' : '',
+      fmBuildUp === 'short_buildup' ? '후방 짧은 빌드업(점유율)' : fmBuildUp === 'halfspace' ? '하프스페이스 2:1 침투' : fmBuildUp === 'switch_play' ? '좌우 측면 전환' : fmBuildUp === 'direct_counter' ? '직선 고속 역습' : '',
+      fmDirection === 'right' ? '우측 측면 집중 공략' : fmDirection === 'left' ? '좌측 측면 집중 공략' : fmDirection === 'center' ? '중앙 Zone14 집중 돌파' : '',
+      fmWide ? '공격 폭 넓게(터치라인 확장)' : '',
+      fmFinalThird === 'low_cutback' ? '골라인 돌파 후 낮은 컷백' : fmFinalThird === 'early_cross' ? '하프스페이스 얼리 크로스' : fmFinalThird === 'through_ball' ? '수비 뒷공간 킬패스(스루패스)' : fmFinalThird === 'shoot_on_sight' ? '박스 밖 아크 정면 중거리 슛' : '',
+      fmDefense === 'high_gegenpress' ? '하이 라인 + 전방 게겐프레싱' : fmDefense === 'mid_trap' ? '미드 블록 + 측면 압박 트랩' : fmDefense === 'low_block' ? '로우 블록 + 박스 앞 밀집수비' : '',
+      includeOpponent ? (fmOppStyle === 'opp_5back' ? '상대팀: 5백 밀집수비(GK+5백+DM)' : fmOppStyle === 'opp_highpress' ? '상대팀: 하이 라인 전방압박' : '상대팀: 상황별 4백 밸런스') : ''
+    ].filter(Boolean).join(', ');
 
     const applyScenarioAndPlay = (finalScenario) => {
       const firstFrame = finalScenario.frames[0];
@@ -2265,14 +2473,14 @@ export default function App() {
 우리팀 포메이션: ${formation}
 우리팀 aCoords 11명 인덱스별 고정 포지션 및 좌우 위치 규칙(절대 어기지 마세요):
 ${roleOrderGuide}
-전술 상황: ${themeLabelMap[theme] || theme}
-상대팀 표시 여부: ${includeOpponent ? '포함 (전술 상황에 맞는 상대 핵심 포지션 7명: 예: 공격시 GK,RB,CB,CB,LB,DM,CM / 수비·역습시 GK,CB,CB,RM,AM,LM,CF / 점유율시 CB,CB,CM,CM,RW,CF,LW)' : '미포함'}
-사용자 특별 요청사항: ${customRequest?.trim() || '없음 (전술 테마의 특징이 극대화되도록 설계)'}
+풋볼매니저(FM) 스타일 조합 지침: ${fmSummaryParts || '제한 없음(아래 사용자 요청사항 중심)'}
+상대팀 표시 여부: ${includeOpponent ? `포함 (${fmOppStyle === 'opp_5back' ? '상대 5백 밀집수비 GK,RWB,CB,CB,CB,LWB,DM 7명' : fmOppStyle === 'opp_highpress' ? '상대 하이 라인 전방압박 GK,CB,CB,CM,RW,CF,LW 7명' : '전술 상황에 맞는 상대 핵심 포지션 7명'})` : '미포함'}
+사용자 전술 설명 및 추가 요청사항: ${customRequest?.trim() || '없음 (위 조합 지침의 특징이 극대화되도록 설계)'}
 
 경기장 좌표계 규칙:
 - x: 8~92 (화면 왼쪽 터치라인 8, 중앙 50, 화면 오른쪽 터치라인 92 — 우리팀 LB/LM/LW는 반드시 왼쪽 x<40, RB/RM/RW는 반드시 오른쪽 x>60에 배치!)
 - y: 4~94 (상대 골문 y=4, 하프라인 y=50, 우리팀 GK y=92)
-- 반드시 5단계(5컷) 연속 시나리오로 작성하고, 사용자 특별 요청사항이 있다면 선수 이동과 패스 궤적에 반드시 반영하세요.
+- 반드시 5단계(5컷) 연속 시나리오로 작성하고, 선택한 모든 FM 조합 지침과 사용자 요청사항이 선수 이동·간격·패스 궤적에 정확히 반영되어야 합니다.
 
 아래 JSON 형식으로만 응답하세요 (마크다운 없이 순수 JSON):
 {
@@ -2378,13 +2586,13 @@ ${roleOrderGuide}
 
       if (!generatedScenario) {
         await new Promise(r => setTimeout(r, 300));
-        generatedScenario = buildLocalAiTacticScenario({ formation, theme, includeOpponent, customRequest });
+        generatedScenario = buildLocalAiTacticScenario(tacticAiModal);
       }
 
       applyScenarioAndPlay(generatedScenario);
     } catch (err) {
       console.error('AI tactic generation error:', err);
-      const fallback = buildLocalAiTacticScenario({ formation, theme, includeOpponent, customRequest });
+      const fallback = buildLocalAiTacticScenario(tacticAiModal);
       applyScenarioAndPlay(fallback);
     } finally {
       setIsGeneratingTacticAi(false);
@@ -9193,16 +9401,16 @@ const renderGoalFlowModal = () => {
             </div>
 
             {tacticAiModal.isOpen && (
-              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[160] flex items-center justify-center p-4 animate-in fade-in break-keep">
-                <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl p-4 sm:p-5 w-full max-w-md shadow-2xl space-y-3.5 max-h-[90vh] overflow-y-auto">
+              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[160] flex items-center justify-center p-3 sm:p-4 animate-in fade-in break-keep">
+                <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl p-4 sm:p-5 w-full max-w-md shadow-2xl space-y-3 max-h-[92vh] overflow-y-auto">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-1.5">
                         <span>🤖</span>
-                        <span>AI 맞춤형 전술 설계</span>
+                        <span>FM 스타일 전술 조합 & AI 설계</span>
                       </h3>
                       <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                        테마를 고르거나, 테마 없이 원하는 전술을 자유롭게 설명해 5단계 애니메이션을 생성합니다.
+                        풋볼매니저처럼 여러 전술 지침을 조합하고 추가 설명을 적어 5단계 전술을 생성합니다.
                       </p>
                     </div>
                     <button
@@ -9223,7 +9431,7 @@ const renderGoalFlowModal = () => {
                             key={fm}
                             type="button"
                             onClick={() => setTacticAiModal(prev => ({ ...prev, formation: fm }))}
-                            className={`py-2.5 px-2 rounded-xl font-black text-xs border transition flex items-center justify-center gap-1 whitespace-nowrap ${tacticAiModal.formation === fm ? 'bg-indigo-600 text-white border-indigo-400 shadow-md' : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:text-white'}`}
+                            className={`py-2 px-2 rounded-xl font-black text-xs border transition flex items-center justify-center gap-1 whitespace-nowrap ${tacticAiModal.formation === fm ? 'bg-indigo-600 text-white border-indigo-400 shadow-md' : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:text-white'}`}
                           >
                             <span>{fm === '4-4-2' ? '🔥 4-4-2 전술' : '⚡ 4-3-3 전술'}</span>
                           </button>
@@ -9231,59 +9439,188 @@ const renderGoalFlowModal = () => {
                       </div>
                     </div>
 
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <label className="text-xs font-black text-slate-300 whitespace-nowrap">2. 상황별 테마 (선택 안 함 가능)</label>
+                    <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-2.5 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-black text-indigo-300 whitespace-nowrap">2. 팀 전술 지침 조합 (복수 선택 가능)</span>
                         <button
                           type="button"
-                          onClick={() => setTacticAiModal(prev => ({ ...prev, theme: 'free' }))}
-                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black border transition whitespace-nowrap shrink-0 ${tacticAiModal.theme === 'free' ? 'bg-amber-500/20 border-amber-400 text-amber-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}
+                          onClick={() => setTacticAiModal(prev => ({
+                            ...prev,
+                            theme: 'free',
+                            fmBuildUp: '',
+                            fmDirection: '',
+                            fmFinalThird: '',
+                            fmDefense: '',
+                            fmWide: false,
+                            fmSetPiece: ''
+                          }))}
+                          className="px-2 py-0.5 rounded-lg text-[10px] font-black border bg-slate-800 border-slate-700 text-slate-300 hover:text-white whitespace-nowrap shrink-0"
                         >
-                          ✨ 테마 없이 자유 설명
+                          ✨ 지침 전체 해제
                         </button>
                       </div>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {[
-                          { id: 'attack', icon: '⚔️', label: '공격 전개', desc: '측면·하프스페이스 침투' },
-                          { id: 'defense', icon: '🛡️', label: '수비 블록', desc: '간격 유지 및 함정 압박' },
-                          { id: 'possession', icon: '🔄', label: '점유율 확보', desc: '후방 빌드업 탈압박' },
-                          { id: 'counter', icon: '⚡', label: '고속 역습', desc: '수비 후 직선 침투' },
-                          { id: 'pressing', icon: '🔥', label: '전방 압박', desc: '게겐프레싱 볼 탈취' },
-                          { id: 'switch', icon: '↔️', label: '측면 전환', desc: '유인 후 반대편 전환' }
-                        ].map(item => (
+
+                      {/* ⚽ 빌드업 · 전개 방식 */}
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-400 mb-1">⚽ 빌드업 · 전개 템포</div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {[
+                            { id: 'short_buildup', label: '🔄 짧은 빌드업' },
+                            { id: 'halfspace', label: '⚔️ 하프스페이스' },
+                            { id: 'switch_play', label: '↔️ 반대편 전환' },
+                            { id: 'direct_counter', label: '⚡ 직선 고속역습' }
+                          ].map(opt => {
+                            const active = tacticAiModal.fmBuildUp === opt.id;
+                            return (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => setTacticAiModal(prev => ({ ...prev, fmBuildUp: prev.fmBuildUp === opt.id ? '' : opt.id, fmSetPiece: '' }))}
+                                className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border transition whitespace-nowrap text-center ${active ? 'bg-indigo-600/30 border-indigo-400 text-white shadow-sm' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'}`}
+                              >
+                                {opt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* 🎯 공격 방향 · 공간 폭 */}
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-400 mb-1">🎯 공격 방향 · 좌우 폭</div>
+                        <div className="grid grid-cols-4 gap-1">
+                          {[
+                            { id: 'left', label: '⬅️ 좌측' },
+                            { id: 'center', label: '⬆️ 중앙' },
+                            { id: 'right', label: '➡️ 우측' }
+                          ].map(opt => {
+                            const active = tacticAiModal.fmDirection === opt.id;
+                            return (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => setTacticAiModal(prev => ({ ...prev, fmDirection: prev.fmDirection === opt.id ? '' : opt.id }))}
+                                className={`py-1.5 px-1 rounded-lg text-[11px] font-bold border transition whitespace-nowrap text-center ${active ? 'bg-emerald-600/30 border-emerald-400 text-emerald-200' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'}`}
+                              >
+                                {opt.label}
+                              </button>
+                            );
+                          })}
                           <button
-                            key={item.id}
                             type="button"
-                            onClick={() => setTacticAiModal(prev => ({ ...prev, theme: prev.theme === item.id ? 'free' : item.id }))}
-                            className={`p-2 rounded-xl border text-left transition min-w-0 ${tacticAiModal.theme === item.id ? 'bg-indigo-500/20 border-indigo-400 text-white shadow-sm' : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'}`}
+                            onClick={() => setTacticAiModal(prev => ({ ...prev, fmWide: !prev.fmWide }))}
+                            className={`py-1.5 px-1 rounded-lg text-[11px] font-bold border transition whitespace-nowrap text-center ${tacticAiModal.fmWide ? 'bg-amber-500/25 border-amber-400 text-amber-200' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'}`}
                           >
-                            <div className="text-xs font-black flex items-center gap-1 whitespace-nowrap">
-                              <span>{item.icon}</span>
-                              <span>{item.label}</span>
-                            </div>
-                            <div className="text-[10px] text-slate-400 mt-0.5 truncate">{item.desc}</div>
+                            ↔️ 폭 넓게
                           </button>
-                        ))}
+                        </div>
+                      </div>
+
+                      {/* 🥅 파이널 서드 · 마무리 */}
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-400 mb-1">🥅 파이널 서드 · 찬스 메이킹</div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {[
+                            { id: 'low_cutback', label: '📐 낮은 컷백' },
+                            { id: 'early_cross', label: '🚀 얼리 크로스' },
+                            { id: 'through_ball', label: '⚡ 뒷공간 스루' },
+                            { id: 'shoot_on_sight', label: '💥 아크 중거리슛' }
+                          ].map(opt => {
+                            const active = tacticAiModal.fmFinalThird === opt.id;
+                            return (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => setTacticAiModal(prev => ({ ...prev, fmFinalThird: prev.fmFinalThird === opt.id ? '' : opt.id, fmSetPiece: '' }))}
+                                className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border transition whitespace-nowrap text-center ${active ? 'bg-sky-600/30 border-sky-400 text-sky-100' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'}`}
+                              >
+                                {opt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* 🛡️ 수비 라인 · 압박 & 세트피스 */}
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-400 mb-1">🛡️ 수비 라인 · 압박 강도 & 세트피스</div>
+                        <div className="grid grid-cols-3 gap-1">
+                          {[
+                            { id: 'high_gegenpress', label: '🔥 하이라인' },
+                            { id: 'mid_trap', label: '🕸️ 미드블록' },
+                            { id: 'low_block', label: '🏰 로우블록' }
+                          ].map(opt => {
+                            const active = tacticAiModal.fmDefense === opt.id;
+                            return (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => setTacticAiModal(prev => ({ ...prev, fmDefense: prev.fmDefense === opt.id ? '' : opt.id, fmSetPiece: '' }))}
+                                className={`py-1.5 px-1 rounded-lg text-[11px] font-bold border transition whitespace-nowrap text-center ${active ? 'bg-rose-600/30 border-rose-400 text-rose-100' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'}`}
+                              >
+                                {opt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+                          {[
+                            { id: 'corner_kick', label: '🚩 코너킥 세트피스' },
+                            { id: 'free_kick', label: '🎯 프리킥 세트피스' }
+                          ].map(opt => {
+                            const active = tacticAiModal.fmSetPiece === opt.id;
+                            return (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => setTacticAiModal(prev => ({ ...prev, fmSetPiece: prev.fmSetPiece === opt.id ? '' : opt.id }))}
+                                className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border transition whitespace-nowrap text-center ${active ? 'bg-violet-600/30 border-violet-400 text-violet-100' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'}`}
+                              >
+                                {opt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
 
-                    <label className="flex items-center justify-between gap-2 bg-slate-800/80 px-3 py-2 rounded-xl border border-slate-700 cursor-pointer">
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-white whitespace-nowrap">상대팀 상황별 포지션 함께 표시</div>
-                        <div className="text-[10px] text-slate-400 truncate">전술에 맞춰 상대 GK·수비·미드필더·공격수(7명)가 함께 움직입니다</div>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={tacticAiModal.includeOpponent}
-                        onChange={(e) => setTacticAiModal(prev => ({ ...prev, includeOpponent: e.target.checked }))}
-                        className="w-4 h-4 accent-indigo-500 shrink-0"
-                      />
-                    </label>
+                    <div className="bg-slate-800/70 px-3 py-2 rounded-xl border border-slate-700 space-y-2">
+                      <label className="flex items-center justify-between gap-2 cursor-pointer">
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-white whitespace-nowrap">상대팀 포지션 및 대응 전술 함께 표시</div>
+                          <div className="text-[10px] text-slate-400 truncate">상대 핵심 7명이 전술 스타일에 맞춰 유기적으로 움직입니다</div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={tacticAiModal.includeOpponent}
+                          onChange={(e) => setTacticAiModal(prev => ({ ...prev, includeOpponent: e.target.checked }))}
+                          className="w-4 h-4 accent-indigo-500 shrink-0"
+                        />
+                      </label>
+                      {tacticAiModal.includeOpponent && (
+                        <div className="grid grid-cols-3 gap-1 pt-0.5">
+                          {[
+                            { id: 'opp_balanced', label: '⚖️ 4백 밸런스' },
+                            { id: 'opp_5back', label: '🚌 5백 밀집' },
+                            { id: 'opp_highpress', label: '🔥 상대 압박' }
+                          ].map(opt => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => setTacticAiModal(prev => ({ ...prev, fmOppStyle: opt.id }))}
+                              className={`py-1 px-1 rounded-lg text-[10px] font-bold border transition whitespace-nowrap text-center ${tacticAiModal.fmOppStyle === opt.id ? 'bg-blue-600/30 border-blue-400 text-blue-200' : 'bg-slate-900/90 border-slate-700 text-slate-400 hover:text-white'}`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
 
                     <div>
                       <div className="flex items-center justify-between gap-2 mb-1">
-                        <label className={`text-xs font-black whitespace-nowrap ${tacticAiModal.theme === 'free' ? 'text-amber-300' : 'text-slate-300'}`}>
-                          {tacticAiModal.theme === 'free' ? '3. 자유 전술 설명 입력 (필수)' : '3. 전술 설명 및 추가 요청 (선택)'}
+                        <label className="text-xs font-black text-slate-300 whitespace-nowrap">
+                          3. 전술 설명 및 추가 지시사항 (조합 지침과 함께 반영)
                         </label>
                         <button
                           type="button"
@@ -9294,13 +9631,11 @@ const renderGoalFlowModal = () => {
                         </button>
                       </div>
                       <textarea
-                        rows={3}
+                        rows={2}
                         value={tacticAiModal.customRequest}
                         onChange={(e) => setTacticAiModal(prev => ({ ...prev, customRequest: e.target.value }))}
-                        placeholder={tacticAiModal.theme === 'free'
-                          ? '원하는 전술을 자유롭게 적어주세요!\n예: 상대 5백 밀집수비를 좌측으로 유인한 뒤 반대편 전환 크로스 / 우측 코너킥 약속된 세트피스 / 아크 정면 프리킥 전술'
-                          : '예: 좌측 윙어가 안쪽으로 좁히고 풀백이 오버래핑하여 컷백 크로스'}
-                        className={`w-full bg-slate-950 border rounded-xl p-2.5 text-xs text-white outline-none resize-none leading-relaxed ${tacticAiModal.theme === 'free' ? 'border-amber-400/80 focus:border-amber-300' : 'border-slate-700 focus:border-indigo-500'}`}
+                        placeholder="위에서 조합한 지침에 더해 원하는 디테일을 적어주세요! (지침 없이 설명만 적어도 생성 가능)&#10;예: 상대 5백을 좌측으로 유인한 뒤 반대편 풀백 오버래핑 얼리크로스"
+                        className="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 rounded-xl p-2.5 text-xs text-white outline-none resize-none leading-relaxed"
                       />
                     </div>
 
