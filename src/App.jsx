@@ -311,7 +311,7 @@ export default function App() {
   const [selectedTacticTemplateId, setSelectedTacticTemplateId] = useState('442_attack_counter');
   const [tacticScenarioTitle, setTacticScenarioTitle] = useState('[4-4-2] 두 줄 수비 후 측면 고속 역습');
   const [tacticScenarioSummary, setTacticScenarioSummary] = useState('');
-  const [showTacticAdvanced, setShowTacticAdvanced] = useState(false);
+  const [showTacticAdvanced, setShowTacticAdvanced] = useState(true);
   const [tacticAiModal, setTacticAiModal] = useState({
     isOpen: false,
     formation: '4-3-3',
@@ -1691,6 +1691,19 @@ export default function App() {
     stopTacticPlayback();
     setIsAutoRecording(false);
     setSelectedTacticTemplateId(templateId);
+
+    // 자유 배치 모드('') 선택 시: 설정 > 초기화와 동일한 완전 초기 배치로 복원
+    if (!templateId) {
+      setTacticScenarioTitle('');
+      setTacticScenarioSummary('');
+      setAnimationFrames([]);
+      setActiveFrameIndex(0);
+      setTacticTokens(getInitialTacticsTokens(pitchType));
+      setDrawings([]);
+      setPastState([]);
+      setFutureState([]);
+      return;
+    }
 
     // 우리 팀 커스텀 저장 전술인지 먼저 확인
     const customFound = savedCustomTactics.find(c => c.id === templateId);
@@ -9230,7 +9243,7 @@ const renderGoalFlowModal = () => {
                     <button onClick={() => { stopTacticPlayback(); setPitchType('full'); setSelectedTacticTemplateId(''); setTacticScenarioTitle(''); setTacticScenarioSummary(''); setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens('full'), []); setIsAutoRecording(false); }} className={`h-7 px-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap ${pitchType === 'full' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>풀코트</button>
                     <button onClick={() => { stopTacticPlayback(); setPitchType('half'); setSelectedTacticTemplateId(''); setTacticScenarioTitle(''); setTacticScenarioSummary(''); setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens('half'), []); setIsAutoRecording(false); }} className={`h-7 px-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap ${pitchType === 'half' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>하프코트</button>
                     <button onClick={saveCurrentTacticAsCustomTemplate} disabled={isPlaying} className="h-7 px-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-[11px] font-bold transition whitespace-nowrap">전술저장</button>
-                    <button onClick={() => { stopTacticPlayback(); if (selectedTacticTemplateId && selectedTacticTemplateId !== 'ai_generated') { applyTacticTemplateById(selectedTacticTemplateId); } else { setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens(pitchType), []); setIsAutoRecording(false); } }} className="h-7 px-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold transition whitespace-nowrap">초기화</button>
+                    <button onClick={() => { stopTacticPlayback(); setSelectedTacticTemplateId(''); setTacticScenarioTitle(''); setTacticScenarioSummary(''); setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens(pitchType), []); setIsAutoRecording(false); }} className="h-7 px-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold transition whitespace-nowrap">초기화</button>
                   </div>
 
                   {/* 우리팀 / 상대팀 인원 조절: 2열 구조로 넉넉한 폭 확보 */}
@@ -9310,20 +9323,9 @@ const renderGoalFlowModal = () => {
                   </div>
                 </div>
 
-                {showTacticAdvanced ? (
-                  <textarea
-                    rows={2}
-                    value={animationFrames[activeFrameIndex]?.coachingNote || ''}
-                    onChange={(e) => updateCurrentFrameCoachingNote(e.target.value)}
-                    disabled={isPlaying}
-                    placeholder="이 단계의 전술 해설을 입력하세요"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs font-bold text-amber-200 leading-snug outline-none focus:border-emerald-500 resize-none break-keep"
-                  />
-                ) : (
-                  <p className="text-xs font-bold text-amber-200 leading-relaxed break-keep">
-                    💡 {animationFrames[activeFrameIndex]?.coachingNote || tacticScenarioSummary || '선수 아이콘을 드래그하여 위치를 수정하거나 재생 버튼을 눌러보세요.'}
-                  </p>
-                )}
+                <p className="text-xs font-bold text-amber-200 leading-relaxed break-keep">
+                  💡 {animationFrames[activeFrameIndex]?.coachingNote || tacticScenarioSummary || '선수 아이콘을 드래그하여 위치를 수정하거나 재생 버튼을 눌러보세요.'}
+                </p>
               </div>
             )}
 
