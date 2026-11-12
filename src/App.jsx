@@ -316,7 +316,7 @@ export default function App() {
     isOpen: false,
     formation: '4-3-3',
     theme: 'attack',
-    includeOpponent: false,
+    includeOpponent: true,
     customRequest: ''
   });
   const [isGeneratingTacticAi, setIsGeneratingTacticAi] = useState(false);
@@ -1516,19 +1516,23 @@ export default function App() {
   }, [rawCustomTacticsMemo]);
 
   const makeTacticFrame = (formation, aCoords, ballCoord, rawDrawings, stepTitle, coachingNote, nameMap = {}, bCoords = []) => {
-    const roles = formation === '4-3-3' ? TACTIC_ROLES_433 : TACTIC_ROLES_442;
-    const tokens = aCoords.map((pt, idx) => {
+    const roles = Array.isArray(formation)
+      ? formation
+      : (formation === '4-3-3' ? TACTIC_ROLES_433 : TACTIC_ROLES_442);
+    const safeNameMap = (nameMap && typeof nameMap === 'object' && !Array.isArray(nameMap)) ? nameMap : {};
+    const tokens = (aCoords || []).map((pt, idx) => {
       const id = TACTIC_TOKEN_IDS[idx] || `A_P${idx}`;
       return {
         id,
         position: roles[idx] || 'CM',
-        name: nameMap[id] || '',
+        name: safeNameMap[id] || '',
         x: pt[0],
         y: pt[1],
         team: 'A'
       };
     });
-    bCoords.forEach((pt, idx) => {
+    (bCoords || []).forEach((pt, idx) => {
+      if (!Array.isArray(pt) || pt.length < 2) return;
       tokens.push({
         id: `B_OPP_${idx + 1}`,
         position: pt[2] || 'DF',
@@ -1778,23 +1782,24 @@ export default function App() {
     );
   };
 
-  const playTacticAnimation = () => {
-    if ((animationFrames || []).length < 2) return;
+  const playTacticAnimation = (framesArg) => {
+    const targetFrames = Array.isArray(framesArg) ? framesArg : animationFrames;
+    if ((targetFrames || []).length < 2) return;
     stopTacticPlayback();
     setIsPlaying(true);
     let idx = 0;
     let start = null;
     const transitionDuration = 850;
     setActiveFrameIndex(0);
-    setTacticTokens(animationFrames[0].tokens || []);
-    setDrawings(animationFrames[0].drawings || []);
+    setTacticTokens(targetFrames[0].tokens || []);
+    setDrawings(targetFrames[0].drawings || []);
 
     const animate = (timestamp) => {
       if (!start) start = timestamp;
       const progress = Math.min(1, (timestamp - start) / transitionDuration);
       const ease = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
-      const startTokens = animationFrames[idx]?.tokens || [];
-      const endTokens = animationFrames[idx + 1]?.tokens || startTokens;
+      const startTokens = targetFrames[idx]?.tokens || [];
+      const endTokens = targetFrames[idx + 1]?.tokens || startTokens;
       startTokens.forEach(t1 => {
         const t2 = endTokens.find(t => t.id === t1.id) || t1;
         const x = t1.x + (t2.x - t1.x) * ease;
@@ -1810,9 +1815,9 @@ export default function App() {
       } else {
         idx++;
         setActiveFrameIndex(idx);
-        setTacticTokens(animationFrames[idx]?.tokens || []);
-        setDrawings(animationFrames[idx]?.drawings || []);
-        if (idx >= animationFrames.length - 1) {
+        setTacticTokens(targetFrames[idx]?.tokens || []);
+        setDrawings(targetFrames[idx]?.drawings || []);
+        if (idx >= targetFrames.length - 1) {
           setIsPlaying(false);
           playbackRef.current = null;
         } else {
@@ -1882,76 +1887,187 @@ export default function App() {
 
   const buildLocalAiTacticScenario = ({ formation, theme, includeOpponent, customRequest }) => {
     const is433 = formation === '4-3-3';
-    let baseId = is433 ? '433_attack_halfspace' : '442_attack_counter';
-    if (theme === 'defense') baseId = is433 ? '433_defense_gegenpress' : '442_defense_block';
-    else if (theme === 'possession') baseId = is433 ? '433_possession_buildup' : '442_possession_diamond';
-    else if (theme === 'pressing') baseId = is433 ? '433_defense_gegenpress' : '442_defense_block';
-    else if (theme === 'counter') baseId = is433 ? '433_attack_halfspace' : '442_attack_counter';
+    const roles = is433 ? TACTIC_ROLES_433 : TACTIC_ROLES_442;
+    const reqText = (customRequest || '').trim();
+    const nameMap = {};
+    (tacticTokens || []).forEach(t => {
+      if (t.team === 'A' && t.name) nameMap[t.id] = t.name;
+    });
 
-    // 측면 전환 (Switch of Play) 전용 5단계 시나리오
+    let scenario = null;
+
+    // 1. 측면 전환 (Switch of Play): 좌측 유인 후 우측 반대편 공간 타격 + 상대 GK·4백·2미드필더 시프트
     if (theme === 'switch') {
-      const roles = is433 ? TACTIC_ROLES_433 : TACTIC_ROLES_442;
-      const oppSteps = includeOpponent
-        ? [
-            [[25, 36], [38, 38], [52, 36], [68, 34]],
-            [[20, 42], [32, 44], [46, 42], [62, 38]],
-            [[24, 44], [38, 44], [54, 42], [70, 38]],
-            [[34, 32], [48, 30], [64, 28], [80, 26]],
-            [[40, 20], [54, 18], [68, 16], [82, 16]]
-          ]
-        : [[], [], [], [], []];
-      return {
-        title: `🤖 AI ${formation} 좌우 측면 전환(Switch of Play) 전술`,
-        summary: customRequest?.trim()
-          ? `AI 맞춤 설계 (${customRequest.trim()}) — 한쪽 측면으로 수비를 유인한 뒤 반대편 넓은 공간으로 빠르게 전환합니다.`
-          : '좌측에 수비를 밀집시킨 뒤 중원 피벗을 거쳐 우측 반대편 넓은 공간으로 빠르게 침투하는 5단계 전술입니다.',
+      const opp = includeOpponent ? [
+        [[50,7,'GK'],[18,28,'RB'],[34,30,'CB'],[52,30,'CB'],[72,28,'LB'],[30,42,'DM'],[50,42,'CM']],
+        [[48,7,'GK'],[16,32,'RB'],[30,34,'CB'],[46,34,'CB'],[66,32,'LB'],[24,44,'DM'],[44,44,'CM']],
+        [[50,7,'GK'],[22,30,'RB'],[38,28,'CB'],[56,28,'CB'],[76,26,'LB'],[34,38,'DM'],[58,36,'CM']],
+        [[52,6,'GK'],[32,22,'RB'],[46,20,'CB'],[62,20,'CB'],[84,18,'LB'],[44,28,'DM'],[68,26,'CM']],
+        [[50,5,'GK'],[36,16,'RB'],[48,14,'CB'],[60,14,'CB'],[78,16,'LB'],[48,22,'DM'],[64,22,'CM']]
+      ] : [[],[],[],[],[]];
+      scenario = {
+        title: `🤖 AI ${formation} 좌우 측면 전환(Switch of Play)`,
+        summary: '좌측에 수비를 밀집시킨 뒤 중원 피벗을 거쳐 반대편 넓은 우측 공간으로 빠르게 전환해 마무리합니다.',
         frames: [
-          makeTacticFrame(roles, [[50,92],[14,66],[36,72],[64,72],[86,64],[14,44],[36,52],[60,52],[86,42],[34,28],[64,28]], [14,44], oppSteps[0], [['zone',8,36,42,68],['pass',14,44,36,52]], '1단계: 좌측 오버로드 유인', '좌측 풀백·측면 자원이 볼을 점유하며 상대 수비 블록을 왼쪽으로 끌어들입니다.'),
-          makeTacticFrame(roles, [[50,90],[16,60],[36,68],[64,68],[88,54],[16,38],[38,48],[62,46],[88,34],[36,24],[66,24]], [38,48], oppSteps[1], [['pass',38,48,62,46],['arrow',88,54,90,34],['arrow',88,34,84,18]], '2단계: 중원 피벗 탈압박 전환', '중원 미드필더가 원터치로 반대편 미드필더에게 연결하고 우측 라인이 동시에 전진합니다.'),
-          makeTacticFrame(roles, [[50,88],[22,58],[40,64],[66,64],[90,36],[24,36],[44,44],[64,42],[86,20],[40,20],[68,20]], [86,20], oppSteps[2], [['pass',64,42,86,20],['zone',72,14,94,42],['arrow',90,36,92,16]], '3단계: 반대편 약점 공간 롱패스', '수비가 비어 있는 우측 윙/측면 공간으로 대각선 전환 패스를 공급합니다.'),
-          makeTacticFrame(roles, [[50,86],[28,54],[44,60],[68,60],[92,18],[32,30],[48,38],[68,32],[82,16],[44,14],[64,14]], [92,18], oppSteps[3], [['pass',82,16,92,18],['pass',92,18,56,12],['arrow',44,14,48,10],['arrow',64,14,60,10]], '4단계: 우측 오버래핑 & 컷백', '우측 풀백이 오버래핑으로 볼을 이어받아 박스 안쪽으로 날카로운 컷백 크로스를 올립니다.'),
-          makeTacticFrame(roles, [[50,86],[30,52],[46,58],[68,58],[88,16],[38,22],[50,32],[68,26],[78,14],[48,9],[58,10]], [50,4], oppSteps[4], [['pass',58,10,50,4]], '5단계: 박스 침투 마무리 슈팅', '반대편 공격수와 2선 자원이 박스 중앙으로 쇄도하며 원터치 슈팅으로 마무리합니다.')
+          makeTacticFrame(roles, [[50,92],[14,64],[36,72],[64,72],[86,62],[14,44],[36,52],[60,52],[86,40],[34,28],[64,28]], [14,44], [['zone',8,34,42,66],['pass',14,44,36,52]], '1단계: 좌측 오버로드 & 상대 수비 유인', '좌측 풀백·미드필더가 짧은 패스로 상대 수비 블록과 미드필더를 왼쪽으로 끌어들입니다.', nameMap, opp[0]),
+          makeTacticFrame(roles, [[50,90],[16,58],[36,68],[64,68],[88,50],[18,38],[38,48],[62,46],[88,32],[36,24],[66,24]], [38,48], [['pass',38,48,62,46],['arrow',88,50,90,30],['arrow',88,32,84,18]], '2단계: 중원 피벗 원터치 전환 연결', '압박을 피해 중원 미드필더에게 볼을 빼주고 반대편 우측 풀백·윙어가 동시에 전진합니다.', nameMap, opp[1]),
+          makeTacticFrame(roles, [[50,88],[22,56],[40,64],[66,64],[90,32],[24,34],[44,44],[64,42],[84,20],[40,20],[66,20]], [84,20], [['pass',64,42,84,20],['zone',70,12,94,40],['arrow',90,32,92,16]], '3단계: 반대편 약점 공간 대각선 전환 패스', '수비가 비어 있는 우측 측면 공간으로 대각선 롱패스를 공급해 단숨에 2:1 상황을 만듭니다.', nameMap, opp[2]),
+          makeTacticFrame(roles, [[50,86],[28,54],[44,60],[68,60],[92,16],[32,28],[48,38],[68,32],[80,16],[44,14],[62,14]], [92,16], [['pass',80,16,92,16],['pass',92,16,56,11],['arrow',44,14,48,10]], '4단계: 우측 오버래핑 돌파 & 낮은 컷백', '우측 풀백이 오버래핑으로 볼을 이어받아 골문 앞 쇄도하는 공격수에게 컷백 크로스를 보냅니다.', nameMap, opp[3]),
+          makeTacticFrame(roles, [[50,86],[30,52],[46,58],[68,58],[88,16],[38,22],[50,32],[68,26],[78,14],[48,9],[56,10]], [50,4], [['pass',56,10,50,4]], '5단계: 박스 중앙 침투 논스톱 마무리!', '반대편에서 쇄도한 공격수가 골키퍼 역방향으로 원터치 슈팅을 성공시킵니다.', nameMap, opp[4])
         ]
       };
     }
 
-    const preset = buildTacticPresetScenario(baseId);
-    const oppDefault = [
-      [[26, 36], [42, 38], [58, 38], [74, 36]],
-      [[24, 34], [40, 36], [56, 36], [72, 34]],
-      [[26, 28], [42, 30], [58, 30], [74, 28]],
-      [[30, 22], [44, 24], [58, 24], [72, 22]],
-      [[34, 16], [46, 18], [56, 18], [68, 16]]
-    ];
-    const frames = preset.frames.map((frame, idx) => {
-      let tokens = frame.tokens.filter(t => includeOpponent ? true : t.team !== 'B');
-      if (includeOpponent && !tokens.some(t => t.team === 'B')) {
-        const extraOpp = (oppDefault[idx] || oppDefault[0]).map((pt, bi) => ({
-          id: `B_OPP_${bi + 1}`,
-          team: 'B',
-          number: bi + 1,
-          position: `상대${bi + 1}`,
-          name: `상대${bi + 1}`,
-          x: pt[0],
-          y: pt[1]
-        }));
-        tokens = [...tokens, ...extraOpp];
-      }
-      return {
-        ...frame,
-        tokens,
-        coachingNote: customRequest?.trim() && idx === 0
-          ? `[AI 요청 반영: ${customRequest.trim()}] ${frame.coachingNote}`
-          : frame.coachingNote
+    // 2. 고속 역습 (Counter-Attack): 수비 진영 인터셉트 후 3패스 직선 속공 + 상대 공격진 배후 공간 타격
+    else if (theme === 'counter') {
+      const opp = includeOpponent ? [
+        [[50,8,'GK'],[36,38,'CB'],[64,38,'CB'],[24,54,'RM'],[50,58,'AM'],[76,54,'LM'],[48,72,'CF']],
+        [[50,8,'GK'],[38,34,'CB'],[62,34,'CB'],[28,48,'RM'],[50,50,'AM'],[72,48,'LM'],[48,62,'CF']],
+        [[50,7,'GK'],[40,26,'CB'],[60,26,'CB'],[32,38,'RM'],[50,40,'AM'],[68,38,'LM'],[48,50,'CF']],
+        [[50,6,'GK'],[42,18,'CB'],[58,18,'CB'],[34,28,'RM'],[50,30,'AM'],[66,28,'LM'],[48,38,'CF']],
+        [[50,5,'GK'],[44,14,'CB'],[56,14,'CB'],[36,22,'RM'],[50,24,'AM'],[64,22,'LM'],[48,30,'CF']]
+      ] : [[],[],[],[],[]];
+      scenario = {
+        title: `🤖 AI ${formation} 수비 차단 후 3패스 초고속 역습`,
+        summary: '우리 페널티박스 앞 수비 블록에서 상대 패스를 차단한 직후, 높게 올라온 상대 수비 뒷공간을 직선 침투로 무너뜨립니다.',
+        frames: [
+          makeTacticFrame(roles, [[50,93],[22,80],[40,82],[60,82],[78,80],[22,68],[42,72],[58,72],[78,68],[38,52],[62,52]], [42,72], [['pass',48,72,42,72],['arrow',38,52,32,34],['arrow',62,52,68,32]], '1단계: 페널티박스 앞 패스 인터셉트', '상대 공격형 미드필더(AM)의 침투 패스를 우리 중원이 끊어내자마자 전방 자원이 뒷공간으로 스타트합니다.', nameMap, opp[0]),
+          makeTacticFrame(roles, [[50,92],[22,74],[40,78],[60,78],[78,72],[20,54],[42,64],[58,56],[80,50],[34,38],[66,34]], [58,56], [['pass',42,64,58,56],['pass',58,56,66,34],['arrow',20,54,18,28]], '2단계: 탈압박 전진 패스 & 뒷공간 스루패스', '원터치로 중원을 거쳐 상대 두 센터백(CB) 사이 넓은 뒷공간으로 침투하는 공격수에게 직선 패스를 찔러 넣습니다.', nameMap, opp[1]),
+          makeTacticFrame(roles, [[50,90],[24,66],[42,72],[58,72],[80,62],[18,32],[44,52],[60,44],[82,32],[32,24],[64,22]], [64,22], [['arrow',64,22,58,14],['arrow',32,24,42,12],['arrow',18,32,24,16]], '3단계: 하프라인 돌파 & 3대2 수적 우위 질주', '상대 미드필더들이 미처 복귀하기 전에 공격진 3명이 박스까지 전력 질주하며 3대2 수적 우위를 점합니다.', nameMap, opp[2]),
+          makeTacticFrame(roles, [[50,88],[26,60],[42,68],[58,68],[80,56],[24,18],[46,44],[60,34],[78,20],[42,12],[58,14]], [42,12], [['pass',58,14,42,12],['arrow',42,12,50,4]], '4단계: 상대 센터백 유인 후 반대편 횡패스', '공을 몰고 들어간 우측 공격수가 골키퍼와 수비를 끌어당긴 뒤 노마크 상태인 반대편 공격수에게 내줍니다.', nameMap, opp[3]),
+          makeTacticFrame(roles, [[50,88],[26,58],[42,66],[58,66],[80,54],[26,14],[46,40],[60,30],[76,16],[48,9],[58,12]], [50,4], [['pass',48,9,50,4]], '5단계: 골문 정면 빈 골대 침착한 마무리!', '단 3번의 전진 패스로 상대 수비를 완전히 무너뜨리고 빈 골문으로 득점을 성공시킵니다.', nameMap, opp[4])
+        ]
       };
-    });
-    return {
-      title: `🤖 ${preset.title.replace(/^\[[^\]]+\]\s*/, `${formation} AI `)}`,
-      summary: customRequest?.trim()
-        ? `AI 맞춤 설계 (${customRequest.trim()}) — ${preset.summary}`
-        : preset.summary,
-      frames
-    };
+    }
+
+    // 3. 전방 압박 (Pressing): 상대 후방 빌드업(GK+4백+2미드필더)을 전방에서 가두어 탈취 후 속공
+    else if (theme === 'pressing') {
+      const opp = includeOpponent ? [
+        [[50,7,'GK'],[20,20,'RB'],[38,16,'CB'],[62,16,'CB'],[80,20,'LB'],[42,28,'DM'],[60,28,'CM']],
+        [[48,7,'GK'],[16,22,'RB'],[36,16,'CB'],[60,16,'CB'],[80,20,'LB'],[36,28,'DM'],[58,28,'CM']],
+        [[46,7,'GK'],[14,24,'RB'],[34,18,'CB'],[58,18,'CB'],[78,22,'LB'],[30,28,'DM'],[54,30,'CM']],
+        [[48,6,'GK'],[16,24,'RB'],[36,18,'CB'],[58,18,'CB'],[78,22,'LB'],[32,28,'DM'],[54,30,'CM']],
+        [[50,5,'GK'],[20,22,'RB'],[38,16,'CB'],[58,16,'CB'],[76,20,'LB'],[36,26,'DM'],[54,28,'CM']]
+      ] : [[],[],[],[],[]];
+      scenario = {
+        title: `🤖 AI ${formation} 전방 게겐프레싱 & 하이 라인 탈취`,
+        summary: '상대 골문 앞 빌드업을 아크 형태 전방 압박으로 측면 코너에 가두고, 패스 실수를 유발해 3초 안에 득점합니다.',
+        frames: [
+          makeTacticFrame(roles, [[50,86],[18,60],[38,64],[62,64],[82,60],[22,42],[40,44],[60,44],[78,42],[38,24],[62,24]], [38,16], [['arrow',38,24,38,17],['arrow',62,24,44,26],['zone',12,12,64,34]], '1단계: 상대 센터백 압박 & 중앙 DM 패스 차단', '공격수가 곡선 주행으로 중앙 패스 길을 막으며 상대 센터백(CB)이 측면 풀백에게 공을 보내도록 강제합니다.', nameMap, opp[0]),
+          makeTacticFrame(roles, [[48,84],[16,54],[36,60],[60,60],[80,58],[18,30],[36,34],[56,40],[76,40],[34,18],[58,22]], [16,22], [['pass',38,16,16,22],['arrow',18,30,16,23],['arrow',36,34,28,26]], '2단계: 측면 풀백 터치 순간 3인 연쇄 압박', '볼이 상대 우측 풀백(RB)에게 이동하는 즉시 우리 좌측 자원과 미드필더가 전속력으로 덮칩니다.', nameMap, opp[1]),
+          makeTacticFrame(roles, [[48,82],[14,44],[34,56],[58,56],[78,56],[15,24],[28,26],[52,36],[74,36],[32,16],[54,20]], [15,24], [['zone',8,14,38,32],['pass',15,24,28,26]], '3단계: 측면 압박 감옥 완성 & 볼 인터셉트!', '풀백까지 전진해 모든 패스 출구를 봉쇄하고, 당황한 상대의 패스를 가로채는 데 성공합니다.', nameMap, opp[2]),
+          makeTacticFrame(roles, [[48,82],[16,42],[36,56],[58,56],[78,54],[18,22],[28,24],[50,32],[72,30],[36,13],[52,14]], [36,13], [['pass',28,24,36,13],['arrow',52,14,50,10]], '4단계: 탈취 즉시 페널티박스 침투 패스', '볼을 뺏은 미드필더가 상대 수비가 정돈되기 전에 박스 안 공격수에게 원터치 스루패스를 찔러 넣습니다.', nameMap, opp[3]),
+          makeTacticFrame(roles, [[48,82],[18,42],[36,56],[58,56],[78,54],[20,20],[32,22],[50,28],[70,26],[46,10],[52,10]], [50,4], [['pass',46,10,50,4]], '5단계: 게겐프레싱 탈취 후 논스톱 골!', '상대 진영에서 공을 뺏은 지 3초 만에 간결한 마무리 슈팅으로 골망을 흔듭니다.', nameMap, opp[4])
+        ]
+      };
+    }
+
+    // 4. 수비 블록 (Defense): 상대 빌드업·2선 침투(CB·LB·RB·DM·AM·CF)를 컴팩트 블록으로 차단
+    else if (theme === 'defense') {
+      const opp = includeOpponent ? [
+        [[36,30,'CB'],[64,30,'CB'],[16,40,'RB'],[84,40,'LB'],[50,44,'DM'],[50,58,'AM'],[50,70,'CF']],
+        [[34,32,'CB'],[62,32,'CB'],[16,44,'RB'],[82,42,'LB'],[44,46,'DM'],[36,58,'AM'],[48,70,'CF']],
+        [[34,34,'CB'],[60,34,'CB'],[18,48,'RB'],[80,44,'LB'],[40,48,'DM'],[32,60,'AM'],[46,72,'CF']],
+        [[36,32,'CB'],[62,32,'CB'],[20,48,'RB'],[80,44,'LB'],[42,48,'DM'],[34,58,'AM'],[46,68,'CF']],
+        [[38,26,'CB'],[64,26,'CB'],[24,42,'RB'],[78,38,'LB'],[46,42,'DM'],[38,52,'AM'],[48,60,'CF']]
+      ] : [[],[],[],[],[]];
+      scenario = {
+        title: `🤖 AI ${formation} 컴팩트 지역 수비 블록 & 중앙 패스 차단`,
+        summary: '수비라인과 미드필드 간격을 12m 이내로 유지해 상대 공격형 미드필더(AM)와 스트라이커(CF)로의 패스 길을 완벽히 차단합니다.',
+        frames: [
+          makeTacticFrame(roles, [[50,93],[24,78],[42,80],[58,80],[76,78],[24,64],[42,66],[58,66],[76,64],[40,50],[60,50]], [50,44], [['zone',24,60,76,82]], '1단계: 중앙 밀집 2줄 수비 블록 구축', '상대 중원(DM)이 공을 잡았을 때 수비-미드필더 간격을 좁혀 중앙 침투 패스 경로를 완전히 닫습니다.', nameMap, opp[0]),
+          makeTacticFrame(roles, [[48,93],[20,78],[38,80],[54,80],[72,78],[18,62],[36,64],[52,65],[70,64],[36,48],[54,50]], [16,44], [['pass',50,44,16,44],['arrow',18,62,18,50],['arrow',36,64,30,56]], '2단계: 볼 이동에 맞춘 전 라인 좌측 시프트', '상대가 측면 풀백(RB)으로 공을 돌리자 우리 팀 10명이 동시에 좌측으로 이동하며 대형을 유지합니다.', nameMap, opp[1]),
+          makeTacticFrame(roles, [[48,92],[18,76],[36,78],[52,79],[70,78],[18,52],[32,58],[50,64],[68,64],[34,46],[52,48]], [32,58], [['pass',18,48,32,58],['zone',14,46,42,66]], '3단계: 하프스페이스 협력 압박 & 패스 인터셉트!', '상대가 안쪽 공격형 미드필더(AM)에게 찔러 넣는 패스를 미리 읽고 있던 우리 중원이 완벽히 차단합니다.', nameMap, opp[2]),
+          makeTacticFrame(roles, [[48,90],[20,72],[38,76],[54,76],[72,72],[22,44],[34,54],[52,56],[72,50],[38,36],[60,36]], [52,56], [['pass',34,54,52,56],['pass',52,56,60,36],['arrow',72,50,76,30]], '4단계: 수비 성공 직후 탈압박 전개', '차단한 볼을 압박이 없는 중앙 파트너에게 연결하고 전방 공격수들이 넓게 벌리며 역습 대형으로 전환합니다.', nameMap, opp[3]),
+          makeTacticFrame(roles, [[50,88],[22,66],[40,72],[58,72],[76,64],[26,36],[38,48],[54,46],[76,28],[40,26],[62,24]], [62,24], [['pass',60,36,62,24],['arrow',62,24,54,12],['arrow',76,28,80,16]], '5단계: 상대 진영 전환 돌파 성공', '견고한 블록 수비로 실점 위기를 막아낸 뒤 단숨에 상대 진영 공격 찬스로 연결합니다.', nameMap, opp[4])
+        ]
+      };
+    }
+
+    // 5. 점유율 확보 (Possession): 상대 전방 압박(CF·LW·RW·CM)을 후방 수적 우위와 삼각 패스로 탈압박
+    else if (theme === 'possession') {
+      const opp = includeOpponent ? [
+        [[40,22,'CB'],[60,22,'CB'],[38,44,'CM'],[62,44,'CM'],[24,62,'RW'],[50,68,'CF'],[76,62,'LW']],
+        [[40,22,'CB'],[60,22,'CB'],[36,46,'CM'],[60,46,'CM'],[22,66,'RW'],[48,72,'CF'],[74,64,'LW']],
+        [[40,20,'CB'],[60,20,'CB'],[34,42,'CM'],[58,42,'CM'],[26,56,'RW'],[46,62,'CF'],[72,56,'LW']],
+        [[42,18,'CB'],[60,18,'CB'],[38,34,'CM'],[60,34,'CM'],[30,46,'RW'],[48,50,'CF'],[70,46,'LW']],
+        [[42,16,'CB'],[58,16,'CB'],[40,26,'CM'],[58,26,'CM'],[32,36,'RW'],[50,38,'CF'],[68,36,'LW']]
+      ] : [[],[],[],[],[]];
+      scenario = {
+        title: `🤖 AI ${formation} 후방 수적 우위 빌드업 & 제3자 탈압박`,
+        summary: '상대 전방 압박(CF·윙어)을 후방 삼각 대형과 제3자 패스(Third-man run)로 벗겨내며 안정적으로 점유율을 장악합니다.',
+        frames: [
+          makeTacticFrame(roles, [[50,92],[14,68],[28,82],[72,82],[86,68],[50,74],[34,54],[66,54],[16,36],[44,32],[84,36]], [50,92], [['pass',50,92,28,82],['zone',22,68,78,94]], '1단계: 센터백 좌우 폭 확장 & 중원 코어 하강', '상대 3명이 전방 압박을 걸어오자 두 센터백이 넓게 벌리고 중원 자원이 내려와 4대3 후방 수적 우위를 만듭니다.', nameMap, opp[0]),
+          makeTacticFrame(roles, [[50,92],[12,58],[26,80],[74,80],[88,58],[48,72],[32,50],[66,50],[16,34],[46,30],[84,34]], [48,72], [['pass',26,80,48,72],['pass',48,72,12,58],['arrow',32,50,28,38]], '2단계: 압박 유인 후 풀백 원터치 삼각 패스', '상대 CF와 윙어를 끌어들인 뒤 중앙 피벗을 거쳐 측면 터치라인의 풀백(LB)에게 원터치로 빼줍니다.', nameMap, opp[1]),
+          makeTacticFrame(roles, [[50,90],[14,52],[30,74],[70,74],[86,52],[50,64],[30,40],[64,44],[16,28],[48,32],[84,28]], [30,40], [['pass',14,52,30,40],['pass',30,40,48,32],['arrow',64,44,66,28]], '3단계: 상대 1선 압박 돌파 & 중원 라인 브레이킹', '풀백이 하프스페이스로 움직인 미드필더에게 전진 패스를 넣어 상대 전방 압박진 3명을 단숨에 무력화합니다.', nameMap, opp[2]),
+          makeTacticFrame(roles, [[50,88],[18,46],[34,68],[66,68],[82,44],[50,56],[34,34],[66,28],[16,22],[48,30],[84,22]], [66,28], [['pass',48,30,66,28],['pass',66,28,84,22],['zone',14,18,86,46]], '4단계: 폴스나인 연계 & 반대편 하프스페이스 전환', '내려와 볼을 받은 공격수가 반대편 전진 미드필더와 윙어에게 연결하며 상대 진영을 완전히 장악합니다.', nameMap, opp[3]),
+          makeTacticFrame(roles, [[50,86],[22,42],[36,62],[64,62],[78,38],[50,48],[38,26],[64,20],[20,18],[48,14],[80,18]], [48,14], [['pass',80,18,48,14],['pass',48,14,50,4]], '5단계: 상대 진영 2-3-5 안착 & 완벽한 찬스 메이킹', '높은 점유율로 상대를 박스 안에 가두고 컷백 패스에 이은 침착한 마무리로 득점합니다.', nameMap, opp[4])
+        ]
+      };
+    }
+
+    // 6. 공격 전개 (Attack 기본값): 상대 GK+4백+2볼란치를 흔드는 풀백 오버래핑 & 하프스페이스 2:1 침투
+    else {
+      const opp = includeOpponent ? [
+        [[50,7,'GK'],[18,24,'RB'],[38,22,'CB'],[62,22,'CB'],[82,24,'LB'],[40,34,'DM'],[60,34,'CM']],
+        [[50,7,'GK'],[20,24,'RB'],[38,22,'CB'],[64,22,'CB'],[84,26,'LB'],[42,34,'DM'],[64,34,'CM']],
+        [[50,6,'GK'],[22,22,'RB'],[40,20,'CB'],[64,20,'CB'],[84,24,'LB'],[44,30,'DM'],[66,28,'CM']],
+        [[50,6,'GK'],[26,18,'RB'],[42,16,'CB'],[62,16,'CB'],[80,20,'LB'],[46,24,'DM'],[64,24,'CM']],
+        [[50,5,'GK'],[28,16,'RB'],[44,14,'CB'],[60,14,'CB'],[78,18,'LB'],[48,22,'DM'],[62,22,'CM']]
+      ] : [[],[],[],[],[]];
+      scenario = {
+        title: `🤖 AI ${formation} 하프스페이스 2:1 월패스 & 오버래핑 공격`,
+        summary: '상대 4백과 투볼란치(DM·CM) 사이의 하프스페이스를 2:1 원투패스와 풀백 오버래핑으로 허물어 득점합니다.',
+        frames: [
+          makeTacticFrame(roles, [[50,90],[18,64],[38,72],[62,72],[82,58],[20,44],[38,50],[62,48],[84,38],[38,28],[62,28]], [62,48], [['pass',62,48,84,38],['arrow',82,58,90,34]], '1단계: 중원 빌드업 & 우측 풀백 오버래핑 시동', '중원에서 우측 측면 자원으로 볼을 전개하는 동시에 우측 풀백(RB)이 터치라인을 따라 과감하게 오버래핑합니다.', nameMap, opp[0]),
+          makeTacticFrame(roles, [[50,88],[20,58],[38,68],[62,68],[90,32],[22,36],[40,44],[64,40],[78,32],[38,24],[60,26]], [60,26], [['pass',78,32,60,26],['pass',60,26,72,20],['arrow',78,32,72,20]], '2단계: 상대 LB 유인 & 하프스페이스 2:1 원투패스', '우측 풀백이 상대 수비(LB)를 측면으로 벌려 놓은 틈을 타, 공격수와 2:1 월패스로 하프스페이스를 돌파합니다.', nameMap, opp[1]),
+          makeTacticFrame(roles, [[50,86],[22,54],[40,64],[62,64],[90,22],[26,28],[42,38],[64,32],[72,18],[38,18],[56,18]], [72,18], [['pass',72,18,54,12],['arrow',56,18,54,12],['arrow',38,18,42,12]], '3단계: 페널티박스 우측 반공간 진입 & 킬패스', '상대 센터백(CB)과 풀백(LB) 사이가 벌어진 공간으로 파고들어 문전 쇄도하는 공격수에게 킬패스를 공급합니다.', nameMap, opp[2]),
+          makeTacticFrame(roles, [[50,86],[24,52],[42,62],[62,62],[88,18],[30,22],[44,34],[62,26],[74,14],[42,12],[54,11]], [54,11], [['pass',54,11,44,11],['arrow',42,12,44,11]], '4단계: 상대 GK·CB 시선 집중 후 컷백 연결', '볼을 받은 공격수가 골키퍼까지 끌어당긴 뒤 반대편에서 노마크로 들어오는 파트너에게 컷백을 내줍니다.', nameMap, opp[3]),
+          makeTacticFrame(roles, [[50,86],[24,52],[42,62],[62,62],[86,18],[32,18],[46,30],[62,24],[74,14],[46,9],[56,11]], [50,4], [['pass',46,9,50,4]], '5단계: 문전 원터치 마무리 득점!', '조직적인 2:1 패스와 오버래핑으로 상대 6명의 수비 블록을 완전히 무너뜨리고 골을 완성합니다.', nameMap, opp[4])
+        ]
+      };
+    }
+
+    // 사용자 추가 요청사항(customRequest) 키워드 분석 및 실제 동선 변형 적용
+    if (reqText) {
+      const wantLeft = /좌측|왼쪽|레프트|LW|LM|LB/i.test(reqText) && !/우측|오른쪽/.test(reqText);
+      const wantLongShot = /중거리|원거리|세컨볼|2선\s*슛/.test(reqText);
+      if (wantLeft && theme !== 'switch') {
+        scenario.frames = scenario.frames.map(fr => ({
+          ...fr,
+          tokens: fr.tokens.map(tk => tk.team === 'ball' || tk.team === 'A' || tk.team === 'B'
+            ? { ...tk, x: Math.round(100 - tk.x) }
+            : tk),
+          drawings: (fr.drawings || []).map(d => ({
+            ...d,
+            start: { x: Math.round(100 - d.start.x), y: d.start.y },
+            end: { x: Math.round(100 - d.end.x), y: d.end.y }
+          })),
+          coachingNote: fr.coachingNote.replace(/우측/g, '좌측').replace(/오른쪽/g, '왼쪽').replace(/RB/g, 'LB').replace(/RM/g, 'LM').replace(/RW/g, 'LW')
+        }));
+      }
+      if (wantLongShot && scenario.frames.length >= 5) {
+        const lastIdx = scenario.frames.length - 1;
+        const lastFrame = scenario.frames[lastIdx];
+        lastFrame.tokens = lastFrame.tokens.map(tk => {
+          if (tk.id === 'A_CM2') return { ...tk, x: 50, y: 22 };
+          if (tk.id === 'ball') return { ...tk, x: 50, y: 4 };
+          return tk;
+        });
+        lastFrame.drawings = [
+          { id: `d_ls_1`, type: 'pass', start: { x: 54, y: 12 }, end: { x: 50, y: 22 } },
+          { id: `d_ls_2`, type: 'pass', start: { x: 50, y: 22 }, end: { x: 50, y: 4 } }
+        ];
+        lastFrame.stepTitle = '5단계: 2선 레이오프 & 중거리포 득점!';
+        lastFrame.coachingNote = `[요청 반영: ${reqText}] 박스 안에서 2선 중앙(CM)으로 내준 공을 논스톱 중거리 슈팅으로 연결해 골망을 가릅니다!`;
+      } else {
+        scenario.frames[0].coachingNote = `[맞춤 반영: ${reqText}] ${scenario.frames[0].coachingNote}`;
+      }
+      scenario.title = `${scenario.title} (맞춤 설계)`;
+      scenario.summary = `[요청 반영: ${reqText}] ${scenario.summary}`;
+    }
+
+    return scenario;
   };
 
   const generateAiTacticScenario = async (e) => {
@@ -1962,116 +2078,141 @@ export default function App() {
 
     const { formation, theme, includeOpponent, customRequest } = tacticAiModal;
     const roles = formation === '4-3-3' ? TACTIC_ROLES_433 : TACTIC_ROLES_442;
+    const nameMap = {};
+    (tacticTokens || []).forEach(t => {
+      if (t.team === 'A' && t.name) nameMap[t.id] = t.name;
+    });
     const themeLabelMap = {
-      attack: '공격 전개 및 결정력 극대화',
-      defense: '수비 블록 유지 및 공간 제어',
-      possession: '점유율 확보 및 후방 빌드업 탈압박',
-      counter: '수비 성공 후 고속 역습(Transition)',
-      pressing: '전방 압박 및 게겐프레싱 볼 탈취',
-      switch: '한쪽 측면 유인 후 반대편 측면 전환(Switch of Play)'
+      attack: '공격 전개 (상대 GK+4백+2미드필더를 허무는 박스 침투)',
+      defense: '지역 수비 블록 (상대 빌드업·AM·CF 침투 패스 차단 후 전개)',
+      possession: '점유율 확보 (상대 전방 압박 CF·윙어·CM을 벗겨내는 후방 빌드업)',
+      counter: '고속 역습 (우리 수비 진영에서 차단 직후 상대 높은 수비 뒷공간 3패스 타격)',
+      pressing: '전방 게겐프레싱 (상대 GK·4백·DM 후방 빌드업을 가두어 볼 탈취 후 즉시 득점)',
+      switch: '좌우 측면 전환 (한쪽 측면으로 상대 수비를 유인한 뒤 반대편 넓은 공간 전환 타격)'
+    };
+
+    const applyScenarioAndPlay = (finalScenario) => {
+      const firstFrame = finalScenario.frames[0];
+      setPitchType('full');
+      setSelectedTacticTemplateId('ai_generated');
+      setTacticScenarioTitle(finalScenario.title);
+      setTacticScenarioSummary(finalScenario.summary);
+      setAnimationFrames(finalScenario.frames);
+      setActiveFrameIndex(0);
+      setTacticTokens(firstFrame.tokens);
+      setDrawings(firstFrame.drawings);
+      setPastState([]);
+      setFutureState([]);
+      setTacticAiModal(prev => ({ ...prev, isOpen: false }));
+      setTimeout(() => {
+        playTacticAnimation(finalScenario.frames);
+      }, 280);
     };
 
     try {
       let generatedScenario = null;
       const cleanKey = (geminiApiKey || '').trim();
-      if (cleanKey) {
-        const prompt = `당신은 프로 축구 전술 분석가이자 감독입니다.
-포메이션: ${formation} (11명 순서 고정: ${roles.join(', ')})
+      const prompt = `당신은 프로 축구 전술 분석가이자 감독입니다.
+우리팀 포메이션: ${formation} (11명 순서 고정: ${roles.join(', ')})
 전술 상황: ${themeLabelMap[theme] || theme}
-상대 수비/압박 토큰(4명) 표시 여부: ${includeOpponent ? '포함' : '미포함'}
-사용자 추가 요청: ${customRequest?.trim() || '없음'}
+상대팀 표시 여부: ${includeOpponent ? '포함 (전술 상황에 맞는 상대 핵심 포지션 7명: 예: 공격시 GK,RB,CB,CB,LB,DM,CM / 수비·역습시 CB,CB,DM,RM,AM,LM,CF / 점유율시 CB,CB,CM,CM,RW,CF,LW)' : '미포함'}
+사용자 특별 요청사항: ${customRequest?.trim() || '없음 (전술 테마의 특징이 극대화되도록 설계)'}
 
 경기장 좌표계 규칙:
 - x: 8~92 (좌측 터치라인 8, 중앙 50, 우측 터치라인 92)
 - y: 4~94 (상대 골문 y=4, 하프라인 y=50, 우리팀 GK y=92)
-- 반드시 5단계(5컷) 연속 시나리오로 작성하세요.
+- 반드시 5단계(5컷) 연속 시나리오로 작성하고, 사용자 특별 요청사항이 있다면 선수 이동과 패스 궤적에 반드시 반영하세요.
 
-아래 JSON 형식으로만 응답하세요 (마크다운 코드블록 없이 순수 JSON):
+아래 JSON 형식으로만 응답하세요 (마크다운 없이 순수 JSON):
 {
-  "title": "전술 제목 (예: 🤖 AI ${formation} 하프스페이스 공략 전술)",
-  "summary": "전체 전술 핵심 요약 1~2문장",
+  "title": "🤖 AI ${formation} 맞춤 전술 제목",
+  "summary": "전술 핵심 요약 1~2문장",
   "steps": [
     {
       "stepTitle": "1단계: 단계 제목",
-      "coachingNote": "이 단계에서 선수들의 움직임과 패스 타이밍 코칭 설명",
+      "coachingNote": "이 단계에서 우리 선수들과 상대 포지션의 움직임 및 패스 타이밍 상세 해설 (2문장)",
       "aCoords": [[50,92],[16,72],[36,76],[64,76],[84,72],[18,48],[38,54],[62,54],[82,48],[36,26],[64,26]],
-      "ballCoord": [36,76],
-      "bCoords": [[35,34],[50,36],[65,34],[50,48]],
-      "drawings": [["pass",36,76,38,54],["arrow",18,48,18,30]]
+      "ballCoord": [38,54],
+      "bCoords": [[50,7,"GK"],[18,24,"RB"],[38,22,"CB"],[62,22,"CB"],[82,24,"LB"],[40,34,"DM"],[60,34,"CM"]],
+      "drawings": [["pass",38,54,36,26],["arrow",82,48,84,26]]
     }
   ]
 }`;
+
+      const parseAiSteps = (parsed) => {
+        if (!parsed || !Array.isArray(parsed.steps) || parsed.steps.length < 3) return null;
+        const clamp = (v, min, max) => Math.max(min, Math.min(max, Number(v) || 50));
+        const frames = parsed.steps.slice(0, 6).map((st, idx) => {
+          const aCoords = Array.from({ length: 11 }, (_, i) => {
+            const pt = st.aCoords?.[i] || [50, 50];
+            return [clamp(pt[0], 6, 94), clamp(pt[1], 6, 94)];
+          });
+          const ballCoord = st.ballCoord ? [clamp(st.ballCoord[0], 4, 96), clamp(st.ballCoord[1], 4, 96)] : aCoords[6];
+          const bCoords = includeOpponent && Array.isArray(st.bCoords)
+            ? st.bCoords.slice(0, 8).map((pt, bi) => [
+                clamp(pt[0], 6, 94),
+                clamp(pt[1], 5, 94),
+                typeof pt[2] === 'string' && pt[2].trim() ? pt[2].trim().slice(0, 3) : (bi === 0 ? 'GK' : 'DF')
+              ])
+            : [];
+          const dList = Array.isArray(st.drawings)
+            ? st.drawings.slice(0, 5).map(d => [
+                ['pass', 'arrow', 'zone'].includes(d[0]) ? d[0] : 'arrow',
+                clamp(d[1], 4, 96), clamp(d[2], 4, 96), clamp(d[3], 4, 96), clamp(d[4], 4, 96)
+              ])
+            : [];
+          return makeTacticFrame(roles, aCoords, ballCoord, dList, st.stepTitle || `${idx + 1}단계`, st.coachingNote || '', nameMap, bCoords);
+        });
+        return {
+          title: parsed.title || `🤖 AI ${formation} 맞춤 전술`,
+          summary: parsed.summary || 'AI가 설계한 5단계 맞춤 전술 시나리오입니다.',
+          frames
+        };
+      };
+
+      if (cleanKey) {
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(cleanKey)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: 'application/json', temperature: 0.4 }
+            generationConfig: { responseMimeType: 'application/json', temperature: 0.45 }
           })
         });
         if (res.ok) {
           const data = await res.json();
           const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
           const cleaned = rawText.replace(/```json|```/g, '').trim();
-          const parsed = JSON.parse(cleaned);
-          if (parsed && Array.isArray(parsed.steps) && parsed.steps.length >= 3) {
-            const clamp = (v, min, max) => Math.max(min, Math.min(max, Number(v) || 50));
-            const frames = parsed.steps.slice(0, 6).map((st, idx) => {
-              const aCoords = Array.from({ length: 11 }, (_, i) => {
-                const pt = st.aCoords?.[i] || [50, 50];
-                return [clamp(pt[0], 6, 94), clamp(pt[1], 6, 94)];
-              });
-              const ballCoord = st.ballCoord ? [clamp(st.ballCoord[0], 4, 96), clamp(st.ballCoord[1], 4, 96)] : aCoords[6];
-              const bCoords = includeOpponent && Array.isArray(st.bCoords)
-                ? st.bCoords.slice(0, 5).map(pt => [clamp(pt[0], 6, 94), clamp(pt[1], 6, 94)])
-                : [];
-              const dList = Array.isArray(st.drawings)
-                ? st.drawings.slice(0, 5).map(d => [
-                    ['pass', 'arrow', 'zone'].includes(d[0]) ? d[0] : 'arrow',
-                    clamp(d[1], 4, 96), clamp(d[2], 4, 96), clamp(d[3], 4, 96), clamp(d[4], 4, 96)
-                  ])
-                : [];
-              return makeTacticFrame(roles, aCoords, ballCoord, bCoords, dList, st.stepTitle || `${idx + 1}단계`, st.coachingNote || '');
-            });
-            generatedScenario = {
-              title: parsed.title || `🤖 AI ${formation} 맞춤 전술`,
-              summary: parsed.summary || 'AI가 설계한 단계별 전술 시나리오입니다.',
-              frames
-            };
+          generatedScenario = parseAiSteps(JSON.parse(cleaned));
+        }
+      } else {
+        try {
+          const srvRes = await fetch('/api/gps-ai-review', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt })
+          });
+          if (srvRes.ok) {
+            const srvData = await srvRes.json();
+            if (srvData?.ok && srvData?.review) {
+              generatedScenario = parseAiSteps(srvData.review);
+            }
           }
+        } catch {
+          // 로컬 개발환경 또는 서버 키 미설정 시 내장 전술 엔진 사용
         }
       }
 
       if (!generatedScenario) {
-        await new Promise(r => setTimeout(r, 450));
+        await new Promise(r => setTimeout(r, 300));
         generatedScenario = buildLocalAiTacticScenario({ formation, theme, includeOpponent, customRequest });
       }
 
-      const firstFrame = generatedScenario.frames[0];
-      setPitchType('full');
-      setSelectedTacticTemplateId('ai_generated');
-      setTacticScenarioTitle(generatedScenario.title);
-      setTacticScenarioSummary(generatedScenario.summary);
-      setAnimationFrames(generatedScenario.frames);
-      setActiveFrameIndex(0);
-      setTacticTokens(firstFrame.tokens);
-      setDrawings(firstFrame.drawings);
-      setHistory([{ tokens: firstFrame.tokens, drawings: firstFrame.drawings }]);
-      setTacticAiModal(prev => ({ ...prev, isOpen: false }));
+      applyScenarioAndPlay(generatedScenario);
     } catch (err) {
       console.error('AI tactic generation error:', err);
       const fallback = buildLocalAiTacticScenario({ formation, theme, includeOpponent, customRequest });
-      const firstFrame = fallback.frames[0];
-      setPitchType('full');
-      setSelectedTacticTemplateId('ai_generated');
-      setTacticScenarioTitle(fallback.title);
-      setTacticScenarioSummary(fallback.summary);
-      setAnimationFrames(fallback.frames);
-      setActiveFrameIndex(0);
-      setTacticTokens(firstFrame.tokens);
-      setDrawings(firstFrame.drawings);
-      setHistory([{ tokens: firstFrame.tokens, drawings: firstFrame.drawings }]);
-      setTacticAiModal(prev => ({ ...prev, isOpen: false }));
+      applyScenarioAndPlay(fallback);
     } finally {
       setIsGeneratingTacticAi(false);
     }
@@ -8946,8 +9087,8 @@ const renderGoalFlowModal = () => {
 
                     <label className="flex items-center justify-between gap-2 bg-slate-800/80 px-3 py-2 rounded-xl border border-slate-700 cursor-pointer">
                       <div className="min-w-0">
-                        <div className="text-xs font-bold text-white whitespace-nowrap">상대 수비수(4명) 함께 표시</div>
-                        <div className="text-[10px] text-slate-400 truncate">상대팀 압박 동선을 함께 시뮬레이션합니다</div>
+                        <div className="text-xs font-bold text-white whitespace-nowrap">상대팀 상황별 포지션 함께 표시</div>
+                        <div className="text-[10px] text-slate-400 truncate">전술에 맞춰 상대 GK·수비·미드필더·공격수(7명)가 함께 움직입니다</div>
                       </div>
                       <input
                         type="checkbox"
