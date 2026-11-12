@@ -1394,32 +1394,58 @@ export default function App() {
 
   const exportAnimationToVideo = async () => {
     if ((animationFrames||[]).length < 2) return; setShareModal({ isOpen: true, step: 1, data: null, file: null, imgUrl: null, isVideo: true });
-    const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = pitchType === 'full' ? 900 : 450; const ctx = canvas.getContext('2d');
+    const headerH = 82;
+    const pitchH = pitchType === 'full' ? 900 : 450;
+    const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = headerH + pitchH; const ctx = canvas.getContext('2d');
     const candidateTypes = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
     const mimeType = (typeof MediaRecorder !== 'undefined' && candidateTypes.find(t => MediaRecorder.isTypeSupported(t))) || 'video/webm';
     try {
       const stream = canvas.captureStream(30); const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2800000 }); const chunks = [];
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
       recorder.onstop = () => { const isMp4 = mimeType.includes('mp4'); const ext = isMp4 ? 'mp4' : 'webm'; const cleanMime = isMp4 ? 'video/mp4' : 'video/webm'; const blob = new Blob(chunks, { type: cleanMime }); const file = new File([blob], `tactic_animation.${ext}`, { type: cleanMime }); const url = URL.createObjectURL(blob); setShareModal(prev => ({ ...prev, step: 2, file, imgUrl: url, isVideo: true })); };
-      ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, canvas.height); recorder.start();
+      ctx.fillStyle = '#0F172A'; ctx.fillRect(0, 0, canvas.width, canvas.height); recorder.start();
       let frameIdx = 0; let progress = 0; const fps = 30; const stepsPerFrame = Math.round(fps * 1.15);
       const draw = () => {
-          ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 4;
-          if (pitchType === 'full') {
-            ctx.beginPath(); ctx.moveTo(0, canvas.height/2); ctx.lineTo(canvas.width, canvas.height/2); ctx.stroke();
-            ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height/2, 60, 0, Math.PI*2); ctx.stroke();
-            ctx.strokeRect(canvas.width * 0.2, 0, canvas.width * 0.6, canvas.height * 0.16);
-            ctx.strokeRect(canvas.width * 0.2, canvas.height * 0.84, canvas.width * 0.6, canvas.height * 0.16);
-          } else {
-            ctx.strokeRect(canvas.width * 0.2, 0, canvas.width * 0.6, canvas.height * 0.33);
-            ctx.strokeRect(canvas.width * 0.35, 0, canvas.width * 0.3, canvas.height * 0.12);
-            ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height, 70, Math.PI, 0); ctx.stroke();
-          }
           const currentFrame = animationFrames[frameIdx]; const nextFrame = animationFrames[Math.min(frameIdx + 1, animationFrames.length - 1)];
+          // 1. 상단 분리형 전술 설명 헤더 영역 (구장 화면과 완전 분리)
+          ctx.fillStyle = '#0F172A';
+          ctx.fillRect(0, 0, canvas.width, headerH);
+          ctx.strokeStyle = 'rgba(52, 211, 153, 0.45)';
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(0, headerH - 1); ctx.lineTo(canvas.width, headerH - 1); ctx.stroke();
+
+          const stepTitleText = currentFrame.stepTitle || `${frameIdx + 1}단계 / ${animationFrames.length}단계`;
+          const stepNoteText = currentFrame.coachingNote || tacticScenarioSummary || '';
+          ctx.fillStyle = '#34D399';
+          ctx.font = 'bold 15px sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`📋 ${tacticScenarioTitle || 'MATCHBOARD 전술 보드'}  ·  ${stepTitleText}`, 18, 26);
+          if (stepNoteText) {
+            ctx.fillStyle = '#FDE68A';
+            ctx.font = 'bold 14px sans-serif';
+            ctx.fillText(stepNoteText.slice(0, 45), 18, 56);
+          }
+
+          // 2. 하단 구장 및 선수/화살표 렌더링 영역 (y = headerH 부터 시작)
+          ctx.save();
+          ctx.translate(0, headerH);
+          ctx.beginPath(); ctx.rect(0, 0, canvas.width, pitchH); ctx.clip();
+          ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, pitchH); ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 4;
+          if (pitchType === 'full') {
+            ctx.beginPath(); ctx.moveTo(0, pitchH/2); ctx.lineTo(canvas.width, pitchH/2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(canvas.width/2, pitchH/2, 60, 0, Math.PI*2); ctx.stroke();
+            ctx.strokeRect(canvas.width * 0.2, 0, canvas.width * 0.6, pitchH * 0.16);
+            ctx.strokeRect(canvas.width * 0.2, pitchH * 0.84, canvas.width * 0.6, pitchH * 0.16);
+          } else {
+            ctx.strokeRect(canvas.width * 0.2, 0, canvas.width * 0.6, pitchH * 0.33);
+            ctx.strokeRect(canvas.width * 0.35, 0, canvas.width * 0.3, pitchH * 0.12);
+            ctx.beginPath(); ctx.arc(canvas.width/2, pitchH, 70, Math.PI, 0); ctx.stroke();
+          }
           (currentFrame.drawings || []).forEach(d => {
               if(d.type === 'arrow' || d.type === 'pass') {
-                const x1 = (d.start.x/100)*canvas.width; const y1 = (d.start.y/100)*canvas.height;
-                const x2 = (d.end.x/100)*canvas.width; const y2 = (d.end.y/100)*canvas.height;
+                const x1 = (d.start.x/100)*canvas.width; const y1 = (d.start.y/100)*pitchH;
+                const x2 = (d.end.x/100)*canvas.width; const y2 = (d.end.y/100)*pitchH;
                 const color = d.type === 'arrow' ? '#FACC15' : '#38BDF8';
                 ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 4;
                 if(d.type==='pass') ctx.setLineDash([10, 8]); else ctx.setLineDash([]);
@@ -1430,35 +1456,18 @@ export default function App() {
                 ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
                 ctx.closePath(); ctx.fill();
               } 
-              else if(d.type === 'zone') { ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; ctx.strokeStyle = '#3B82F6'; ctx.lineWidth = 3; const x = Math.min(d.start.x, d.end.x)/100 * canvas.width; const y = Math.min(d.start.y, d.end.y)/100 * canvas.height; const w = Math.abs(d.start.x - d.end.x)/100 * canvas.width; const h = Math.abs(d.start.y - d.end.y)/100 * canvas.height; ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h); }
+              else if(d.type === 'zone') { ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; ctx.strokeStyle = '#3B82F6'; ctx.lineWidth = 3; const x = Math.min(d.start.x, d.end.x)/100 * canvas.width; const y = Math.min(d.start.y, d.end.y)/100 * pitchH; const w = Math.abs(d.start.x - d.end.x)/100 * canvas.width; const h = Math.abs(d.start.y - d.end.y)/100 * pitchH; ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h); }
           });
           (currentFrame.tokens || []).forEach(t1 => {
               const t2 = (nextFrame.tokens || []).find(t => t.id === t1.id) || t1; const t = Math.min(1, progress / stepsPerFrame); const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-              const x = t1.x + (t2.x - t1.x) * ease; const y = t1.y + (t2.y - t1.y) * ease; const px = (x / 100) * canvas.width; const py = (y / 100) * canvas.height;
+              const x = t1.x + (t2.x - t1.x) * ease; const y = t1.y + (t2.y - t1.y) * ease; const px = (x / 100) * canvas.width; const py = (y / 100) * pitchH;
               if(t1.team === 'ball') { ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#000000'; ctx.font = '18px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('⚽', px, py); } 
               else {
                   ctx.fillStyle = t1.team === 'A' ? '#DC2626' : '#2563EB'; ctx.beginPath(); ctx.arc(px, py, 22, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = t1.team === 'A' ? '#991B1B' : '#1E40AF'; ctx.lineWidth = 3; ctx.stroke(); ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t1.position || '', px, py);
                   if (t1.name) { ctx.font = 'bold 12px sans-serif'; const textWidth = ctx.measureText(t1.name).width; const rectWidth = textWidth + 16; const rectHeight = 20; const rectY = py + 32; ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(px - rectWidth/2, rectY - rectHeight/2, rectWidth, rectHeight, 10); else ctx.rect(px - rectWidth/2, rectY - rectHeight/2, rectWidth, rectHeight); ctx.fill(); ctx.fillStyle = '#FFFFFF'; ctx.fillText(t1.name, px, rectY); }
               }
           });
-          // 상단 전술 타이틀 & 단계별 코칭 자막 배너 렌더링
-          const stepTitleText = currentFrame.stepTitle || `${frameIdx + 1}단계 / ${animationFrames.length}단계`;
-          const stepNoteText = currentFrame.coachingNote || tacticScenarioTitle || '';
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.86)';
-          ctx.fillRect(16, 14, canvas.width - 32, stepNoteText ? 64 : 40);
-          ctx.strokeStyle = 'rgba(52, 211, 153, 0.65)';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(16, 14, canvas.width - 32, stepNoteText ? 64 : 40);
-          ctx.fillStyle = '#34D399';
-          ctx.font = 'bold 15px sans-serif';
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(`📋 ${tacticScenarioTitle || 'MATCHBOARD 전술 보드'}  |  ${stepTitleText}`, 28, 33);
-          if (stepNoteText) {
-            ctx.fillStyle = '#F8FAFC';
-            ctx.font = 'bold 14px sans-serif';
-            ctx.fillText(stepNoteText.slice(0, 44), 28, 58);
-          }
+          ctx.restore();
 
           progress++; if (progress > stepsPerFrame) { progress = 0; frameIdx++; }
           if (frameIdx < animationFrames.length - 1 || (frameIdx === animationFrames.length - 1 && progress < fps * 0.75)) { setTimeout(draw, 1000 / fps); } else { setTimeout(() => recorder.stop(), 200); }
@@ -8704,61 +8713,6 @@ const renderGoalFlowModal = () => {
                 </button>
               </div>
 
-              {/* 3.5단: 단계별 프레임 선택 타임라인 & 전술 수정 바 (템플릿/녹화 컷이 있을 때 표시) */}
-              {(animationFrames || []).length > 0 && (
-                <div className="bg-slate-900/95 rounded-xl p-1.5 border border-emerald-500/30 space-y-1.5">
-                  <div className="flex items-center justify-between gap-1 overflow-x-auto hide-scrollbar">
-                    <div className="flex items-center gap-1 min-w-0">
-                      {animationFrames.map((fr, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => selectTacticFrame(idx)}
-                          className={`h-6 px-2 rounded-md text-[10px] font-black transition shrink-0 flex items-center gap-1 ${activeFrameIndex === idx ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
-                        >
-                          <span>{idx + 1}컷</span>
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={duplicateCurrentTacticFrame}
-                        disabled={isPlaying}
-                        className="h-6 px-2 rounded-md bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 text-[10px] font-bold transition disabled:opacity-40 whitespace-nowrap"
-                        title="현재 컷을 복제하여 다음 단계 추가"
-                      >
-                        +컷추가
-                      </button>
-                      {animationFrames.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={deleteCurrentTacticFrame}
-                          disabled={isPlaying}
-                          className="h-6 px-1.5 rounded-md bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-300 border border-slate-700 text-[10px] font-bold transition disabled:opacity-40 whitespace-nowrap"
-                          title="현재 선택된 컷 삭제"
-                        >
-                          컷삭제
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 bg-slate-950/90 px-2 py-1 rounded-lg border border-slate-800">
-                    <span className="text-[10px] font-black text-amber-400 shrink-0 whitespace-nowrap">
-                      {animationFrames[activeFrameIndex]?.stepTitle || `${activeFrameIndex + 1}단계`}
-                    </span>
-                    <input
-                      type="text"
-                      value={animationFrames[activeFrameIndex]?.coachingNote || ''}
-                      onChange={(e) => updateCurrentFrameCoachingNote(e.target.value)}
-                      disabled={isPlaying}
-                      placeholder="이 컷의 전술 움직임/코칭 설명을 입력하세요 (영상 상단 자막에 표시됨)"
-                      className="flex-1 min-w-0 bg-transparent text-[11px] font-bold text-slate-200 outline-none placeholder:text-slate-600"
-                    />
-                  </div>
-                </div>
-              )}
-
               {/* 4단: 드로잉 도구 탭 */}
               <div className="grid grid-cols-5 bg-slate-900 rounded-xl p-1 border border-slate-700/80 gap-1">
                 <button onClick={() => setCurrentTool('move')} className={`h-8 px-1 rounded-lg flex items-center justify-center gap-1 transition whitespace-nowrap ${currentTool === 'move' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}><MousePointer size={13} className="shrink-0"/><span className="text-[11px] font-bold">이동</span></button>
@@ -8768,6 +8722,66 @@ const renderGoalFlowModal = () => {
                 <button onClick={() => setCurrentTool('erase')} className={`h-8 px-1 rounded-lg flex items-center justify-center gap-1 transition whitespace-nowrap ${currentTool === 'erase' ? 'bg-red-500/90 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}><XCircle size={13} className="shrink-0"/><span className="text-[11px] font-bold">지우기</span></button>
               </div>
             </div>
+
+            {/* 구장 외부 분리형 전술 단계 타임라인 & 코칭 설명 패널 (선수 아이콘 가림 방지) */}
+            {(animationFrames || []).length > 0 && animationFrames[activeFrameIndex] && (
+              <div className="bg-slate-900/95 border border-emerald-500/40 rounded-2xl p-2.5 mb-2 shrink-0 shadow-md space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                      STEP {activeFrameIndex + 1}/{animationFrames.length}
+                    </span>
+                    <span className="text-xs font-black text-emerald-400 truncate">
+                      {animationFrames[activeFrameIndex].stepTitle || `${activeFrameIndex + 1}단계`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {animationFrames.map((fr, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => selectTacticFrame(idx)}
+                        className={`h-6 px-2 rounded-md text-[10px] font-black transition shrink-0 ${activeFrameIndex === idx ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                      >
+                        {idx + 1}컷
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={duplicateCurrentTacticFrame}
+                      disabled={isPlaying}
+                      className="h-6 px-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 text-[10px] font-bold transition disabled:opacity-40 whitespace-nowrap"
+                      title="현재 컷을 복제하여 다음 단계 추가"
+                    >
+                      +추가
+                    </button>
+                    {animationFrames.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={deleteCurrentTacticFrame}
+                        disabled={isPlaying}
+                        className="h-6 px-1.5 rounded-md bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-300 border border-slate-700 text-[10px] font-bold transition disabled:opacity-40 whitespace-nowrap"
+                        title="현재 선택된 컷 삭제"
+                      >
+                        삭제
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/90 border border-slate-800 rounded-xl px-2.5 py-1.5 flex items-center gap-2">
+                  <span className="text-[11px] shrink-0">💡</span>
+                  <input
+                    type="text"
+                    value={animationFrames[activeFrameIndex]?.coachingNote || ''}
+                    onChange={(e) => updateCurrentFrameCoachingNote(e.target.value)}
+                    disabled={isPlaying}
+                    placeholder="이 단계의 전술 설명/코칭 포인트를 입력하세요 (클릭하여 수정 가능)"
+                    className="flex-1 min-w-0 bg-transparent text-xs font-bold text-amber-200 outline-none placeholder:text-slate-600"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="w-full flex justify-center items-center relative py-1 shrink-0">
               <div 
@@ -8790,24 +8804,6 @@ const renderGoalFlowModal = () => {
                     <div className="absolute top-0 left-1/2 w-32 h-32 border-2 border-white/60 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
                     <div className="absolute bottom-0 left-1/2 w-[70%] h-[40%] border-2 border-b-0 border-white/60 -translate-x-1/2 pointer-events-none"></div>
                   </>
-                )}
-
-                {(animationFrames || []).length > 0 && animationFrames[activeFrameIndex] && (
-                  <div className="absolute top-1.5 left-1.5 right-1.5 z-40 pointer-events-none bg-slate-950/85 backdrop-blur-sm border border-emerald-500/40 rounded-lg px-2.5 py-1.5 shadow-lg">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] font-black text-emerald-400 truncate">
-                        {tacticScenarioTitle || '전술 시나리오'} · {animationFrames[activeFrameIndex].stepTitle || `${activeFrameIndex + 1}단계`}
-                      </span>
-                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 shrink-0">
-                        STEP {activeFrameIndex + 1}/{animationFrames.length}
-                      </span>
-                    </div>
-                    {animationFrames[activeFrameIndex].coachingNote && (
-                      <p className="text-[10px] font-bold text-amber-200 mt-0.5 leading-snug line-clamp-2">
-                        {animationFrames[activeFrameIndex].coachingNote}
-                      </p>
-                    )}
-                  </div>
                 )}
 
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
