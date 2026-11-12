@@ -307,10 +307,22 @@ export default function App() {
   const [tokenEditModal, setTokenEditModal] = useState({ isOpen: false, token: null });
   
   const [animationFrames, setAnimationFrames] = useState([]);
+  const [activeFrameIndex, setActiveFrameIndex] = useState(0);
+  const [selectedTacticTemplateId, setSelectedTacticTemplateId] = useState('442_base');
+  const [tacticScenarioTitle, setTacticScenarioTitle] = useState('4-4-2 기본 스탠다드 대형');
+  const [tacticScenarioSummary, setTacticScenarioSummary] = useState('');
+  const [tacticAiModal, setTacticAiModal] = useState({
+    isOpen: false,
+    formation: '4-3-3',
+    theme: 'attack',
+    includeOpponent: false,
+    customRequest: ''
+  });
+  const [isGeneratingTacticAi, setIsGeneratingTacticAi] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAutoRecording, setIsAutoRecording] = useState(false); 
   
-  const playbackRef = useRef(null); const boardRef = useRef(null); const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 }); const dragStartTokensRef = useRef(null); const activeDrawingData = useRef(null); const svgArrowRef = useRef(null); const svgPassRef = useRef(null); const svgZoneRef = useRef(null);
+  const playbackRef = useRef(null); const playbackTimerRef = useRef(null); const boardRef = useRef(null); const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 }); const dragStartTokensRef = useRef(null); const activeDrawingData = useRef(null); const svgArrowRef = useRef(null); const svgPassRef = useRef(null); const svgZoneRef = useRef(null);
 
   // GPS 분석 및 트래커 상태
   const [gpsSession, setGpsSession] = useState(null);
@@ -1291,9 +1303,35 @@ export default function App() {
   };
 
   const saveHistory = (newTokens, newDrawings = drawings) => {
-    setPastState(prev => [...prev, { tokens: tacticTokens || [], drawings: drawings || [] }].slice(-20)); setFutureState([]);
-    setTacticTokens(newTokens || []); if(newDrawings) setDrawings(newDrawings || []);
-    if (isAutoRecording) setAnimationFrames(prev => [...prev, { tokens: JSON.parse(JSON.stringify(newTokens || [])), drawings: JSON.parse(JSON.stringify(newDrawings || [])) }]);
+    const safeTokens = JSON.parse(JSON.stringify(newTokens || []));
+    const safeDrawings = JSON.parse(JSON.stringify(newDrawings || []));
+    setPastState(prev => [...prev, { tokens: tacticTokens || [], drawings: drawings || [] }].slice(-20));
+    setFutureState([]);
+    setTacticTokens(safeTokens);
+    setDrawings(safeDrawings);
+    if (isAutoRecording) {
+      setAnimationFrames(prev => {
+        const next = [
+          ...prev,
+          {
+            stepTitle: `${prev.length + 1}컷: 동작 진행`,
+            coachingNote: `${prev.length + 1}단계 선수 및 볼 이동`,
+            tokens: safeTokens,
+            drawings: safeDrawings
+          }
+        ];
+        setActiveFrameIndex(next.length - 1);
+        return next;
+      });
+    } else if ((animationFrames || []).length > 0) {
+      setAnimationFrames(prev =>
+        prev.map((frame, idx) =>
+          idx === activeFrameIndex
+            ? { ...frame, tokens: safeTokens, drawings: safeDrawings }
+            : frame
+        )
+      );
+    }
   };
 
   const handleBoardPointerDown = (e) => {
@@ -1360,11 +1398,11 @@ export default function App() {
     const candidateTypes = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
     const mimeType = (typeof MediaRecorder !== 'undefined' && candidateTypes.find(t => MediaRecorder.isTypeSupported(t))) || 'video/webm';
     try {
-      const stream = canvas.captureStream(30); const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 }); const chunks = [];
+      const stream = canvas.captureStream(30); const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2800000 }); const chunks = [];
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
       recorder.onstop = () => { const isMp4 = mimeType.includes('mp4'); const ext = isMp4 ? 'mp4' : 'webm'; const cleanMime = isMp4 ? 'video/mp4' : 'video/webm'; const blob = new Blob(chunks, { type: cleanMime }); const file = new File([blob], `tactic_animation.${ext}`, { type: cleanMime }); const url = URL.createObjectURL(blob); setShareModal(prev => ({ ...prev, step: 2, file, imgUrl: url, isVideo: true })); };
       ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, canvas.height); recorder.start();
-      let frameIdx = 0; let progress = 0; const fps = 30; const stepsPerFrame = fps * 0.5; 
+      let frameIdx = 0; let progress = 0; const fps = 30; const stepsPerFrame = Math.round(fps * 1.15);
       const draw = () => {
           ctx.fillStyle = '#047857'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 4;
           if (pitchType === 'full') {
@@ -1378,7 +1416,7 @@ export default function App() {
             ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height, 70, Math.PI, 0); ctx.stroke();
           }
           const currentFrame = animationFrames[frameIdx]; const nextFrame = animationFrames[Math.min(frameIdx + 1, animationFrames.length - 1)];
-          currentFrame.drawings.forEach(d => {
+          (currentFrame.drawings || []).forEach(d => {
               if(d.type === 'arrow' || d.type === 'pass') {
                 const x1 = (d.start.x/100)*canvas.width; const y1 = (d.start.y/100)*canvas.height;
                 const x2 = (d.end.x/100)*canvas.width; const y2 = (d.end.y/100)*canvas.height;
@@ -1394,8 +1432,8 @@ export default function App() {
               } 
               else if(d.type === 'zone') { ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; ctx.strokeStyle = '#3B82F6'; ctx.lineWidth = 3; const x = Math.min(d.start.x, d.end.x)/100 * canvas.width; const y = Math.min(d.start.y, d.end.y)/100 * canvas.height; const w = Math.abs(d.start.x - d.end.x)/100 * canvas.width; const h = Math.abs(d.start.y - d.end.y)/100 * canvas.height; ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h); }
           });
-          currentFrame.tokens.forEach(t1 => {
-              const t2 = nextFrame.tokens.find(t => t.id === t1.id) || t1; const t = progress / stepsPerFrame; const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+          (currentFrame.tokens || []).forEach(t1 => {
+              const t2 = (nextFrame.tokens || []).find(t => t.id === t1.id) || t1; const t = Math.min(1, progress / stepsPerFrame); const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
               const x = t1.x + (t2.x - t1.x) * ease; const y = t1.y + (t2.y - t1.y) * ease; const px = (x / 100) * canvas.width; const py = (y / 100) * canvas.height;
               if(t1.team === 'ball') { ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#000000'; ctx.font = '18px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('⚽', px, py); } 
               else {
@@ -1403,11 +1441,613 @@ export default function App() {
                   if (t1.name) { ctx.font = 'bold 12px sans-serif'; const textWidth = ctx.measureText(t1.name).width; const rectWidth = textWidth + 16; const rectHeight = 20; const rectY = py + 32; ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(px - rectWidth/2, rectY - rectHeight/2, rectWidth, rectHeight, 10); else ctx.rect(px - rectWidth/2, rectY - rectHeight/2, rectWidth, rectHeight); ctx.fill(); ctx.fillStyle = '#FFFFFF'; ctx.fillText(t1.name, px, rectY); }
               }
           });
+          // 상단 전술 타이틀 & 단계별 코칭 자막 배너 렌더링
+          const stepTitleText = currentFrame.stepTitle || `${frameIdx + 1}단계 / ${animationFrames.length}단계`;
+          const stepNoteText = currentFrame.coachingNote || tacticScenarioTitle || '';
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.86)';
+          ctx.fillRect(16, 14, canvas.width - 32, stepNoteText ? 64 : 40);
+          ctx.strokeStyle = 'rgba(52, 211, 153, 0.65)';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(16, 14, canvas.width - 32, stepNoteText ? 64 : 40);
+          ctx.fillStyle = '#34D399';
+          ctx.font = 'bold 15px sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`📋 ${tacticScenarioTitle || 'MATCHBOARD 전술 보드'}  |  ${stepTitleText}`, 28, 33);
+          if (stepNoteText) {
+            ctx.fillStyle = '#F8FAFC';
+            ctx.font = 'bold 14px sans-serif';
+            ctx.fillText(stepNoteText.slice(0, 44), 28, 58);
+          }
+
           progress++; if (progress > stepsPerFrame) { progress = 0; frameIdx++; }
-          if (frameIdx < animationFrames.length - 1 || (frameIdx === animationFrames.length - 1 && progress < fps * 0.5)) { setTimeout(draw, 1000 / fps); } else { setTimeout(() => recorder.stop(), 200); }
+          if (frameIdx < animationFrames.length - 1 || (frameIdx === animationFrames.length - 1 && progress < fps * 0.75)) { setTimeout(draw, 1000 / fps); } else { setTimeout(() => recorder.stop(), 200); }
       };
       setTimeout(draw, 100);
     } catch(e) { setSystemAlert({ isOpen: true, message: '비디오 추출을 지원하지 않는 브라우저입니다.\n캡처 버튼을 이용해주세요.' }); setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false }); }
+  };
+
+  // ================= 4-4-2 & 4-3-3 전술 템플릿 · 프레임 편집 · AI 전술 생성 엔진 =================
+  const TACTIC_TOKEN_IDS = ['A_GK', 'A_LB', 'A_CB1', 'A_CB2', 'A_RB', 'A_LM', 'A_CM1', 'A_CM2', 'A_RM', 'A_FW1', 'A_FW2'];
+  const TACTIC_ROLES_442 = ['GK', 'LB', 'CB', 'CB', 'RB', 'LM', 'CM', 'CM', 'RM', 'FW', 'FW'];
+  const TACTIC_ROLES_433 = ['GK', 'LB', 'CB', 'CB', 'RB', 'DM', 'CM', 'CM', 'LW', 'CF', 'RW'];
+
+  const TACTIC_PRESET_OPTIONS = [
+    { id: '442_base', group: '4-4-2', label: '[4-4-2] 기본 스탠다드 대형 (1컷)', formation: '4-4-2', theme: 'base' },
+    { id: '442_attack_counter', group: '4-4-2', label: '[4-4-2 공격] 투톱 포스트플레이 & 얼리크로스 (5컷)', formation: '4-4-2', theme: 'attack' },
+    { id: '442_defense_block', group: '4-4-2', label: '[4-4-2 수비] 두 줄 4+4 블록 & 측면 가두기 압박 (5컷)', formation: '4-4-2', theme: 'defense' },
+    { id: '442_possession_diamond', group: '4-4-2', label: '[4-4-2 점유율] 다이아몬드(4-1-2-1-2) 중원 우위 (5컷)', formation: '4-4-2', theme: 'possession' },
+    { id: '433_base', group: '4-3-3', label: '[4-3-3] 기본 스탠다드 대형 (1컷)', formation: '4-3-3', theme: 'base' },
+    { id: '433_possession_buildup', group: '4-3-3', label: '[4-3-3 점유율] 라볼피아나(3-2 빌드업) & 후방 순환 (5컷)', formation: '4-3-3', theme: 'possession' },
+    { id: '433_attack_halfspace', group: '4-3-3', label: '[4-3-3 공격] 메짤라 하프스페이스 침투 & 컷백 (5컷)', formation: '4-3-3', theme: 'attack' },
+    { id: '433_defense_gegenpress', group: '4-3-3', label: '[4-3-3 수비] 전방 게겐프레싱 & 하이 라인 탈취 (5컷)', formation: '4-3-3', theme: 'defense' }
+  ];
+
+  const rawCustomTacticsMemo = memos?.['__custom_tactics__'];
+  const savedCustomTactics = useMemo(() => {
+    if (!rawCustomTacticsMemo) return [];
+    try {
+      const parsed = typeof rawCustomTacticsMemo === 'string' ? JSON.parse(rawCustomTacticsMemo) : rawCustomTacticsMemo;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [rawCustomTacticsMemo]);
+
+  const makeTacticFrame = (formation, aCoords, ballCoord, rawDrawings, stepTitle, coachingNote, nameMap = {}, bCoords = []) => {
+    const roles = formation === '4-3-3' ? TACTIC_ROLES_433 : TACTIC_ROLES_442;
+    const tokens = aCoords.map((pt, idx) => {
+      const id = TACTIC_TOKEN_IDS[idx] || `A_P${idx}`;
+      return {
+        id,
+        position: roles[idx] || 'CM',
+        name: nameMap[id] || '',
+        x: pt[0],
+        y: pt[1],
+        team: 'A'
+      };
+    });
+    bCoords.forEach((pt, idx) => {
+      tokens.push({
+        id: `B_OPP_${idx + 1}`,
+        position: pt[2] || 'DF',
+        name: '',
+        x: pt[0],
+        y: pt[1],
+        team: 'B'
+      });
+    });
+    tokens.push({ id: 'ball', label: '⚽', x: ballCoord[0], y: ballCoord[1], team: 'ball' });
+    const drawingsList = (rawDrawings || []).map((d, i) => ({
+      id: `d_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 5)}`,
+      type: d[0],
+      start: { x: d[1], y: d[2] },
+      end: { x: d[3], y: d[4] }
+    }));
+    return { stepTitle, coachingNote, tokens, drawings: drawingsList };
+  };
+
+  const buildTacticPresetScenario = (templateId, existingTokens = []) => {
+    const nameMap = {};
+    (existingTokens || []).forEach(t => {
+      if (t.team === 'A' && t.name) nameMap[t.id] = t.name;
+    });
+
+    if (templateId === '442_base') {
+      const f1 = makeTacticFrame(
+        '4-4-2',
+        [[50,92],[18,76],[38,78],[62,78],[82,76],[18,56],[38,58],[62,58],[82,56],[37,38],[63,38]],
+        [50, 58],
+        [],
+        '1컷: 4-4-2 기본 대형',
+        '공수 밸런스가 가장 안정적인 4백 + 4미드필더 + 투톱 표준 배치입니다.',
+        nameMap
+      );
+      return { title: '4-4-2 기본 스탠다드 대형', summary: '4백과 4미드필더 두 줄 간격을 유지하며 공수 균형을 잡는 기본 전술입니다.', frames: [f1] };
+    }
+
+    if (templateId === '433_base') {
+      const f1 = makeTacticFrame(
+        '4-3-3',
+        [[50,92],[18,76],[38,78],[62,78],[82,76],[50,64],[34,52],[66,52],[18,36],[50,32],[82,36]],
+        [50, 64],
+        [],
+        '1컷: 4-3-3 기본 대형',
+        '1명의 수비형 미드필더(DM)와 2명의 메짤라(CM), 좌우 윙포워드(LW·RW)로 구성된 표준 배치입니다.',
+        nameMap
+      );
+      return { title: '4-3-3 기본 스탠다드 대형', summary: '중원 역삼각형(1DM+2CM)과 넓은 스리톱으로 공격과 압박에 유리한 기본 전술입니다.', frames: [f1] };
+    }
+
+    if (templateId === '442_attack_counter') {
+      return {
+        title: '4-4-2 투톱 포스트플레이 & 우측 얼리크로스 공격',
+        summary: '중원에서 타겟형 스트라이커(FW1)에게 볼을 투입해 수비를 끌어낸 뒤, 원터치 레이오프와 우측 윙어(RM) 침투 후 얼리크로스로 마무리합니다.',
+        frames: [
+          makeTacticFrame('4-4-2', [[50,92],[18,74],[38,76],[62,76],[82,74],[18,54],[40,58],[60,56],[82,52],[38,40],[62,38]], [40,58], [['pass',40,58,38,43],['arrow',82,52,85,34]], '1컷: 중원 볼 확보 & 침투 시동', 'CM1이 볼을 잡고 FW1에게 전진 패스를 준비하며 우측 RM이 측면 공간으로 스프린트를 시작합니다.', nameMap),
+          makeTacticFrame('4-4-2', [[50,90],[20,68],[39,72],[61,72],[82,64],[20,46],[42,52],[58,48],[85,36],[38,43],[64,33]], [38,43], [['pass',38,43,58,46],['arrow',64,33,62,22],['arrow',85,36,86,22]], '2컷: FW1 포스트플레이 & 원터치 레이오프', 'FW1이 등지며 볼을 받아 전진하는 CM2에게 원터치로 내주고, FW2와 RM은 상대 뒷공간을 허뭅니다.', nameMap),
+          makeTacticFrame('4-4-2', [[50,88],[22,62],[40,68],[60,68],[84,54],[22,38],[44,46],[58,45],[86,23],[40,32],[60,24]], [58,45], [['pass',58,45,86,21],['arrow',40,32,38,16],['arrow',60,24,55,14]], '3컷: 우측 침투 공간 스루패스 전개', 'CM2가 논스톱으로 우측 측면의 RM 앞 공간에 스루패스를 찔러 넣고 투톱이 박스 안으로 쇄도합니다.', nameMap),
+          makeTacticFrame('4-4-2', [[50,86],[24,58],[41,64],[59,64],[82,46],[25,30],[45,40],[60,36],[86,19],[38,16],[55,14]], [86,19], [['pass',86,19,53,12],['arrow',55,14,52,11],['arrow',38,16,42,12]], '4컷: RM 고속 돌파 후 얼리크로스', 'RM이 우측 하프스페이스에서 골문 앞 쇄도하는 투톱을 향해 날카로운 얼리크로스를 올립니다.', nameMap),
+          makeTacticFrame('4-4-2', [[50,86],[25,56],[42,62],[58,62],[80,44],[28,24],[46,36],[60,32],[84,18],[42,12],[52,11]], [50,4], [['pass',52,11,50,4]], '5컷: 박스 안 논스톱 슈팅 득점!', '니어포스트를 잘라 들어간 FW2가 원터치 논스톱 슈팅으로 골망을 흔듭니다.', nameMap)
+        ]
+      };
+    }
+
+    if (templateId === '442_defense_block') {
+      return {
+        title: '4-4-2 두 줄 수비(4+4 블록) & 측면 트랩 압박',
+        summary: '수비 시 4백과 4미드필더 간격을 촘촘히 좁혀 중앙을 완벽히 차단하고, 상대를 측면으로 몰아넣어 협력 압박으로 볼을 탈취합니다.',
+        frames: [
+          makeTacticFrame('4-4-2', [[50,93],[24,78],[41,80],[59,80],[76,78],[24,64],[42,66],[58,66],[76,64],[42,50],[58,50]], [50,30], [['zone',30,52,70,78],['arrow',42,50,46,36]], '1컷: 중앙 4+4 컴팩트 두 줄 블록 형성', '수비-미드필드 간격을 좁혀 중앙 패스 경로를 닫고 FW1이 상대 센터백을 압박합니다.', nameMap, [[50,30,'CB'],[20,38,'RB'],[80,38,'LB'],[50,46,'DM']]),
+          makeTacticFrame('4-4-2', [[48,92],[20,77],[37,79],[55,79],[72,77],[18,62],[36,64],[53,65],[70,64],[44,36],[54,48]], [20,38], [['pass',50,30,20,38],['arrow',18,62,18,44],['arrow',36,64,26,48]], '2컷: 상대 볼 측면 유도 (사이드 트랩)', 'FW1이 곡선 주행으로 중앙을 막아 상대가 좌측 풀백 쪽으로 패스하도록 유도합니다.', nameMap, [[50,30,'CB'],[20,38,'RB'],[80,38,'LB'],[45,46,'DM']]),
+          makeTacticFrame('4-4-2', [[46,92],[16,74],[33,77],[51,78],[68,77],[17,44],[28,48],[48,60],[66,62],[36,36],[48,44]], [18,41], [['zone',8,34,34,54],['arrow',16,74,16,56],['arrow',28,48,20,42]], '3컷: 전원 좌측 시프트 & 삼각 가두기 압박', '볼이 측면으로 이동한 순간 LM·CM1·LB가 일제히 좁혀들어 측면 감옥(Pressing Trap)을 완성합니다.', nameMap, [[46,30,'CB'],[18,41,'RB'],[78,38,'LB'],[38,45,'DM']]),
+          makeTacticFrame('4-4-2', [[46,92],[16,66],[33,75],[51,76],[68,75],[18,41],[24,43],[46,56],[66,58],[36,34],[54,36]], [23,42], [['pass',23,42,56,28],['arrow',54,36,56,24]], '4컷: 더블팀 볼 탈취 & 역습 스타트', 'LM과 CM1이 협력 압박으로 공을 완벽히 빼앗고, 반대편 FW2가 상대 뒷공간으로 즉시 침투합니다.', nameMap, [[46,32,'CB'],[16,42,'RB'],[76,40,'LB'],[36,46,'DM']]),
+          makeTacticFrame('4-4-2', [[48,90],[20,62],[36,70],[54,70],[70,66],[22,34],[32,40],[50,46],[72,42],[40,26],[56,22]], [56,22], [['arrow',56,22,52,10],['arrow',72,42,76,22]], '5컷: 탈취 즉시 전방 전환 패스 성공', '탈취 직후 전방의 FW2에게 다이렉트 패스가 연결되며 순식간에 1:1 역습 찬스로 전환됩니다.', nameMap, [[48,28,'CB'],[20,44,'RB'],[72,34,'LB'],[38,44,'DM']])
+        ]
+      };
+    }
+
+    if (templateId === '442_possession_diamond') {
+      return {
+        title: '4-4-2 다이아몬드(4-1-2-1-2) 중원 점유 빌드업',
+        summary: '미드필더 4명을 마름모(DM-좌우CM-AM)로 배치해 중원 수적 우위(4v3)를 점하고 짧은 삼각 패스로 상대 압박을 벗겨냅니다.',
+        frames: [
+          makeTacticFrame('4-4-2', [[50,92],[16,70],[36,80],[64,80],[84,70],[32,56],[50,68],[50,44],[68,56],[36,30],[64,30]], [36,80], [['pass',36,80,50,68],['zone',30,42,70,70]], '1컷: 중원 다이아몬드(마름모) 대형 구축', 'CM1이 수비형(6번), CM2가 공격형(10번)으로 서고 LM·RM이 안쪽으로 좁혀 중원 마름모 블록을 형성합니다.', nameMap),
+          makeTacticFrame('4-4-2', [[50,90],[14,60],[34,78],[66,78],[86,60],[34,52],[50,66],[50,42],[66,52],[34,28],[66,28]], [50,66], [['pass',50,66,66,52],['arrow',86,60,88,40]], '2컷: 후방 삼각형 순환 & 우측 메짤라 전진 패스', '중앙의 DM이 압박을 끌고 우측 하프스페이스의 RM에게 볼을 전개하며 양 풀백이 높게 전진합니다.', nameMap),
+          makeTacticFrame('4-4-2', [[50,88],[14,52],[36,74],[64,74],[88,42],[34,48],[48,60],[50,38],[66,50],[32,26],[68,26]], [66,50], [['pass',66,50,50,38],['arrow',14,52,14,34]], '3컷: 마름모 꼭짓점(AM) 원터치 연결', 'RM이 전방 꼭짓점에 위치한 공격형 미드필더(AM)에게 찔러주어 상대 중원 라인을 완벽히 돌파합니다.', nameMap),
+          makeTacticFrame('4-4-2', [[50,86],[14,36],[38,68],[62,68],[86,36],[32,42],[48,54],[50,36],[68,42],[28,22],[70,22]], [50,36], [['pass',50,36,36,16],['arrow',28,22,36,15],['arrow',70,22,62,15]], '4컷: 투톱 수비 균열 & 킬패스 공급', '투톱이 좌우로 벌렸다가 대각선으로 침투하는 순간 AM이 수비 사이로 결정적 스루패스를 공급합니다.', nameMap),
+          makeTacticFrame('4-4-2', [[50,86],[16,34],[40,66],[60,66],[84,34],[34,38],[50,50],[50,32],[66,38],[36,14],[62,14]], [50,4], [['pass',36,14,50,4]], '5컷: 박스 침투 후 침착한 마무리', '점유율을 통해 상대 수비 간격을 무너뜨린 뒤 FW1이 골키퍼와 1:1 찬스를 득점으로 연결합니다.', nameMap)
+        ]
+      };
+    }
+
+    if (templateId === '433_possession_buildup') {
+      return {
+        title: '4-3-3 라볼피아나(3-2 후방 빌드업) & 점유율 확보',
+        summary: '수비형 미드필더(DM)가 두 센터백 사이로 내려와 후방 3백을 형성하고, 양 풀백과 메짤라가 중원을 장악해 안정적으로 점유율을 확보합니다.',
+        frames: [
+          makeTacticFrame('4-3-3', [[50,92],[16,74],[34,82],[66,82],[84,74],[50,66],[36,52],[64,52],[16,36],[50,30],[84,36]], [50,92], [['arrow',50,66,50,80],['arrow',34,82,24,80],['arrow',66,82,76,80]], '1컷: 센터백 좌우 벌리기 & DM 하강(라볼피아나)', 'GK가 볼을 잡으면 두 센터백이 넓게 벌리고 DM이 그 사이로 내려와 후방 수적 우위를 준비합니다.', nameMap),
+          makeTacticFrame('4-3-3', [[50,92],[14,60],[24,80],[76,80],[86,60],[50,78],[35,48],[65,48],[14,32],[50,28],[86,32]], [50,78], [['pass',50,92,50,78],['pass',50,78,24,80],['zone',20,56,80,82]], '2컷: 후방 3백 완성 & 양 풀백 중원 전진', 'DM을 중심으로 후방 3백이 볼을 순환하며 양 풀백(LB·RB)이 2선 높이까지 올라서 상대를 가둡니다.', nameMap),
+          makeTacticFrame('4-3-3', [[50,90],[18,54],[24,76],[76,76],[82,54],[50,72],[36,44],[64,44],[12,28],[50,26],[88,28]], [24,76], [['pass',24,76,36,44],['arrow',50,26,46,34]], '3컷: 하프스페이스 메짤라(CM1) 라인 브레이킹 패스', '좌측 센터백(CB1)이 상대 1선 압박 사이로 좌측 하프스페이스의 CM1에게 전진 패스를 연결합니다.', nameMap),
+          makeTacticFrame('4-3-3', [[50,88],[20,48],[28,70],[72,70],[80,48],[50,64],[36,42],[64,40],[12,24],[46,33],[88,24]], [46,33], [['pass',36,42,46,33],['pass',46,33,88,22],['arrow',64,40,68,24]], '4컷: CF 폴스나인 연계 & 반대편 와이드 전환', '내려와 볼을 받은 CF가 원터치로 우측 터치라인의 RW에게 넓게 펼쳐주며 상대 수비를 흔듭니다.', nameMap),
+          makeTacticFrame('4-3-3', [[50,86],[22,44],[32,64],[68,64],[78,42],[50,56],[38,34],[68,22],[16,20],[48,18],[86,20]], [68,22], [['pass',86,20,68,22],['zone',14,16,88,46]], '5컷: 상대 진영 완벽 안착 (2-3-5 공격 점유)', '전원이 상대 진영에 2-3-5 포지셔널 대형으로 안착하여 높은 점유율 속에서 마무리 찬스를 만듭니다.', nameMap)
+        ]
+      };
+    }
+
+    if (templateId === '433_attack_halfspace') {
+      return {
+        title: '4-3-3 윙어 아이솔레이션 & 메짤라 하프스페이스 침투 컷백',
+        summary: '측면 윙어(RW)가 상대 풀백을 유인해 벌려 놓은 하프스페이스(반공간)로 중앙 미드필더(CM2)가 언더래핑 침투한 뒤 컷백으로 득점합니다.',
+        frames: [
+          makeTacticFrame('4-3-3', [[50,90],[18,68],[38,74],[62,74],[82,64],[48,60],[34,48],[64,48],[16,34],[50,28],[88,32]], [34,48], [['pass',34,48,48,60],['pass',48,60,88,32]], '1컷: 좌측 볼 순환 후 우측 와이드 전환', '좌측 CM1과 DM이 볼을 순환하다가 우측 터치라인에 넓게 벌려 선 RW에게 긴 전환 패스를 보냅니다.', nameMap),
+          makeTacticFrame('4-3-3', [[50,88],[20,64],[40,70],[62,70],[84,54],[50,56],[36,44],[66,42],[18,28],[50,24],[88,30]], [88,30], [['arrow',66,42,74,18],['arrow',50,24,46,14],['arrow',18,28,32,16]], '2컷: RW 1:1 드리블 시선 유도 & CM2 언더래핑', 'RW가 볼을 잡고 상대 풀백을 끌어당기는 순간, 우측 메짤라(CM2)가 열린 하프스페이스로 전력 질주합니다.', nameMap),
+          makeTacticFrame('4-3-3', [[50,86],[22,60],[40,68],[62,68],[84,46],[52,52],[38,38],[74,18],[30,18],[46,15],[88,26]], [74,18], [['pass',88,26,74,16],['arrow',46,15,48,11],['arrow',30,18,38,12]], '3컷: 하프스페이스 스루패스 & 박스 침투', 'RW가 수비수 다리 사이로 침투하는 CM2에게 스루패스를 찔러 넣어 페널티박스 우측을 완전히 허뭅니다.', nameMap),
+          makeTacticFrame('4-3-3', [[50,86],[24,58],[42,66],[62,66],[82,42],[52,48],[40,32],[75,11],[38,13],[49,12],[86,22]], [49,12], [['pass',75,11,49,12],['arrow',49,12,50,4]], '4컷: 엔드라인 컷백(Cut-back) 패스 연결', '골라인 근처까지 파고든 CM2가 뒤쪽 페널티 스팟으로 침착하게 낮은 컷백 패스를 내줍니다.', nameMap),
+          makeTacticFrame('4-3-3', [[50,86],[24,58],[42,66],[62,66],[82,42],[52,48],[42,28],[74,11],[38,11],[50,9],[84,20]], [50,4], [['pass',50,9,50,4]], '5컷: CF 논스톱 인사이드 슈팅 골!', '쇄도하던 CF가 컷백 패스를 논스톱 슈팅으로 연결하여 득점을 완성합니다.', nameMap)
+        ]
+      };
+    }
+
+    // 433_defense_gegenpress (기본값)
+    return {
+      title: '4-3-3 전방 게겐프레싱(고강도 압박) & 하이 라인 탈취',
+      summary: '스리톱과 미드필더 3명이 전방에서부터 상대 빌드업 패스 길을 아크 형태로 차단하고, 볼이 측면으로 갔을 때 순간적인 수적 우위로 탈취해 즉각 득점합니다.',
+      frames: [
+        makeTacticFrame('4-3-3', [[50,86],[20,62],[38,65],[62,65],[80,62],[50,50],[36,40],[64,40],[24,28],[50,24],[76,28]], [50,14], [['arrow',50,24,50,15],['zone',20,12,80,44]], '1컷: 하이 라인 전진 & CF 압박 트리거', '수비 라인을 하프라인 가까이 올리고 CF가 상대 센터백을 향해 곡선 압박을 시작합니다.', nameMap, [[50,14,'CB'],[20,20,'RB'],[80,20,'LB'],[50,28,'DM']]),
+        makeTacticFrame('4-3-3', [[50,84],[22,58],[40,62],[62,62],[82,56],[52,46],[38,38],[66,34],[26,26],[48,16],[76,22]], [80,20], [['pass',50,14,80,20],['arrow',76,22,80,20],['arrow',66,34,68,24]], '2컷: 상대 측면 패스 강제 & 스리톱 연쇄 압박', '중앙 길이 막힌 상대가 측면 풀백에게 공을 보내는 순간 RW와 CM2가 전속력으로 덮칩니다.', nameMap, [[50,14,'CB'],[20,20,'RB'],[80,20,'LB'],[56,28,'DM']]),
+        makeTacticFrame('4-3-3', [[52,82],[24,56],[42,60],[64,60],[84,44],[54,42],[40,34],[68,24],[30,24],[52,18],[79,20]], [79,20], [['zone',56,14,90,34],['arrow',84,44,82,30],['arrow',54,42,56,28]], '3컷: 우측 압박 감옥 완성 & 패스 경로 완전 봉쇄', 'RW는 정면 압박, CM2는 중앙 패스 차단, RB는 뒷선을 물고 올라오며 상대의 모든 출구를 막습니다.', nameMap, [[52,14,'CB'],[22,22,'RB'],[80,20,'LB'],[56,28,'DM']]),
+        makeTacticFrame('4-3-3', [[52,82],[24,54],[42,58],[64,58],[82,36],[56,34],[42,28],[66,22],[32,20],[50,15],[78,19]], [66,22], [['pass',66,22,50,13],['arrow',50,15,50,11]], '4컷: 전방 인터셉트 성공 & 박스 직결 패스', '당황한 상대의 횡패스를 CM2가 가로채자마자 골문 앞 CF에게 논스톱 침투 패스를 연결합니다.', nameMap, [[52,15,'CB'],[24,22,'RB'],[80,21,'LB'],[58,28,'DM']]),
+        makeTacticFrame('4-3-3', [[52,82],[24,54],[42,58],[64,58],[82,34],[56,32],[42,24],[66,18],[36,14],[50,10],[76,16]], [50,4], [['pass',50,10,50,4]], '5컷: 탈취 후 3초 내 속공 마무리 득점!', '게겐프레싱으로 상대 진영 깊숙이에서 공을 뺏어 3초 만에 골로 연결합니다.', nameMap, [[52,15,'CB'],[24,22,'RB'],[80,21,'LB'],[58,28,'DM']])
+      ]
+    };
+  };
+
+  const stopTacticPlayback = () => {
+    setIsPlaying(false);
+    if (playbackRef.current) {
+      cancelAnimationFrame(playbackRef.current);
+      playbackRef.current = null;
+    }
+    if (playbackTimerRef.current) {
+      clearTimeout(playbackTimerRef.current);
+      playbackTimerRef.current = null;
+    }
+  };
+
+  const applyTacticTemplateById = (templateId) => {
+    stopTacticPlayback();
+    setIsAutoRecording(false);
+    setSelectedTacticTemplateId(templateId);
+
+    // 우리 팀 커스텀 저장 전술인지 먼저 확인
+    const customFound = savedCustomTactics.find(c => c.id === templateId);
+    if (customFound && Array.isArray(customFound.frames) && customFound.frames.length > 0) {
+      if (customFound.pitchType && customFound.pitchType !== pitchType) {
+        setPitchType(customFound.pitchType);
+      }
+      const clonedFrames = JSON.parse(JSON.stringify(customFound.frames));
+      setTacticScenarioTitle(customFound.title || '커스텀 전술');
+      setTacticScenarioSummary(customFound.summary || '');
+      setAnimationFrames(clonedFrames);
+      setActiveFrameIndex(0);
+      setTacticTokens(clonedFrames[0].tokens || []);
+      setDrawings(clonedFrames[0].drawings || []);
+      setPastState([]);
+      setFutureState([]);
+      return;
+    }
+
+    // 기본 제공 4-4-2 / 4-3-3 템플릿 로드 (풀코트 기준 최적화)
+    if (pitchType !== 'full') setPitchType('full');
+    const scenario = buildTacticPresetScenario(templateId, tacticTokens);
+    const clonedFrames = JSON.parse(JSON.stringify(scenario.frames));
+    setTacticScenarioTitle(scenario.title);
+    setTacticScenarioSummary(scenario.summary || '');
+    setAnimationFrames(clonedFrames);
+    setActiveFrameIndex(0);
+    setTacticTokens(clonedFrames[0].tokens || []);
+    setDrawings(clonedFrames[0].drawings || []);
+    setPastState([]);
+    setFutureState([]);
+  };
+
+  const selectTacticFrame = (idx) => {
+    if (isPlaying || idx < 0 || idx >= (animationFrames || []).length) return;
+    const target = animationFrames[idx];
+    if (!target) return;
+    setActiveFrameIndex(idx);
+    setTacticTokens(JSON.parse(JSON.stringify(target.tokens || [])));
+    setDrawings(JSON.parse(JSON.stringify(target.drawings || [])));
+  };
+
+  const duplicateCurrentTacticFrame = () => {
+    if (isPlaying) return;
+    const curTokens = JSON.parse(JSON.stringify(tacticTokens || []));
+    const curDrawings = JSON.parse(JSON.stringify(drawings || []));
+    if ((animationFrames || []).length === 0) {
+      const f1 = { stepTitle: '1컷: 시작 배치', coachingNote: '초기 대형', tokens: curTokens, drawings: curDrawings };
+      const f2 = { stepTitle: '2컷: 다음 동작', coachingNote: '선수를 이동하거나 패스선을 그려보세요.', tokens: JSON.parse(JSON.stringify(curTokens)), drawings: [] };
+      setAnimationFrames([f1, f2]);
+      setActiveFrameIndex(1);
+      setDrawings([]);
+      return;
+    }
+    const insertAt = activeFrameIndex + 1;
+    const nextList = [...animationFrames];
+    nextList.splice(insertAt, 0, {
+      stepTitle: `${insertAt + 1}컷: 추가 동작`,
+      coachingNote: animationFrames[activeFrameIndex]?.coachingNote || '선수를 드래그하여 다음 움직임을 수정하세요.',
+      tokens: curTokens,
+      drawings: curDrawings
+    });
+    const reindexed = nextList.map((f, i) => ({
+      ...f,
+      stepTitle: f.stepTitle ? f.stepTitle.replace(/^\d+컷:/, `${i + 1}컷:`) : `${i + 1}컷: 전술 단계`
+    }));
+    setAnimationFrames(reindexed);
+    setActiveFrameIndex(insertAt);
+  };
+
+  const deleteCurrentTacticFrame = () => {
+    if (isPlaying || (animationFrames || []).length <= 1) return;
+    const nextList = animationFrames
+      .filter((_, idx) => idx !== activeFrameIndex)
+      .map((f, i) => ({
+        ...f,
+        stepTitle: f.stepTitle ? f.stepTitle.replace(/^\d+컷:/, `${i + 1}컷:`) : `${i + 1}컷: 전술 단계`
+      }));
+    const nextIdx = Math.max(0, Math.min(activeFrameIndex, nextList.length - 1));
+    setAnimationFrames(nextList);
+    setActiveFrameIndex(nextIdx);
+    setTacticTokens(JSON.parse(JSON.stringify(nextList[nextIdx].tokens || [])));
+    setDrawings(JSON.parse(JSON.stringify(nextList[nextIdx].drawings || [])));
+  };
+
+  const updateCurrentFrameCoachingNote = (newNote) => {
+    if ((animationFrames || []).length === 0) return;
+    setAnimationFrames(prev =>
+      prev.map((f, idx) => (idx === activeFrameIndex ? { ...f, coachingNote: newNote } : f))
+    );
+  };
+
+  const playTacticAnimation = () => {
+    if ((animationFrames || []).length < 2) return;
+    stopTacticPlayback();
+    setIsPlaying(true);
+    let idx = 0;
+    let start = null;
+    const transitionDuration = 850;
+    setActiveFrameIndex(0);
+    setTacticTokens(animationFrames[0].tokens || []);
+    setDrawings(animationFrames[0].drawings || []);
+
+    const animate = (timestamp) => {
+      if (!start) start = timestamp;
+      const progress = Math.min(1, (timestamp - start) / transitionDuration);
+      const ease = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
+      const startTokens = animationFrames[idx]?.tokens || [];
+      const endTokens = animationFrames[idx + 1]?.tokens || startTokens;
+      startTokens.forEach(t1 => {
+        const t2 = endTokens.find(t => t.id === t1.id) || t1;
+        const x = t1.x + (t2.x - t1.x) * ease;
+        const y = t1.y + (t2.y - t1.y) * ease;
+        const el = document.getElementById(`token-${t1.id}`);
+        if (el) {
+          el.style.left = `${x}%`;
+          el.style.top = `${y}%`;
+        }
+      });
+      if (progress < 1) {
+        playbackRef.current = requestAnimationFrame(animate);
+      } else {
+        idx++;
+        setActiveFrameIndex(idx);
+        setTacticTokens(animationFrames[idx]?.tokens || []);
+        setDrawings(animationFrames[idx]?.drawings || []);
+        if (idx >= animationFrames.length - 1) {
+          setIsPlaying(false);
+          playbackRef.current = null;
+        } else {
+          start = null;
+          playbackTimerRef.current = setTimeout(() => {
+            playbackRef.current = requestAnimationFrame(animate);
+          }, 320);
+        }
+      }
+    };
+    playbackRef.current = requestAnimationFrame(animate);
+  };
+
+  const saveCurrentTacticAsCustomTemplate = async () => {
+    const defaultTitle = tacticScenarioTitle || '나만의 커스텀 전술';
+    const inputTitle = window.prompt('저장할 전술 템플릿 이름을 입력하세요:', defaultTitle);
+    if (!inputTitle || !inputTitle.trim()) return;
+    const title = inputTitle.trim();
+    const framesToSave = animationFrames.length > 0
+      ? animationFrames
+      : [{ tokens: tacticTokens, drawings, stepTitle: '1단계', coachingNote: tacticScenarioSummary || title }];
+    const newPreset = {
+      id: `custom_${Date.now()}`,
+      title,
+      summary: tacticScenarioSummary || `${framesToSave.length}단계 커스텀 전술 시나리오`,
+      pitchType,
+      frames: JSON.parse(JSON.stringify(framesToSave)),
+      createdAt: new Date().toISOString()
+    };
+    const updatedList = [newPreset, ...savedCustomTactics].slice(0, 20);
+    try {
+      if (isPlayground) {
+        alert('방에 입장한 상태에서만 클라우드에 영구 저장됩니다. 현재 화면에서는 바로 재생 및 영상공유가 가능합니다.');
+        return;
+      }
+      await updateFirebaseData({
+        memos: {
+          ...memos,
+          __custom_tactics__: JSON.stringify(updatedList)
+        }
+      });
+      setSelectedTacticTemplateId(newPreset.id);
+      setTacticScenarioTitle(title);
+      alert(`✅ '${title}' 전술이 템플릿 목록에 저장되었습니다!`);
+    } catch (e) {
+      console.error(e);
+      alert('전술 저장 중 오류가 발생했습니다.');
+    }
+  };
+
+  const deleteCustomTacticTemplate = async (presetId) => {
+    if (!presetId || !presetId.startsWith('custom_')) return;
+    if (!window.confirm('이 커스텀 전술 템플릿을 삭제하시겠습니까?')) return;
+    const updatedList = savedCustomTactics.filter(item => item.id !== presetId);
+    try {
+      await updateFirebaseData({
+        memos: {
+          ...memos,
+          __custom_tactics__: JSON.stringify(updatedList)
+        }
+      });
+      applyTacticTemplateById('442_attack_counter');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const buildLocalAiTacticScenario = ({ formation, theme, includeOpponent, customRequest }) => {
+    const is433 = formation === '4-3-3';
+    let baseId = is433 ? '433_attack_halfspace' : '442_attack_counter';
+    if (theme === 'defense') baseId = is433 ? '433_defense_gegenpress' : '442_defense_block';
+    else if (theme === 'possession') baseId = is433 ? '433_possession_buildup' : '442_possession_diamond';
+    else if (theme === 'pressing') baseId = is433 ? '433_defense_gegenpress' : '442_defense_block';
+    else if (theme === 'counter') baseId = is433 ? '433_attack_halfspace' : '442_attack_counter';
+
+    // 측면 전환 (Switch of Play) 전용 5단계 시나리오
+    if (theme === 'switch') {
+      const roles = is433 ? TACTIC_ROLES_433 : TACTIC_ROLES_442;
+      const oppSteps = includeOpponent
+        ? [
+            [[25, 36], [38, 38], [52, 36], [68, 34]],
+            [[20, 42], [32, 44], [46, 42], [62, 38]],
+            [[24, 44], [38, 44], [54, 42], [70, 38]],
+            [[34, 32], [48, 30], [64, 28], [80, 26]],
+            [[40, 20], [54, 18], [68, 16], [82, 16]]
+          ]
+        : [[], [], [], [], []];
+      return {
+        title: `🤖 AI ${formation} 좌우 측면 전환(Switch of Play) 전술`,
+        summary: customRequest?.trim()
+          ? `AI 맞춤 설계 (${customRequest.trim()}) — 한쪽 측면으로 수비를 유인한 뒤 반대편 넓은 공간으로 빠르게 전환합니다.`
+          : '좌측에 수비를 밀집시킨 뒤 중원 피벗을 거쳐 우측 반대편 넓은 공간으로 빠르게 침투하는 5단계 전술입니다.',
+        frames: [
+          makeTacticFrame(roles, [[50,92],[14,66],[36,72],[64,72],[86,64],[14,44],[36,52],[60,52],[86,42],[34,28],[64,28]], [14,44], oppSteps[0], [['zone',8,36,42,68],['pass',14,44,36,52]], '1단계: 좌측 오버로드 유인', '좌측 풀백·측면 자원이 볼을 점유하며 상대 수비 블록을 왼쪽으로 끌어들입니다.'),
+          makeTacticFrame(roles, [[50,90],[16,60],[36,68],[64,68],[88,54],[16,38],[38,48],[62,46],[88,34],[36,24],[66,24]], [38,48], oppSteps[1], [['pass',38,48,62,46],['arrow',88,54,90,34],['arrow',88,34,84,18]], '2단계: 중원 피벗 탈압박 전환', '중원 미드필더가 원터치로 반대편 미드필더에게 연결하고 우측 라인이 동시에 전진합니다.'),
+          makeTacticFrame(roles, [[50,88],[22,58],[40,64],[66,64],[90,36],[24,36],[44,44],[64,42],[86,20],[40,20],[68,20]], [86,20], oppSteps[2], [['pass',64,42,86,20],['zone',72,14,94,42],['arrow',90,36,92,16]], '3단계: 반대편 약점 공간 롱패스', '수비가 비어 있는 우측 윙/측면 공간으로 대각선 전환 패스를 공급합니다.'),
+          makeTacticFrame(roles, [[50,86],[28,54],[44,60],[68,60],[92,18],[32,30],[48,38],[68,32],[82,16],[44,14],[64,14]], [92,18], oppSteps[3], [['pass',82,16,92,18],['pass',92,18,56,12],['arrow',44,14,48,10],['arrow',64,14,60,10]], '4단계: 우측 오버래핑 & 컷백', '우측 풀백이 오버래핑으로 볼을 이어받아 박스 안쪽으로 날카로운 컷백 크로스를 올립니다.'),
+          makeTacticFrame(roles, [[50,86],[30,52],[46,58],[68,58],[88,16],[38,22],[50,32],[68,26],[78,14],[48,9],[58,10]], [50,4], oppSteps[4], [['pass',58,10,50,4]], '5단계: 박스 침투 마무리 슈팅', '반대편 공격수와 2선 자원이 박스 중앙으로 쇄도하며 원터치 슈팅으로 마무리합니다.')
+        ]
+      };
+    }
+
+    const preset = buildTacticPresetScenario(baseId);
+    const oppDefault = [
+      [[26, 36], [42, 38], [58, 38], [74, 36]],
+      [[24, 34], [40, 36], [56, 36], [72, 34]],
+      [[26, 28], [42, 30], [58, 30], [74, 28]],
+      [[30, 22], [44, 24], [58, 24], [72, 22]],
+      [[34, 16], [46, 18], [56, 18], [68, 16]]
+    ];
+    const frames = preset.frames.map((frame, idx) => {
+      let tokens = frame.tokens.filter(t => includeOpponent ? true : t.team !== 'B');
+      if (includeOpponent && !tokens.some(t => t.team === 'B')) {
+        const extraOpp = (oppDefault[idx] || oppDefault[0]).map((pt, bi) => ({
+          id: `B_OPP_${bi + 1}`,
+          team: 'B',
+          number: bi + 1,
+          position: `상대${bi + 1}`,
+          name: `상대${bi + 1}`,
+          x: pt[0],
+          y: pt[1]
+        }));
+        tokens = [...tokens, ...extraOpp];
+      }
+      return {
+        ...frame,
+        tokens,
+        coachingNote: customRequest?.trim() && idx === 0
+          ? `[AI 요청 반영: ${customRequest.trim()}] ${frame.coachingNote}`
+          : frame.coachingNote
+      };
+    });
+    return {
+      title: `🤖 ${preset.title.replace(/^\[[^\]]+\]\s*/, `${formation} AI `)}`,
+      summary: customRequest?.trim()
+        ? `AI 맞춤 설계 (${customRequest.trim()}) — ${preset.summary}`
+        : preset.summary,
+      frames
+    };
+  };
+
+  const generateAiTacticScenario = async (e) => {
+    if (e) e.preventDefault();
+    if (isGeneratingTacticAi) return;
+    stopTacticPlayback();
+    setIsGeneratingTacticAi(true);
+
+    const { formation, theme, includeOpponent, customRequest } = tacticAiModal;
+    const roles = formation === '4-3-3' ? TACTIC_ROLES_433 : TACTIC_ROLES_442;
+    const themeLabelMap = {
+      attack: '공격 전개 및 결정력 극대화',
+      defense: '수비 블록 유지 및 공간 제어',
+      possession: '점유율 확보 및 후방 빌드업 탈압박',
+      counter: '수비 성공 후 고속 역습(Transition)',
+      pressing: '전방 압박 및 게겐프레싱 볼 탈취',
+      switch: '한쪽 측면 유인 후 반대편 측면 전환(Switch of Play)'
+    };
+
+    try {
+      let generatedScenario = null;
+      const cleanKey = (geminiApiKey || '').trim();
+      if (cleanKey) {
+        const prompt = `당신은 프로 축구 전술 분석가이자 감독입니다.
+포메이션: ${formation} (11명 순서 고정: ${roles.join(', ')})
+전술 상황: ${themeLabelMap[theme] || theme}
+상대 수비/압박 토큰(4명) 표시 여부: ${includeOpponent ? '포함' : '미포함'}
+사용자 추가 요청: ${customRequest?.trim() || '없음'}
+
+경기장 좌표계 규칙:
+- x: 8~92 (좌측 터치라인 8, 중앙 50, 우측 터치라인 92)
+- y: 4~94 (상대 골문 y=4, 하프라인 y=50, 우리팀 GK y=92)
+- 반드시 5단계(5컷) 연속 시나리오로 작성하세요.
+
+아래 JSON 형식으로만 응답하세요 (마크다운 코드블록 없이 순수 JSON):
+{
+  "title": "전술 제목 (예: 🤖 AI ${formation} 하프스페이스 공략 전술)",
+  "summary": "전체 전술 핵심 요약 1~2문장",
+  "steps": [
+    {
+      "stepTitle": "1단계: 단계 제목",
+      "coachingNote": "이 단계에서 선수들의 움직임과 패스 타이밍 코칭 설명",
+      "aCoords": [[50,92],[16,72],[36,76],[64,76],[84,72],[18,48],[38,54],[62,54],[82,48],[36,26],[64,26]],
+      "ballCoord": [36,76],
+      "bCoords": [[35,34],[50,36],[65,34],[50,48]],
+      "drawings": [["pass",36,76,38,54],["arrow",18,48,18,30]]
+    }
+  ]
+}`;
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(cleanKey)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: 'application/json', temperature: 0.4 }
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          const cleaned = rawText.replace(/```json|```/g, '').trim();
+          const parsed = JSON.parse(cleaned);
+          if (parsed && Array.isArray(parsed.steps) && parsed.steps.length >= 3) {
+            const clamp = (v, min, max) => Math.max(min, Math.min(max, Number(v) || 50));
+            const frames = parsed.steps.slice(0, 6).map((st, idx) => {
+              const aCoords = Array.from({ length: 11 }, (_, i) => {
+                const pt = st.aCoords?.[i] || [50, 50];
+                return [clamp(pt[0], 6, 94), clamp(pt[1], 6, 94)];
+              });
+              const ballCoord = st.ballCoord ? [clamp(st.ballCoord[0], 4, 96), clamp(st.ballCoord[1], 4, 96)] : aCoords[6];
+              const bCoords = includeOpponent && Array.isArray(st.bCoords)
+                ? st.bCoords.slice(0, 5).map(pt => [clamp(pt[0], 6, 94), clamp(pt[1], 6, 94)])
+                : [];
+              const dList = Array.isArray(st.drawings)
+                ? st.drawings.slice(0, 5).map(d => [
+                    ['pass', 'arrow', 'zone'].includes(d[0]) ? d[0] : 'arrow',
+                    clamp(d[1], 4, 96), clamp(d[2], 4, 96), clamp(d[3], 4, 96), clamp(d[4], 4, 96)
+                  ])
+                : [];
+              return makeTacticFrame(roles, aCoords, ballCoord, bCoords, dList, st.stepTitle || `${idx + 1}단계`, st.coachingNote || '');
+            });
+            generatedScenario = {
+              title: parsed.title || `🤖 AI ${formation} 맞춤 전술`,
+              summary: parsed.summary || 'AI가 설계한 단계별 전술 시나리오입니다.',
+              frames
+            };
+          }
+        }
+      }
+
+      if (!generatedScenario) {
+        await new Promise(r => setTimeout(r, 450));
+        generatedScenario = buildLocalAiTacticScenario({ formation, theme, includeOpponent, customRequest });
+      }
+
+      const firstFrame = generatedScenario.frames[0];
+      setPitchType('full');
+      setSelectedTacticTemplateId('ai_generated');
+      setTacticScenarioTitle(generatedScenario.title);
+      setTacticScenarioSummary(generatedScenario.summary);
+      setAnimationFrames(generatedScenario.frames);
+      setActiveFrameIndex(0);
+      setTacticTokens(firstFrame.tokens);
+      setDrawings(firstFrame.drawings);
+      setHistory([{ tokens: firstFrame.tokens, drawings: firstFrame.drawings }]);
+      setTacticAiModal(prev => ({ ...prev, isOpen: false }));
+    } catch (err) {
+      console.error('AI tactic generation error:', err);
+      const fallback = buildLocalAiTacticScenario({ formation, theme, includeOpponent, customRequest });
+      const firstFrame = fallback.frames[0];
+      setPitchType('full');
+      setSelectedTacticTemplateId('ai_generated');
+      setTacticScenarioTitle(fallback.title);
+      setTacticScenarioSummary(fallback.summary);
+      setAnimationFrames(fallback.frames);
+      setActiveFrameIndex(0);
+      setTacticTokens(firstFrame.tokens);
+      setDrawings(firstFrame.drawings);
+      setHistory([{ tokens: firstFrame.tokens, drawings: firstFrame.drawings }]);
+      setTacticAiModal(prev => ({ ...prev, isOpen: false }));
+    } finally {
+      setIsGeneratingTacticAi(false);
+    }
   };
 
   // ================= GPS 분석 및 스마트워치 히트맵 엔진 =================
@@ -6909,11 +7549,37 @@ const renderGoalFlowModal = () => {
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100] animate-in fade-in">
         <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl">
           <div className="flex justify-between items-center mb-6"><h2 className="text-lg font-bold text-white flex items-center gap-2"><Target size={18}/> 토큰 정보 수정</h2><button onClick={() => setTokenEditModal({isOpen: false, token: null})} className="text-slate-400 hover:text-white"><X size={20}/></button></div>
-          <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.target); const pos = fd.get('position'); const name = fd.get('name'); const newTokens = (tacticTokens||[]).map(t => t.id === tokenEditModal.token.id ? { ...t, position: pos, name: name } : t); saveHistory(newTokens); setTokenEditModal({ isOpen: false, token: null }); }} className="space-y-4">
-            <div><label className="block text-xs font-bold text-slate-400 mb-1">포지션 약어</label><input type="text" name="position" defaultValue={tokenEditModal.token.position || ''} maxLength="3" placeholder="예: FW, CM" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none text-center font-black tracking-wider uppercase" /></div>
-            <div><label className="block text-xs font-bold text-slate-400 mb-1">선수 이름표 (선택)</label><input type="text" name="name" defaultValue={tokenEditModal.token.name || ''} placeholder="예: 손흥민" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none text-center font-bold" /></div>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            const pos = fd.get('position');
+            const name = fd.get('name');
+            const targetId = tokenEditModal.token.id;
+            const newTokens = (tacticTokens||[]).map(t => t.id === targetId ? { ...t, position: pos, name: name } : t);
+            saveHistory(newTokens);
+            if (animationFrames.length > 0) {
+              setAnimationFrames(prev => prev.map(frame => ({
+                ...frame,
+                tokens: (frame.tokens || []).map(t => t.id === targetId ? { ...t, position: pos, name: name } : t)
+              })));
+            }
+            setTokenEditModal({ isOpen: false, token: null });
+          }} className="space-y-4">
+            <div><label className="block text-xs font-bold text-slate-400 mb-1">포지션 약어 (전 프레임 동기화)</label><input type="text" name="position" defaultValue={tokenEditModal.token.position || ''} maxLength="4" placeholder="예: FW, CM" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none text-center font-black tracking-wider uppercase" /></div>
+            <div><label className="block text-xs font-bold text-slate-400 mb-1">선수 이름표 (전 프레임 동기화)</label><input type="text" name="name" defaultValue={tokenEditModal.token.name || ''} placeholder="예: 손흥민" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none text-center font-bold" /></div>
             <div className="flex gap-2 pt-2 border-t border-slate-700"><button type="submit" className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold">수정 완료</button></div>
-            <button type="button" onClick={() => { const newTokens = (tacticTokens||[]).filter(t => t.id !== tokenEditModal.token.id); saveHistory(newTokens); setTokenEditModal({ isOpen: false, token: null }); }} className="w-full py-3 mt-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold text-sm flex items-center justify-center gap-1"><Trash2 size={16}/> 이 선수 토큰 삭제</button>
+            <button type="button" onClick={() => {
+              const targetId = tokenEditModal.token.id;
+              const newTokens = (tacticTokens||[]).filter(t => t.id !== targetId);
+              saveHistory(newTokens);
+              if (animationFrames.length > 0) {
+                setAnimationFrames(prev => prev.map(frame => ({
+                  ...frame,
+                  tokens: (frame.tokens || []).filter(t => t.id !== targetId)
+                })));
+              }
+              setTokenEditModal({ isOpen: false, token: null });
+            }} className="w-full py-3 mt-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold text-sm flex items-center justify-center gap-1"><Trash2 size={16}/> 이 선수 토큰 삭제</button>
           </form>
         </div>
       </div>
@@ -7898,16 +8564,76 @@ const renderGoalFlowModal = () => {
           <div className="animate-in fade-in flex-1 flex flex-col min-h-0 overflow-y-auto hide-scrollbar relative pb-4 -mx-3 px-2">
             {/* 상단 통합 컨트롤 패널 */}
             <div className="bg-slate-800/70 border border-slate-700/80 rounded-2xl p-2 space-y-1.5 shrink-0 mb-2 shadow-sm overflow-hidden">
+              {/* 0단: 4-4-2 / 4-3-3 전술 템플릿 드롭다운 + AI 전술 생성 + 커스텀 저장 */}
+              <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700/80">
+                <select
+                  value={selectedTacticTemplateId}
+                  onChange={(e) => applyTacticTemplateById(e.target.value)}
+                  disabled={isPlaying}
+                  className="flex-1 min-w-0 h-8 px-2 bg-slate-950 border border-slate-700/90 rounded-lg text-[11px] font-bold text-emerald-300 outline-none focus:border-emerald-500 truncate"
+                >
+                  <option value="">📋 4-4-2 / 4-3-3 전술 템플릿 선택...</option>
+                  {selectedTacticTemplateId === 'ai_generated' && (
+                    <option value="ai_generated">{tacticScenarioTitle || '🤖 AI 맞춤 생성 전술'}</option>
+                  )}
+                  <optgroup label="🔥 4-4-2 포메이션 전술">
+                    {TACTIC_PRESET_OPTIONS.filter(o => o.formation === '4-4-2').map(opt => (
+                      <option key={opt.id} value={opt.id}>{opt.label}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="⚡ 4-3-3 포메이션 전술">
+                    {TACTIC_PRESET_OPTIONS.filter(o => o.formation === '4-3-3').map(opt => (
+                      <option key={opt.id} value={opt.id}>{opt.label}</option>
+                    ))}
+                  </optgroup>
+                  {savedCustomTactics.length > 0 && (
+                    <optgroup label="⭐ 우리 팀 저장 커스텀 전술">
+                      {savedCustomTactics.map(ct => (
+                        <option key={ct.id} value={ct.id}>⭐ {ct.title} ({(ct.frames || []).length}컷)</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setTacticAiModal(prev => ({ ...prev, isOpen: true }))}
+                  disabled={isPlaying}
+                  className="h-8 px-2.5 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black text-[11px] flex items-center gap-1 shrink-0 shadow-sm transition disabled:opacity-40 whitespace-nowrap"
+                >
+                  <span>🤖 AI 전술</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={saveCurrentTacticAsCustomTemplate}
+                  disabled={isPlaying}
+                  className="h-8 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold text-[11px] flex items-center gap-1 shrink-0 transition disabled:opacity-40 whitespace-nowrap"
+                  title="현재 수정한 전술을 템플릿에 저장"
+                >
+                  <span>💾 저장</span>
+                </button>
+                {selectedTacticTemplateId?.startsWith('custom_') && (
+                  <button
+                    type="button"
+                    onClick={() => deleteCustomTacticTemplate(selectedTacticTemplateId)}
+                    disabled={isPlaying}
+                    className="h-8 w-7 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 flex items-center justify-center shrink-0 transition"
+                    title="커스텀 템플릿 삭제"
+                  >
+                    <Trash2 size={12}/>
+                  </button>
+                )}
+              </div>
+
               {/* 1단: 코트 전환 + 실행취소/초기화 + 캡처/가이드 (단일 통합 바) */}
               <div className="flex items-center justify-between bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-0.5">
-                <button onClick={() => { setPitchType('full'); saveHistory(getInitialTacticsTokens('full'), []); setAnimationFrames([]); setIsPlaying(false); setIsAutoRecording(false); if (playbackRef.current) cancelAnimationFrame(playbackRef.current); }} className={`flex-1 h-7 px-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center ${pitchType === 'full' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>풀코트</button>
-                <button onClick={() => { setPitchType('half'); saveHistory(getInitialTacticsTokens('half'), []); setAnimationFrames([]); setIsPlaying(false); setIsAutoRecording(false); if (playbackRef.current) cancelAnimationFrame(playbackRef.current); }} className={`flex-1 h-7 px-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center ${pitchType === 'half' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>하프</button>
+                <button onClick={() => { stopTacticPlayback(); setPitchType('full'); setSelectedTacticTemplateId(''); setTacticScenarioTitle(''); setTacticScenarioSummary(''); setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens('full'), []); setIsAutoRecording(false); }} className={`flex-1 h-7 px-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center ${pitchType === 'full' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>풀코트</button>
+                <button onClick={() => { stopTacticPlayback(); setPitchType('half'); setSelectedTacticTemplateId(''); setTacticScenarioTitle(''); setTacticScenarioSummary(''); setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens('half'), []); setIsAutoRecording(false); }} className={`flex-1 h-7 px-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center justify-center ${pitchType === 'half' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>하프</button>
 
                 <div className="w-px h-3.5 bg-slate-800 mx-0.5 shrink-0"></div>
 
                 <button onClick={() => {if(pastState.length > 0) { const prev = pastState[pastState.length - 1]; setPastState(p => p.slice(0, -1)); setFutureState(p => [{ tokens: tacticTokens || [], drawings: drawings || [] }, ...p]); setTacticTokens(prev.tokens || []); setDrawings(prev.drawings || []); }}} disabled={pastState.length === 0 || isPlaying} className="h-7 w-6 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-800 transition flex items-center justify-center shrink-0" title="실행 취소"><Undo size={13}/></button>
                 <button onClick={() => {if(futureState.length > 0) { const next = futureState[0]; setFutureState(p => p.slice(1)); setPastState(p => [...p, { tokens: tacticTokens || [], drawings: drawings || [] }]); setTacticTokens(next.tokens || []); setDrawings(next.drawings || []); }}} disabled={futureState.length === 0 || isPlaying} className="h-7 w-6 text-slate-300 rounded-lg disabled:opacity-30 hover:bg-slate-800 transition flex items-center justify-center shrink-0" title="다시 실행"><Redo size={13}/></button>
-                <button onClick={() => { setPitchType(pitchType); saveHistory(getInitialTacticsTokens(pitchType), []); setAnimationFrames([]); setIsPlaying(false); setIsAutoRecording(false); if (playbackRef.current) cancelAnimationFrame(playbackRef.current); }} className="flex-1 h-7 px-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg font-bold text-[11px] transition whitespace-nowrap flex items-center justify-center">초기화</button>
+                <button onClick={() => { stopTacticPlayback(); if (selectedTacticTemplateId && selectedTacticTemplateId !== 'ai_generated') { applyTacticTemplateById(selectedTacticTemplateId); } else { setPitchType(pitchType); setAnimationFrames([]); setActiveFrameIndex(0); saveHistory(getInitialTacticsTokens(pitchType), []); setIsAutoRecording(false); } }} className="flex-1 h-7 px-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg font-bold text-[11px] transition whitespace-nowrap flex items-center justify-center">초기화</button>
 
                 <div className="w-px h-3.5 bg-slate-800 mx-0.5 shrink-0"></div>
 
@@ -7941,46 +8667,97 @@ const renderGoalFlowModal = () => {
 
               {/* 3단: 애니메이션 스튜디오 바 (녹화 / 재생 / 영상공유 / 삭제) */}
               <div className="flex items-center gap-1 bg-slate-900 rounded-xl p-1 border border-slate-700/80">
-                <div className="h-7 px-2.5 rounded-lg bg-slate-800/80 text-[11px] font-black text-slate-400 flex items-center justify-center shrink-0 whitespace-nowrap">
-                  {(animationFrames||[]).length}컷
+                <div className="h-7 px-2.5 rounded-lg bg-slate-800/80 text-[11px] font-black text-emerald-400 flex items-center justify-center shrink-0 whitespace-nowrap">
+                  {(animationFrames||[]).length > 0 ? `${activeFrameIndex + 1}/${animationFrames.length}컷` : '0컷'}
                 </div>
                 <button onClick={() => {
-                  if (!isAutoRecording) { setAnimationFrames([{ tokens: JSON.parse(JSON.stringify(tacticTokens||[])), drawings: JSON.parse(JSON.stringify(drawings||[])) }]); setIsAutoRecording(true); } 
-                  else setIsAutoRecording(false);
+                  if (!isAutoRecording) {
+                    setAnimationFrames([{
+                      tokens: JSON.parse(JSON.stringify(tacticTokens||[])),
+                      drawings: JSON.parse(JSON.stringify(drawings||[])),
+                      stepTitle: '1단계',
+                      coachingNote: tacticScenarioTitle || '기본 배치'
+                    }]);
+                    setActiveFrameIndex(0);
+                    setIsAutoRecording(true);
+                  } else {
+                    setIsAutoRecording(false);
+                  }
                 }} disabled={isPlaying} className={`flex-1 h-7 px-2 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5 disabled:opacity-40 whitespace-nowrap ${isAutoRecording ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'}`}>
                   <span className={`w-2 h-2 rounded-full ${isAutoRecording ? 'bg-red-400' : 'bg-red-500'}`}></span>
                   <span>{isAutoRecording ? '녹화중지' : '자동녹화'}</span>
                 </button>
-                <button onClick={() => {
-                   if ((animationFrames||[]).length < 2) return; setIsPlaying(true); let idx = 0; let start = null;
-                   const transitionDuration = 400; setTacticTokens(animationFrames[0].tokens); setDrawings(animationFrames[0].drawings);
-                   const animate = (timestamp) => {
-                     if (!start) start = timestamp;
-                     let progress = Math.min(1, (timestamp - start) / transitionDuration);
-                     const ease = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
-                     const startTokens = animationFrames[idx].tokens; const endTokens = animationFrames[idx + 1].tokens;
-                     startTokens.forEach(t1 => {
-                       const t2 = endTokens.find(t => t.id === t1.id) || t1;
-                       const x = t1.x + (t2.x - t1.x) * ease; const y = t1.y + (t2.y - t1.y) * ease;
-                       const el = document.getElementById(`token-${t1.id}`); if (el) { el.style.left = `${x}%`; el.style.top = `${y}%`; }
-                     });
-                     if (progress < 1) playbackRef.current = requestAnimationFrame(animate);
-                     else {
-                       idx++; setTacticTokens(animationFrames[idx].tokens); setDrawings(animationFrames[idx].drawings);
-                       if (idx >= animationFrames.length - 1) setIsPlaying(false); else { start = null; setTimeout(() => { playbackRef.current = requestAnimationFrame(animate); }, 150); }
-                     }
-                   };
-                   playbackRef.current = requestAnimationFrame(animate);
-                }} disabled={isPlaying || (animationFrames||[]).length < 2 || isAutoRecording} className="flex-1 h-7 px-2 bg-slate-800 hover:bg-slate-700 text-blue-400 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 disabled:opacity-35 whitespace-nowrap">
-                  <PlayCircle size={13} className="shrink-0"/> <span>재생</span>
-                </button>
-                <button onClick={exportAnimationToVideo} disabled={isPlaying || (animationFrames||[]).length < 2 || isAutoRecording} className="flex-1 h-7 px-2 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 disabled:opacity-35 whitespace-nowrap">
+                {isPlaying ? (
+                  <button onClick={stopTacticPlayback} className="flex-1 h-7 px-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 rounded-lg text-[11px] font-black transition flex items-center justify-center gap-1 whitespace-nowrap">
+                    <XCircle size={13} className="shrink-0"/> <span>정지</span>
+                  </button>
+                ) : (
+                  <button onClick={playTacticAnimation} disabled={(animationFrames||[]).length < 2 || isAutoRecording} className="flex-1 h-7 px-2 bg-blue-600/25 hover:bg-blue-600/35 text-blue-300 border border-blue-500/40 rounded-lg text-[11px] font-black transition flex items-center justify-center gap-1 disabled:opacity-35 whitespace-nowrap">
+                    <PlayCircle size={13} className="shrink-0"/> <span>재생</span>
+                  </button>
+                )}
+                <button onClick={exportAnimationToVideo} disabled={isPlaying || (animationFrames||[]).length < 2 || isAutoRecording} className="flex-1 h-7 px-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-[11px] font-black transition flex items-center justify-center gap-1 disabled:opacity-35 whitespace-nowrap">
                   <Video size={13} className="shrink-0"/> <span>영상공유</span>
                 </button>
-                <button onClick={() => { setAnimationFrames([]); setIsPlaying(false); setIsAutoRecording(false); if (playbackRef.current) cancelAnimationFrame(playbackRef.current); }} disabled={isPlaying || (animationFrames||[]).length === 0} className="w-7 h-7 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-lg flex items-center justify-center transition disabled:opacity-35 shrink-0" title="녹화 컷 비우기">
+                <button onClick={() => { stopTacticPlayback(); setAnimationFrames([]); setActiveFrameIndex(0); setSelectedTacticTemplateId(''); setTacticScenarioTitle(''); setTacticScenarioSummary(''); setIsAutoRecording(false); }} disabled={isPlaying || (animationFrames||[]).length === 0} className="w-7 h-7 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-lg flex items-center justify-center transition disabled:opacity-35 shrink-0" title="녹화 컷 비우기">
                   <Trash2 size={13}/>
                 </button>
               </div>
+
+              {/* 3.5단: 단계별 프레임 선택 타임라인 & 전술 수정 바 (템플릿/녹화 컷이 있을 때 표시) */}
+              {(animationFrames || []).length > 0 && (
+                <div className="bg-slate-900/95 rounded-xl p-1.5 border border-emerald-500/30 space-y-1.5">
+                  <div className="flex items-center justify-between gap-1 overflow-x-auto hide-scrollbar">
+                    <div className="flex items-center gap-1 min-w-0">
+                      {animationFrames.map((fr, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => selectTacticFrame(idx)}
+                          className={`h-6 px-2 rounded-md text-[10px] font-black transition shrink-0 flex items-center gap-1 ${activeFrameIndex === idx ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                        >
+                          <span>{idx + 1}컷</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={duplicateCurrentTacticFrame}
+                        disabled={isPlaying}
+                        className="h-6 px-2 rounded-md bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 text-[10px] font-bold transition disabled:opacity-40 whitespace-nowrap"
+                        title="현재 컷을 복제하여 다음 단계 추가"
+                      >
+                        +컷추가
+                      </button>
+                      {animationFrames.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={deleteCurrentTacticFrame}
+                          disabled={isPlaying}
+                          className="h-6 px-1.5 rounded-md bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-300 border border-slate-700 text-[10px] font-bold transition disabled:opacity-40 whitespace-nowrap"
+                          title="현재 선택된 컷 삭제"
+                        >
+                          컷삭제
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-slate-950/90 px-2 py-1 rounded-lg border border-slate-800">
+                    <span className="text-[10px] font-black text-amber-400 shrink-0 whitespace-nowrap">
+                      {animationFrames[activeFrameIndex]?.stepTitle || `${activeFrameIndex + 1}단계`}
+                    </span>
+                    <input
+                      type="text"
+                      value={animationFrames[activeFrameIndex]?.coachingNote || ''}
+                      onChange={(e) => updateCurrentFrameCoachingNote(e.target.value)}
+                      disabled={isPlaying}
+                      placeholder="이 컷의 전술 움직임/코칭 설명을 입력하세요 (영상 상단 자막에 표시됨)"
+                      className="flex-1 min-w-0 bg-transparent text-[11px] font-bold text-slate-200 outline-none placeholder:text-slate-600"
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* 4단: 드로잉 도구 탭 */}
               <div className="grid grid-cols-5 bg-slate-900 rounded-xl p-1 border border-slate-700/80 gap-1">
@@ -8015,6 +8792,24 @@ const renderGoalFlowModal = () => {
                   </>
                 )}
 
+                {(animationFrames || []).length > 0 && animationFrames[activeFrameIndex] && (
+                  <div className="absolute top-1.5 left-1.5 right-1.5 z-40 pointer-events-none bg-slate-950/85 backdrop-blur-sm border border-emerald-500/40 rounded-lg px-2.5 py-1.5 shadow-lg">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-black text-emerald-400 truncate">
+                        {tacticScenarioTitle || '전술 시나리오'} · {animationFrames[activeFrameIndex].stepTitle || `${activeFrameIndex + 1}단계`}
+                      </span>
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 shrink-0">
+                        STEP {activeFrameIndex + 1}/{animationFrames.length}
+                      </span>
+                    </div>
+                    {animationFrames[activeFrameIndex].coachingNote && (
+                      <p className="text-[10px] font-bold text-amber-200 mt-0.5 leading-snug line-clamp-2">
+                        {animationFrames[activeFrameIndex].coachingNote}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
                   <defs>
                     <marker id="arrowhead" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="9" refX="10" refY="4.5" orient="auto"><polygon points="0 0, 12 4.5, 0 9" fill="#FACC15" /></marker>
@@ -8026,9 +8821,15 @@ const renderGoalFlowModal = () => {
                   {(drawings||[]).filter(Boolean).map(d => {
                     const isEraseMode = currentTool === 'erase' && !isPlaying;
                     const pClass = isEraseMode ? 'pointer-events-auto cursor-pointer hover:stroke-red-500 hover:stroke-[4px]' : '';
-                    if (d.type === 'arrow') return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#FACC15" strokeWidth="2.5" markerEnd="url(#arrowhead)" className={pClass} onPointerDown={(e) => { if(isEraseMode){ e.stopPropagation(); setDrawings(prev => prev.filter(x => x.id !== d.id)); } }} />
-                    if (d.type === 'pass') return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#60A5FA" strokeWidth="2.5" strokeDasharray="6,6" markerEnd="url(#passhead)" className={pClass} onPointerDown={(e) => { if(isEraseMode){ e.stopPropagation(); setDrawings(prev => prev.filter(x => x.id !== d.id)); } }} />
-                    if (d.type === 'zone') return <rect key={d.id} x={`${Math.min(d.start.x, d.end.x)}%`} y={`${Math.min(d.start.y, d.end.y)}%`} width={`${Math.abs(d.start.x - d.end.x)}%`} height={`${Math.abs(d.start.y - d.end.y)}%`} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="3" className={isEraseMode ? 'pointer-events-auto cursor-pointer hover:fill-red-500/30' : ''} onPointerDown={(e) => { if(isEraseMode){ e.stopPropagation(); setDrawings(prev => prev.filter(x => x.id !== d.id)); } }} />
+                    const handleEraseDrawing = (e) => {
+                      if (!isEraseMode) return;
+                      e.stopPropagation();
+                      const nextDrawings = (drawings || []).filter(x => x.id !== d.id);
+                      saveHistory(tacticTokens, nextDrawings);
+                    };
+                    if (d.type === 'arrow') return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#FACC15" strokeWidth="2.5" markerEnd="url(#arrowhead)" className={pClass} onPointerDown={handleEraseDrawing} />
+                    if (d.type === 'pass') return <line key={d.id} x1={`${d.start.x}%`} y1={`${d.start.y}%`} x2={`${d.end.x}%`} y2={`${d.end.y}%`} stroke="#60A5FA" strokeWidth="2.5" strokeDasharray="6,6" markerEnd="url(#passhead)" className={pClass} onPointerDown={handleEraseDrawing} />
+                    if (d.type === 'zone') return <rect key={d.id} x={`${Math.min(d.start.x, d.end.x)}%`} y={`${Math.min(d.start.y, d.end.y)}%`} width={`${Math.abs(d.start.x - d.end.x)}%`} height={`${Math.abs(d.start.y - d.end.y)}%`} fill="rgba(59, 130, 246, 0.3)" stroke="#3B82F6" strokeWidth="3" className={isEraseMode ? 'pointer-events-auto cursor-pointer hover:fill-red-500/30' : ''} onPointerDown={handleEraseDrawing} />
                     return null;
                   })}
                 </svg>
@@ -8058,6 +8859,126 @@ const renderGoalFlowModal = () => {
                 ))}
               </div>
             </div>
+
+            {tacticAiModal.isOpen && (
+              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[160] flex items-center justify-center p-4 animate-in fade-in">
+                <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl p-5 w-full max-w-md shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-base font-black text-white flex items-center gap-1.5">
+                        <span>🤖</span>
+                        <span>AI 맞춤형 전술 시나리오 설계</span>
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        포메이션과 상황(공격·수비·점유율 등)을 선택하면 5단계 애니메이션을 생성합니다.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setTacticAiModal(prev => ({ ...prev, isOpen: false }))}
+                      className="text-slate-400 hover:text-white p-1"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  <form onSubmit={generateAiTacticScenario} className="space-y-3.5">
+                    <div>
+                      <label className="block text-xs font-black text-slate-300 mb-1.5">1. 기반 포메이션 선택</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {['4-4-2', '4-3-3'].map(fm => (
+                          <button
+                            key={fm}
+                            type="button"
+                            onClick={() => setTacticAiModal(prev => ({ ...prev, formation: fm }))}
+                            className={`py-2.5 px-3 rounded-xl font-black text-xs border transition flex items-center justify-center gap-1.5 ${tacticAiModal.formation === fm ? 'bg-indigo-600 text-white border-indigo-400 shadow-md' : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:text-white'}`}
+                          >
+                            <span>{fm === '4-4-2' ? '🔥 4-4-2 포메이션' : '⚡ 4-3-3 포메이션'}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-black text-slate-300 mb-1.5">2. 전술 상황 및 테마 선택</label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {[
+                          { id: 'attack', icon: '⚔️', label: '공격 시 전개', desc: '측면·하프스페이스 침투' },
+                          { id: 'defense', icon: '🛡️', label: '수비 시 블록', desc: '간격 유지 및 함정 압박' },
+                          { id: 'possession', icon: '🔄', label: '점유율 확보', desc: '후방 빌드업 & 수적 우위' },
+                          { id: 'counter', icon: '⚡', label: '고속 역습', desc: '수비 성공 후 직선 침투' },
+                          { id: 'pressing', icon: '🔥', label: '전방 압박', desc: '게겐프레싱 볼 탈취' },
+                          { id: 'switch', icon: '↔️', label: '측면 전환', desc: '수비 유인 후 반대편 전환' }
+                        ].map(item => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setTacticAiModal(prev => ({ ...prev, theme: item.id }))}
+                            className={`p-2.5 rounded-xl border text-left transition ${tacticAiModal.theme === item.id ? 'bg-indigo-500/20 border-indigo-400 text-white shadow-sm' : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'}`}
+                          >
+                            <div className="text-xs font-black flex items-center gap-1">
+                              <span>{item.icon}</span>
+                              <span>{item.label}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-0.5 truncate">{item.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <label className="flex items-center justify-between bg-slate-800/80 px-3 py-2.5 rounded-xl border border-slate-700 cursor-pointer">
+                      <div>
+                        <div className="text-xs font-bold text-white">상대팀 압박/수비수 토큰 함께 배치</div>
+                        <div className="text-[10px] text-slate-400">상대 선수 4명의 압박 동선을 함께 시뮬레이션합니다</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={tacticAiModal.includeOpponent}
+                        onChange={(e) => setTacticAiModal(prev => ({ ...prev, includeOpponent: e.target.checked }))}
+                        className="w-4 h-4 accent-indigo-500"
+                      />
+                    </label>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-black text-slate-300">3. 세부 전술 요청사항 (선택)</label>
+                        <button
+                          type="button"
+                          onClick={() => setIsAiKeyModalOpen(true)}
+                          className="text-[10px] font-bold text-indigo-300 hover:text-indigo-200 underline"
+                        >
+                          {geminiApiKey ? '🔑 Gemini API 연결됨' : '⚙️ AI 키 설정 (미설정 시 내장 엔진 사용)'}
+                        </button>
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={tacticAiModal.customRequest}
+                        onChange={(e) => setTacticAiModal(prev => ({ ...prev, customRequest: e.target.value }))}
+                        placeholder="예: 좌측 윙어가 안쪽으로 좁히고 풀백이 오버래핑하여 컷백 크로스하는 패턴으로 만들어줘"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white outline-none focus:border-indigo-500 resize-none"
+                      />
+                    </div>
+
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setTacticAiModal(prev => ({ ...prev, isOpen: false }))}
+                        className="flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition"
+                      >
+                        취소
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isGeneratingTacticAi}
+                        className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black text-xs shadow-lg transition disabled:opacity-50"
+                      >
+                        {isGeneratingTacticAi ? '🤖 AI 5단계 전술 설계 중...' : '🤖 5단계 전술 생성하기'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
