@@ -33,7 +33,7 @@ const getMatchTeamCount = (match) => {
 
 const calculateStandings = (match) => {
   const stats = {}; const actualTeamCount = getMatchTeamCount(match); 
-  TEAM_LETTERS.slice(0, actualTeamCount).forEach(t => { stats[t] = { team: t, matches: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 }; });
+  TEAM_LETTERS.slice(0, actualTeamCount).forEach(t => { stats[t] = { team: t, matches: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0, eventPts: 0, eventResult: '' }; });
   (match.quarterScores || []).forEach(qs => {
     const { team1, team2, score1, score2 } = qs; if (!stats[team1] || !stats[team2]) return;
     stats[team1].matches++; stats[team2].matches++; stats[team1].gf += score1; stats[team1].ga += score2; stats[team2].gf += score2; stats[team2].ga += score1;
@@ -44,13 +44,12 @@ const calculateStandings = (match) => {
     const lTeam = match.eventMatch.loserTeam;
     const evPts = Math.max(0, parseInt(match.eventMatch.points, 10) || 0);
     if (stats[wTeam]) {
-      stats[wTeam].matches++;
-      stats[wTeam].w++;
+      stats[wTeam].eventPts = evPts;
+      stats[wTeam].eventResult = 'W';
       stats[wTeam].pts += evPts;
     }
     if (lTeam && lTeam !== wTeam && stats[lTeam]) {
-      stats[lTeam].matches++;
-      stats[lTeam].l++;
+      stats[lTeam].eventResult = 'L';
     }
   }
   Object.values(stats).forEach(s => s.gd = s.gf - s.ga);
@@ -7363,18 +7362,48 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
 
   const StandingsTable = ({ match, isLarge }) => {
     const standings = calculateStandings(match);
+    const hasEventMatch = match.matchType === 'internal' && match.eventMatch?.enabled;
     const textClass = isLarge ? "text-2xl py-6" : "text-xs py-2"; const headerClass = isLarge ? "pb-6" : "pb-2";
     return (
       <table className={`w-full text-center ${isLarge ? 'text-2xl' : 'text-xs'}`}>
-        <thead><tr className="text-slate-500 font-bold border-b border-slate-700/50"><th className={headerClass}>순위</th><th className={`${headerClass} text-left`}>팀</th><th className={headerClass}>승점</th><th className={headerClass}>승(W)</th><th className={headerClass}>무(D)</th><th className={headerClass}>패(L)</th><th className={headerClass}>득실</th></tr></thead>
+        <thead>
+          <tr className="text-slate-500 font-bold border-b border-slate-700/50">
+            <th className={headerClass}>순위</th>
+            <th className={`${headerClass} text-left`}>팀</th>
+            <th className={headerClass}>승점</th>
+            <th className={headerClass}>승(W)</th>
+            <th className={headerClass}>무(D)</th>
+            <th className={headerClass}>패(L)</th>
+            <th className={headerClass}>득실</th>
+            {hasEventMatch && <th className={`${headerClass} text-amber-400`}>이벤트</th>}
+          </tr>
+        </thead>
         <tbody>
           {standings.map((st, i) => (
             <tr key={st.team} className="border-t border-slate-800/50">
               <td className={`${textClass} font-black ${i === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{i + 1}</td>
               <td className={`${textClass} text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(match, st.team)}</td>
-              <td className={`${textClass} text-blue-400 font-black`}>{st.pts}</td>
+              <td className={`${textClass} text-blue-400 font-black whitespace-nowrap`}>
+                {st.pts}
+                {st.eventPts > 0 && (
+                  <span className={`${isLarge ? 'text-lg ml-1.5' : 'text-[10px] ml-0.5'} text-amber-400 font-bold`}>
+                    (+{st.eventPts})
+                  </span>
+                )}
+              </td>
               <td className={`${textClass} text-white`}>{st.w}</td><td className={`${textClass} text-slate-400`}>{st.d}</td><td className={`${textClass} text-slate-400`}>{st.l}</td>
               <td className={`${textClass} text-white`}>{st.gd > 0 ? '+'+st.gd : st.gd}</td>
+              {hasEventMatch && (
+                <td className={`${textClass} font-black whitespace-nowrap`}>
+                  {st.eventResult === 'W' ? (
+                    <span className="text-emerald-400">승</span>
+                  ) : st.eventResult === 'L' ? (
+                    <span className="text-red-400">패</span>
+                  ) : (
+                    <span className="text-slate-500">-</span>
+                  )}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
