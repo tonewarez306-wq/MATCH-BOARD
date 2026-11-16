@@ -93,9 +93,12 @@ const captureToCanvas = async (element, { scale = 3, backgroundColor = '#0F172A'
         /* Tailwind Preflight(img, svg { display: block })로 인한 html2canvas 텍스트 하단 쏠림(#2775) 근본 해결 */
         img, svg { display: inline-block !important; }
         .h2c-pill { display: inline-block !important; line-height: 1 !important; padding-top: 1px !important; padding-bottom: 6px !important; vertical-align: middle !important; }
+        .h2c-pill-sm { line-height: 1.1 !important; padding-top: 1px !important; padding-bottom: 4px !important; }
         .h2c-chip { display: inline-block !important; line-height: 1 !important; padding-top: 4px !important; padding-bottom: 10px !important; vertical-align: middle !important; }
         .h2c-chip > span { position: relative !important; top: -2px !important; }
-        .h2c-shift { position: relative !important; top: -2px !important; }
+        .h2c-shift { position: relative !important; top: -2px !important; overflow: visible !important; }
+        .h2c-gk-wrap > div { padding-top: 4px !important; padding-bottom: 9px !important; }
+        .h2c-gk-wrap > div span { position: relative !important; top: -1.5px !important; line-height: 1.2 !important; }
       `;
       clonedDoc.head.appendChild(style);
     }
@@ -8413,7 +8416,7 @@ const renderGoalFlowModal = () => {
                 <div className="w-7 h-7 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700 text-xs overflow-hidden shrink-0">
                   {activeTeam?.logo?.startsWith('data:image') ? <img src={activeTeam.logo} alt="logo" className="w-full h-full object-cover" /> : (activeTeam?.logo || '⚽')}
                 </div>
-                <span className="text-[11px] font-black text-slate-300 truncate h2c-shift">{activeTeam?.name || 'MATCHBOARD'}</span>
+                <span className="text-[11px] font-black text-slate-300 h2c-shift leading-none">{activeTeam?.name || 'MATCHBOARD'}</span>
               </div>
               <span className="text-[10px] font-black italic tracking-tight text-slate-500 shrink-0 h2c-shift">MATCHBOARD</span>
             </div>
@@ -8487,7 +8490,7 @@ const renderGoalFlowModal = () => {
                         <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(shareMatch, qs.team2)}</span>
                       </span>
                     </div>
-                    <div className="h2c-shift">{renderQuarterGkBadge(shareMatch, qs)}</div>
+                    <div className="h2c-gk-wrap">{renderQuarterGkBadge(shareMatch, qs)}</div>
                     {qLogs.length > 0 ? (
                       <div className="space-y-3">
                         {qLogs.map(l => {
@@ -9727,8 +9730,8 @@ const renderGoalFlowModal = () => {
                       ${t.team === 'ball' ? 'w-6 h-6 sm:w-7 sm:h-7 bg-white text-black shadow-[inset_0_-1px_3px_rgba(0,0,0,0.3),_0_3px_6px_rgba(0,0,0,0.6)] text-[16px]' : ''}
                     `}
                   >
-                    <span>{t.team === 'ball' ? t.label : t.position}</span>
-                    {t.name && <span className="absolute top-[120%] text-[10px] sm:text-[11px] font-bold text-white bg-black/80 px-2 py-0.5 rounded-full shadow-md whitespace-nowrap z-40 pointer-events-none tracking-tight">{t.name}</span>}
+                    <span className="h2c-shift">{t.team === 'ball' ? t.label : t.position}</span>
+                    {t.name && <span className="h2c-pill-sm absolute top-[120%] text-[10px] sm:text-[11px] font-bold text-white bg-black/80 px-2 py-0.5 rounded-full shadow-md whitespace-nowrap z-40 pointer-events-none tracking-tight">{t.name}</span>}
                   </div>
                 ))}
               </div>
