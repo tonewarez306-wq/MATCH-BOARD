@@ -929,10 +929,6 @@ export default function App() {
     if (!checkCanEdit(match)) { setSystemAlert({ isOpen: true, message: `경기 시간 이후에만 기록이 가능합니다.\n(관리자는 언제든 가능)` }); return; }
     if (action === 'assign') setAssignmentModal({ isOpen: true, match });
     if (action === 'start') {
-      if (match.matchType !== 'external') {
-         const attendees = match.attendees || []; const assignments = match.teamAssignments || {}; const unassigned = attendees.filter(id => !assignments[id]);
-         if (attendees.length > 0 && unassigned.length > 0) { setSystemConfirm({ isOpen: true, message: `아직 팀 편성이 안 된 참석자가 ${unassigned.length}명 있습니다.\n먼저 팀을 나누시겠습니까?`, onConfirm: () => setAssignmentModal({ isOpen: true, match }) }); return; }
-      }
       const nextLiveState = computeDerivedLiveState(match);
       setLiveMatchId(match.id);
       setLiveState(nextLiveState);
@@ -1015,10 +1011,16 @@ export default function App() {
 
   const assignTeam = (playerId, teamLetter) => {
     const m = assignmentModal.match;
-    if(m) {
-      const currentTeam = m.teamAssignments?.[playerId] || null; if (currentTeam === teamLetter) return;
-      const updatedMatch = { ...m, teamAssignments: { ...m.teamAssignments, [playerId]: teamLetter } };
-      setAssignmentModal(prev => ({ ...prev, match: updatedMatch })); setDoc(doc(db, 'matches', m.id), updatedMatch).catch(console.error);
+    if (m) {
+      const nextAssignments = { ...(m.teamAssignments || {}) };
+      if (nextAssignments[playerId] === teamLetter) {
+        delete nextAssignments[playerId];
+      } else {
+        nextAssignments[playerId] = teamLetter;
+      }
+      const updatedMatch = { ...m, teamAssignments: nextAssignments };
+      setAssignmentModal(prev => ({ ...prev, match: updatedMatch }));
+      setDoc(doc(db, 'matches', m.id), updatedMatch).catch(console.error);
     }
   };
 
@@ -7621,6 +7623,16 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
                     </div>
                   );
                 })}
+                {(() => {
+                  const unassignedPlayers = players.filter(p => (detailMatch.attendees || []).includes(p.id) && !((detailMatch.teamAssignments || {})[p.id]));
+                  if (unassignedPlayers.length === 0) return null;
+                  return (
+                    <div>
+                      <div className="text-[11px] font-black mb-2 text-slate-400">미편성 참석자</div>
+                      <div className="flex flex-wrap gap-2">{unassignedPlayers.map(p => ( <div key={p.id} className="bg-slate-800 px-3.5 py-2.5 rounded-full border border-slate-600/50 flex items-center"><span className="font-bold text-white text-[14px] tracking-wide">{p.name}</span></div> ))}</div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -7738,7 +7750,24 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[150]">
         <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-md border border-slate-700 max-h-[80vh] flex flex-col shadow-xl">
-          <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-700"><div><h2 className="text-lg font-bold text-white">참석자 팀 편성</h2></div><button onClick={() => setAssignmentModal({isOpen: false, match: null})} className="text-white bg-blue-500 px-4 py-2 rounded-xl font-bold">완료</button></div>
+          <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-700">
+            <div>
+              <h2 className="text-lg font-bold text-white">참석자 팀 편성</h2>
+              <p className="text-[11px] text-slate-400 mt-0.5">팀을 지정하지 않아도 저장되며 바로 기록할 수 있습니다.</p>
+            </div>
+            <button
+              onClick={async () => {
+                const m = assignmentModal.match;
+                setAssignmentModal({ isOpen: false, match: null });
+                if (m?.id) {
+                  await setDoc(doc(db, 'matches', m.id), { ...m, teamAssignments: m.teamAssignments || {} }).catch(console.error);
+                }
+              }}
+              className="text-white bg-blue-500 px-4 py-2 rounded-xl font-bold shrink-0"
+            >
+              완료
+            </button>
+          </div>
           <div className="flex-1 overflow-y-auto pr-2 space-y-2 hide-scrollbar">
             {currentTeamPlayers.filter(p => (assignmentModal.match.attendees || []).includes(p.id)).map(p => {
               const currentTeam = (assignmentModal.match.teamAssignments || {})[p.id] || null;
@@ -8353,6 +8382,16 @@ const renderGoalFlowModal = () => {
                     </div>
                   );
                 })}
+                {(() => {
+                  const unassignedPlayers = players.filter(p => (shareMatch.attendees || []).includes(p.id) && !((shareMatch.teamAssignments || {})[p.id]));
+                  if (unassignedPlayers.length === 0) return null;
+                  return (
+                    <div>
+                      <div className="text-xl font-black mb-4 text-slate-400">미편성 참석자</div>
+                      <div className="flex flex-wrap gap-4">{unassignedPlayers.map(p => ( <div key={p.id} className="bg-slate-900 px-5 py-3 rounded-full border border-slate-600/50 flex items-center"><span className="font-bold text-white text-xl tracking-wide">{p.name}</span></div> ))}</div>
+                    </div>
+                  );
+                })()}
               </div>
           </div>
         </div>
@@ -8863,7 +8902,7 @@ const renderGoalFlowModal = () => {
                   {m.matchType !== 'external' && (() => {
                       const attendees = m.attendees || []; const assignments = m.teamAssignments || {}; const unassigned = attendees.filter(id => !assignments[id]);
                       if (attendees.length === 0) return <div className="text-[11px] bg-slate-800 text-slate-400 px-2 py-1 rounded inline-block mb-2 border border-slate-700">👥 아직 참석자가 없습니다</div>;
-                      if (unassigned.length > 0) return <div className="text-[11px] bg-red-500/10 text-red-400 px-2 py-1 rounded inline-block mb-2 border border-red-500/20 animate-pulse">⚠️ 팀 편성 필요 ({unassigned.length}명 미정)</div>;
+                      if (unassigned.length > 0) return <div className="text-[11px] bg-slate-800 text-slate-300 px-2 py-1 rounded inline-block mb-2 border border-slate-700">👥 참석 {attendees.length}명 (팀 미정 {unassigned.length}명 · 기록 가능)</div>;
                       return <div className="text-[11px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded inline-block mb-2 border border-emerald-500/20">✅ 팀 편성 완료</div>;
                   })()}
                   <div className="flex items-center gap-2 mb-1 mt-1">
