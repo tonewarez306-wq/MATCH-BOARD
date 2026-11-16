@@ -90,10 +90,12 @@ const captureToCanvas = async (element, { scale = 3, backgroundColor = '#0F172A'
     onclone: (clonedDoc) => {
       const style = clonedDoc.createElement('style');
       style.textContent = `
-        /* html2canvas 한글/이모지 베이스라인 하단 쏠림 보정 (flex align-items 대신 inline-block + 비대칭 패딩 사용) */
-        .h2c-pill { display: inline-block !important; line-height: 1.15 !important; padding-top: 2px !important; padding-bottom: 6px !important; vertical-align: middle !important; }
-        .h2c-chip { display: inline-block !important; line-height: 1.15 !important; padding-top: 5px !important; padding-bottom: 10px !important; vertical-align: middle !important; }
-        .h2c-shift { position: relative !important; top: -2.5px !important; }
+        /* Tailwind Preflight(img, svg { display: block })로 인한 html2canvas 텍스트 하단 쏠림(#2775) 근본 해결 */
+        img, svg { display: inline-block !important; }
+        .h2c-pill { display: inline-block !important; line-height: 1 !important; padding-top: 1px !important; padding-bottom: 6px !important; vertical-align: middle !important; }
+        .h2c-chip { display: inline-block !important; line-height: 1 !important; padding-top: 4px !important; padding-bottom: 10px !important; vertical-align: middle !important; }
+        .h2c-chip > span { position: relative !important; top: -2px !important; }
+        .h2c-shift { position: relative !important; top: -2px !important; }
       `;
       clonedDoc.head.appendChild(style);
     }
