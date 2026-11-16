@@ -983,12 +983,17 @@ export default function App() {
 
   const saveEventMatchResult = async (targetMatch, nextEventMatch) => {
     if (!targetMatch?.id || isProcessing) return;
+    const updatedMatch = {
+      ...targetMatch,
+      eventMatch: nextEventMatch
+    };
+    setMatches(prev => prev.map(m => (m.id === targetMatch.id ? updatedMatch : m)));
+    setDetailModal(prev => (prev.isOpen && prev.match?.id === targetMatch.id ? { ...prev, match: updatedMatch } : prev));
     setIsProcessing(true);
     try {
-      await setDoc(doc(db, 'matches', targetMatch.id), {
-        ...targetMatch,
-        eventMatch: nextEventMatch
-      });
+      await setDoc(doc(db, 'matches', targetMatch.id), updatedMatch);
+    } catch (e) {
+      console.error('saveEventMatchResult error:', e);
     } finally {
       setIsProcessing(false);
     }
