@@ -3,6 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, deleteDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { Calendar, Users, BarChart2, Plus, MapPin, Trophy, Shield, ChevronRight, ChevronLeft, X, Play, Edit, Trash2, CheckCircle, Activity, List, LogOut, Share2, MessageCircle, Footprints, Settings, Target, Undo, Redo, MousePointer, ArrowUpRight, TrendingUp, Square, XCircle, Video, PlayCircle, RotateCcw } from 'lucide-react';
+import { domToCanvas } from 'modern-screenshot';
 
 const firebaseConfig = { apiKey: "AIzaSyCO99Km34_p0paqFM8wbWD0odUU8UJ9ph4", authDomain: "matchboard-d010e.firebaseapp.com", projectId: "matchboard-d010e", storageBucket: "matchboard-d010e.appspot.com", messagingSenderId: "693534026774", appId: "1:693534026774:web:a61dd8607c492e5e7c1937", measurementId: "G-VVB38BS06J" };
 const app = initializeApp(firebaseConfig);
@@ -82,15 +83,41 @@ const loadHtml2Canvas = () => {
 };
 
 const captureToCanvas = async (element, { scale = 3, backgroundColor = '#0F172A' } = {}) => {
+  const rect = element.getBoundingClientRect ? element.getBoundingClientRect() : { width: 440, height: 600 };
+  const maxDim = Math.max(rect.width || 440, rect.height || 600);
+  const safeScale = maxDim * scale > 3800 ? Math.max(1.5, Math.floor((3800 / maxDim) * 10) / 10) : scale;
+  try {
+    const canvas = await domToCanvas(element, {
+      scale: safeScale,
+      maximumCanvasSize: 4096,
+      backgroundColor,
+      font: false,
+      timeout: 15000,
+      features: {
+        restoreScrollPosition: false
+      },
+      filter: (node) => {
+        if (node && node.nodeType === 1 && node.getAttribute?.('data-html2canvas-ignore') === 'true') {
+          return false;
+        }
+        return true;
+      }
+    });
+    if (canvas && canvas.width > 0 && canvas.height > 0) {
+      return canvas;
+    }
+  } catch (err) {
+    console.warn('modern-screenshot fallback to html2canvas:', err);
+  }
+
   const html2canvas = await loadHtml2Canvas();
   return html2canvas(element, {
-    scale,
+    scale: safeScale,
     useCORS: true,
     backgroundColor,
     onclone: (clonedDoc) => {
       const style = clonedDoc.createElement('style');
       style.textContent = `
-        /* Tailwind Preflight(img, svg { display: block })로 인한 html2canvas 텍스트 하단 쏠림(#2775) 근본 해결 */
         img, svg { display: inline-block !important; }
         .h2c-pill { display: inline-block !important; line-height: 1 !important; padding-top: 1px !important; padding-bottom: 6px !important; vertical-align: middle !important; }
         .h2c-pill-sm { line-height: 1.1 !important; padding-top: 1px !important; padding-bottom: 4px !important; }
@@ -8407,7 +8434,7 @@ const renderGoalFlowModal = () => {
     const shareMatch = shareModal.data;
     const actualTeamCount = getMatchTeamCount(shareMatch);
     return (
-      <div className="fixed top-0 left-0 w-[440px] opacity-0 pointer-events-none z-[-100] overflow-visible">
+      <div className="fixed top-0 -left-[9999px] w-[440px] pointer-events-none z-[-100] overflow-visible">
         <div id="capture-area-hidden" className="bg-slate-800 w-full flex flex-col text-left text-slate-200 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
           {/* 상단 헤더 (실제 결과 팝업 UI와 100% 동일 규격) */}
           <div className="p-6 border-b border-slate-700 bg-slate-900">
