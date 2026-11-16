@@ -7629,18 +7629,18 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
       <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-[100] animate-in fade-in">
         <div className="bg-slate-800 rounded-3xl w-full max-w-md border border-slate-700 max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
           <div className="p-6 border-b border-slate-700 bg-slate-900 shrink-0">
-            <div className="flex justify-between items-start mb-2">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${detailMatch.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : detailMatch.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>{detailMatch.matchType === 'external' ? '교류전' : detailMatch.matchType === 'futsal' ? '풋살' : '자체전'}</span>
+            <div className="flex justify-between items-start gap-2 mb-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border whitespace-nowrap shrink-0 ${detailMatch.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : detailMatch.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>{detailMatch.matchType === 'external' ? '교류전' : detailMatch.matchType === 'futsal' ? '풋살' : '자체전'}</span>
                   {detailMatch.matchType === 'internal' && detailMatch.eventMatch?.enabled && (
-                    <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">🎉 {detailMatch.eventMatch.name || '이벤트 경기'}</span>
+                    <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 whitespace-nowrap max-w-full truncate">🎉 {detailMatch.eventMatch.name || '이벤트 경기'}</span>
                   )}
-                  <h2 className="text-lg font-black text-white">{detailMatch.date} 결과</h2>
                 </div>
-                <p className="text-sm text-slate-400"><MapPin size={12} className="inline mr-1"/>{detailMatch.location}</p>
+                <h2 className="text-lg font-black text-white leading-snug">{detailMatch.date} 결과</h2>
+                <p className="text-sm text-slate-400 flex items-center gap-1 mt-0.5 break-keep"><MapPin size={12} className="shrink-0"/><span>{detailMatch.location}</span></p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 shrink-0">
                 <button onClick={() => triggerShare(detailMatch)} className="text-yellow-500 bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"><Share2 size={20}/></button>
                 <button onClick={() => { setDetailModal({isOpen: false, match: null}); setDetailModalMatchId(null); }} className="text-slate-400 bg-slate-800 p-2 rounded-full hover:text-white transition"><X size={20}/></button>
               </div>
@@ -7655,9 +7655,9 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
               const evPoints = Math.max(0, parseInt(ev.points, 10) || 0);
               return (
                 <div className="bg-amber-500/10 rounded-2xl p-4 border border-amber-500/30 space-y-3">
-                  <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
-                    <span className="text-xs font-black text-amber-300 flex items-center gap-1.5">🎉 이벤트 경기 · {ev.name || '이벤트 경기'}</span>
-                    <span className="text-[11px] font-black text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-md">승점 +{evPoints}점</span>
+                  <div className="flex items-center justify-between gap-2 border-b border-amber-500/20 pb-2">
+                    <span className="text-xs font-black text-amber-300 flex items-center gap-1.5 min-w-0 truncate">🎉 이벤트 경기 · {ev.name || '이벤트 경기'}</span>
+                    <span className="text-[11px] font-black text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-md whitespace-nowrap shrink-0">승점 +{evPoints}점</span>
                   </div>
                   {ev.winnerTeam ? (
                     <div className="flex items-center justify-around bg-slate-900/90 rounded-xl p-3 border border-slate-700/80">
@@ -8447,21 +8447,21 @@ const renderGoalFlowModal = () => {
               </div>
               <span className="text-[10px] font-black italic tracking-tight text-slate-500 shrink-0 h2c-shift">MATCHBOARD</span>
             </div>
-            <div className="flex items-center gap-2 flex-wrap mb-1.5">
-              <span className={`h2c-pill text-[10px] font-bold px-2 py-0.5 rounded border ${shareMatch.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : shareMatch.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>
+            <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+              <span className={`h2c-pill text-[10px] font-bold px-2 py-0.5 rounded border whitespace-nowrap shrink-0 ${shareMatch.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : shareMatch.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>
                 {shareMatch.matchType === 'external' ? '교류전' : shareMatch.matchType === 'futsal' ? '풋살' : '자체전'}
               </span>
               {shareMatch.matchType === 'internal' && shareMatch.eventMatch?.enabled && (
-                <span className="h2c-pill text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
+                <span className="h2c-pill text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 whitespace-nowrap max-w-full truncate">
                   🎉 {shareMatch.eventMatch.name || '이벤트 경기'}
                 </span>
               )}
-              <h2 className="text-lg font-black text-white h2c-shift">{shareMatch.date} 결과</h2>
             </div>
-            <p className="text-sm text-slate-400 flex items-center gap-1.5 flex-wrap h2c-shift">
+            <h2 className="text-lg font-black text-white leading-snug mb-1 h2c-shift">{shareMatch.date} 결과</h2>
+            <p className="text-sm text-slate-400 flex items-center gap-1.5 flex-wrap break-keep h2c-shift">
               <span className="inline-flex items-center gap-1"><MapPin size={12} className="inline shrink-0"/>{shareMatch.matchType === 'external' ? `${shareMatch.location} · vs ${shareMatch.opponentName}` : shareMatch.location}</span>
               <span className="text-slate-600">·</span>
-              <span className="text-xs">{formatTimeAmPm(shareMatch.time)} · 참석 {(shareMatch.attendees || []).length}명</span>
+              <span className="text-xs whitespace-nowrap">{formatTimeAmPm(shareMatch.time)} · 참석 {(shareMatch.attendees || []).length}명</span>
             </p>
           </div>
 
@@ -8478,9 +8478,9 @@ const renderGoalFlowModal = () => {
               const evPoints = Math.max(0, parseInt(ev.points, 10) || 0);
               return (
                 <div className="bg-amber-500/10 rounded-2xl p-4 border border-amber-500/30 space-y-3">
-                  <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
-                    <span className="text-xs font-black text-amber-300 flex items-center gap-1.5 h2c-shift">🎉 이벤트 경기 · {ev.name || '이벤트 경기'}</span>
-                    <span className="h2c-pill text-[11px] font-black text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-md">승점 +{evPoints}점</span>
+                  <div className="flex items-center justify-between gap-2 border-b border-amber-500/20 pb-2">
+                    <span className="text-xs font-black text-amber-300 flex items-center gap-1.5 min-w-0 truncate h2c-shift">🎉 이벤트 경기 · {ev.name || '이벤트 경기'}</span>
+                    <span className="h2c-pill text-[11px] font-black text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-md whitespace-nowrap shrink-0">승점 +{evPoints}점</span>
                   </div>
                   {ev.winnerTeam ? (
                     <div className="flex items-center justify-around bg-slate-900/90 rounded-xl p-3 border border-slate-700/80">
@@ -9085,10 +9085,12 @@ const renderGoalFlowModal = () => {
                       if (unassigned.length > 0) return <div className="text-[11px] bg-slate-800 text-slate-300 px-2 py-1 rounded inline-block mb-2 border border-slate-700">👥 참석 {attendees.length}명 (팀 미정 {unassigned.length}명 · 기록 가능)</div>;
                       return <div className="text-[11px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded inline-block mb-2 border border-emerald-500/20">✅ 팀 편성 완료</div>;
                   })()}
-                  <div className="flex items-center gap-2 mb-1 mt-1">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${m.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : m.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>{m.matchType === 'external' ? '교류전' : m.matchType === 'futsal' ? '풋살' : '자체전'}</span>
-                    {m.matchType === 'internal' && m.eventMatch?.enabled && <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">🎉 {m.eventMatch.name || '이벤트'}</span>}
-                    <div className="text-lg font-bold text-white">{m.location}</div>
+                  <div className="space-y-1.5 mt-1.5 mb-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border whitespace-nowrap shrink-0 ${m.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : m.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>{m.matchType === 'external' ? '교류전' : m.matchType === 'futsal' ? '풋살' : '자체전'}</span>
+                      {m.matchType === 'internal' && m.eventMatch?.enabled && <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 whitespace-nowrap max-w-full truncate">🎉 {m.eventMatch.name || '이벤트'}</span>}
+                    </div>
+                    <div className="text-lg font-bold text-white leading-snug break-keep">{m.location}</div>
                   </div>
                   <div className="text-xs text-slate-400 mb-4 mt-1">{m.matchType === 'external' ? `우리 팀 VS ${m.opponentName}` : `총 ${m.teamCount || 2}팀 파전`} • 총 {m.totalQuarters}쿼터 • 참석 {(m.attendees || []).length}명</div>
                   <div className="flex gap-2">
@@ -9101,10 +9103,12 @@ const renderGoalFlowModal = () => {
                 <div key={m.id} onClick={() => { setDetailModalMatchId(m.id); setDetailModal({isOpen: true, match: m}); }} className="bg-slate-900 p-5 rounded-2xl border border-slate-700 opacity-80 hover:opacity-100 hover:border-slate-500 cursor-pointer transition relative group">
                   <div className="absolute top-3 right-3 flex gap-2 items-center"><button onClick={(e) => { e.stopPropagation(); triggerShare(m); }} className="text-yellow-500 hover:text-yellow-400 p-1 bg-slate-800 rounded-md ml-1"><Share2 size={14}/></button>{isAdmin && <button onClick={(e) => { e.stopPropagation(); requestDeleteMatch(m.id); }} className="text-slate-500 hover:text-red-400 p-1 bg-slate-800 rounded-md ml-1"><Trash2 size={14}/></button>}</div>
                   <div className="flex items-center gap-2 text-sm text-slate-400 font-bold mb-2"><CheckCircle size={14}/> {m.date} (종료)</div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${m.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : m.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>{m.matchType === 'external' ? '교류전' : m.matchType === 'futsal' ? '풋살' : '자체전'}</span>
-                    {m.matchType === 'internal' && m.eventMatch?.enabled && <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">🎉 {m.eventMatch.name || '이벤트'}</span>}
-                    <div className="text-base font-bold text-slate-300">{m.location}</div>
+                  <div className="space-y-1.5 mb-3">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border whitespace-nowrap shrink-0 ${m.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : m.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>{m.matchType === 'external' ? '교류전' : m.matchType === 'futsal' ? '풋살' : '자체전'}</span>
+                      {m.matchType === 'internal' && m.eventMatch?.enabled && <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 whitespace-nowrap max-w-full truncate">🎉 {m.eventMatch.name || '이벤트'}</span>}
+                    </div>
+                    <div className="text-base font-bold text-slate-200 leading-snug break-keep">{m.location}</div>
                   </div>
                   <div className="bg-slate-800 rounded-xl p-3 mb-3 border border-slate-700/50">
                     <div className="text-xs text-slate-400 mb-2 font-bold border-b border-slate-700 pb-2 flex justify-between"><span>순위표</span><span className="text-blue-400 font-normal">상세보기 &gt;</span></div>
