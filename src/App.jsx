@@ -269,7 +269,7 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAutoRecording, setIsAutoRecording] = useState(false); 
   
-  const playbackRef = useRef(null); const playbackTimerRef = useRef(null); const boardRef = useRef(null); const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 }); const dragStartTokensRef = useRef(null); const activeDrawingData = useRef(null); const svgArrowRef = useRef(null); const svgPassRef = useRef(null); const svgZoneRef = useRef(null);
+  const playbackRef = useRef(null); const playbackTimerRef = useRef(null); const boardRef = useRef(null); const tacticShareRef = useRef(null); const pointerDownInfo = useRef({ x: 0, y: 0, time: 0 }); const dragStartTokensRef = useRef(null); const activeDrawingData = useRef(null); const svgArrowRef = useRef(null); const svgPassRef = useRef(null); const svgZoneRef = useRef(null);
 
   // GPS 분석 및 트래커 상태
   const [gpsSession, setGpsSession] = useState(null);
@@ -1100,13 +1100,24 @@ export default function App() {
   };
 
   const triggerTacticShare = () => {
-    if (!boardRef.current) return; setShareModal({ isOpen: true, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
+    const targetEl = tacticShareRef.current || boardRef.current;
+    if (!targetEl) return;
+    setShareModal({ isOpen: true, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
     setTimeout(async () => {
       try {
-        const html2canvas = await loadHtml2Canvas(); const canvas = await html2canvas(boardRef.current, { scale: 2, useCORS: true, backgroundColor: '#047857' });
-        canvas.toBlob((blob) => { if (!blob) return; const file = new File([blob], 'matchboard_tactic.png', { type: 'image/png' }); const imgUrl = URL.createObjectURL(blob); setShareModal(prev => ({ ...prev, step: 2, file, imgUrl, isVideo: false })); }, 'image/png');
-      } catch (err) { setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' }); setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false }); }
-    }, 500); 
+        const html2canvas = await loadHtml2Canvas();
+        const canvas = await html2canvas(targetEl, { scale: 3, useCORS: true, backgroundColor: '#0F172A' });
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const file = new File([blob], 'matchboard_tactic.png', { type: 'image/png' });
+          const imgUrl = URL.createObjectURL(blob);
+          setShareModal(prev => ({ ...prev, step: 2, file, imgUrl, isVideo: false }));
+        }, 'image/png');
+      } catch (err) {
+        setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' });
+        setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
+      }
+    }, 350);
   };
 
   const downloadShareFile = () => {
@@ -1394,35 +1405,53 @@ export default function App() {
       let frameIdx = 0; let progress = 0; const fps = 30; const stepsPerFrame = Math.round(fps * 1.15);
       const draw = () => {
           const currentFrame = animationFrames[frameIdx]; const nextFrame = animationFrames[Math.min(frameIdx + 1, animationFrames.length - 1)];
-          // 1. 상단 분리형 전술 설명 헤더 영역 (구장 화면과 완전 분리 · 2줄 자동 줄바꿈 지원)
+          // 1. 상단 분리형 전술 설명 카드 (앱 UI와 동일한 다크 슬레이트 카드 + 단계 배지 + 줄바꿈 해설)
           ctx.fillStyle = '#0F172A';
           ctx.fillRect(0, 0, canvas.width, headerH);
-          ctx.strokeStyle = 'rgba(52, 211, 153, 0.45)';
-          ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.moveTo(0, headerH - 1); ctx.lineTo(canvas.width, headerH - 1); ctx.stroke();
+          ctx.fillStyle = '#1E293B';
+          if (ctx.roundRect) {
+            ctx.beginPath(); ctx.roundRect(12, 10, canvas.width - 24, headerH - 20, 14); ctx.fill();
+            ctx.strokeStyle = 'rgba(71, 85, 105, 0.8)'; ctx.lineWidth = 1.5; ctx.stroke();
+          }
 
-          const stepTitleText = currentFrame.stepTitle || `${frameIdx + 1}단계 / ${animationFrames.length}단계`;
-          const stepNoteText = currentFrame.coachingNote || tacticScenarioSummary || '';
+          const badgeText = `${frameIdx + 1} / ${animationFrames.length}`;
+          ctx.font = 'bold 12px sans-serif';
+          const badgeW = ctx.measureText(badgeText).width + 16;
+          ctx.fillStyle = 'rgba(16, 185, 129, 0.2)';
+          if (ctx.roundRect) {
+            ctx.beginPath(); ctx.roundRect(22, 18, badgeW, 20, 6); ctx.fill();
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.45)'; ctx.lineWidth = 1; ctx.stroke();
+          }
+          ctx.fillStyle = '#6EE7B7';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(badgeText, 22 + badgeW / 2, 28);
+
+          const stepTitleText = currentFrame.stepTitle || `${frameIdx + 1}단계`;
           ctx.fillStyle = '#34D399';
           ctx.font = 'bold 14px sans-serif';
           ctx.textAlign = 'left';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(`📋 ${tacticScenarioTitle || 'MATCHBOARD 전술 보드'}  ·  ${stepTitleText}`, 18, 22);
+          ctx.fillText(stepTitleText, 22 + badgeW + 8, 28);
+
+          const stepNoteText = currentFrame.coachingNote || tacticScenarioSummary || '';
           if (stepNoteText) {
             ctx.fillStyle = '#FDE68A';
-            ctx.font = 'bold 13px sans-serif';
-            const maxW = canvas.width - 36;
-            let line1 = '';
-            let line2 = '';
-            for (const ch of stepNoteText) {
-              if (!line2 && ctx.measureText(line1 + ch).width <= maxW) {
-                line1 += ch;
+            ctx.font = 'bold 12.5px sans-serif';
+            const maxW = canvas.width - 44;
+            const lines = [];
+            let cur = '';
+            for (const ch of `💡 ${stepNoteText}`) {
+              if (ctx.measureText(cur + ch).width <= maxW) {
+                cur += ch;
               } else {
-                line2 += ch;
+                lines.push(cur);
+                cur = ch;
+                if (lines.length === 2) break;
               }
             }
-            ctx.fillText(line1, 18, line2 ? 49 : 56);
-            if (line2) ctx.fillText(line2, 18, 72);
+            if (cur && lines.length < 2) lines.push(cur);
+            if (lines[0]) ctx.fillText(lines[0], 22, lines.length > 1 ? 52 : 60);
+            if (lines[1]) ctx.fillText(lines[1], 22, 72);
           }
 
           // 2. 하단 구장 및 선수/화살표 렌더링 영역 (y = headerH 부터 시작)
@@ -4163,7 +4192,7 @@ ${roleOrderGuide}
     setTimeout(async () => {
       try {
         const html2canvas = await loadHtml2Canvas();
-        const canvas = await html2canvas(gpsCardCaptureRef.current, { scale: 2, useCORS: true, backgroundColor: '#0F172A' });
+        const canvas = await html2canvas(gpsCardCaptureRef.current, { scale: 3, useCORS: true, backgroundColor: '#0F172A' });
         canvas.toBlob((blob) => {
           if (!blob) return;
           const file = new File([blob], 'matchboard_gps_heatmap.png', { type: 'image/png' });
@@ -8352,67 +8381,134 @@ const renderGoalFlowModal = () => {
   };
 
   const renderHiddenCaptureArea = () => {
-    if (!shareModal.isOpen || !shareModal.data || shareModal.isVideo) return null; const shareMatch = shareModal.data;
+    if (!shareModal.isOpen || !shareModal.data || shareModal.isVideo) return null;
+    const shareMatch = shareModal.data;
+    const actualTeamCount = getMatchTeamCount(shareMatch);
     return (
-      <div className="fixed top-0 left-0 w-[960px] opacity-0 pointer-events-none z-[-100] overflow-visible">
-        <div id="capture-area-hidden" className="bg-slate-900 p-12 w-full flex flex-col items-center text-left text-slate-200 border-none pb-16">
-          <div className="mb-8 w-full pb-6 border-b border-slate-700"><h3 className="font-black text-white text-5xl leading-tight mb-4">{shareMatch.matchType === 'external' ? `[교류전] vs ${shareMatch.opponentName}` : shareMatch.matchType === 'futsal' ? `[풋살] ${shareMatch.location}` : `[자체전] ${shareMatch.location}`}</h3><p className="text-slate-400 text-2xl font-medium">{new Date(shareMatch.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} {formatTimeAmPm(shareMatch.time)} · 참석 {(shareMatch.attendees || []).length}명</p></div>
-          <div className="w-full bg-slate-800 rounded-3xl p-8 mb-8 border border-slate-700/50 shadow-md"><div className="font-black text-slate-400 text-2xl border-b border-slate-700/50 pb-4 mb-6">순위표</div><StandingsTable match={shareMatch} isLarge={true} /></div>
-          {shareMatch.matchType === 'internal' && shareMatch.eventMatch?.enabled && (() => {
-            const ev = shareMatch.eventMatch;
-            const evPoints = Math.max(0, parseInt(ev.points, 10) || 0);
-            return (
-              <div className="w-full bg-amber-500/10 rounded-3xl p-8 mb-8 border border-amber-500/40 shadow-md">
-                <div className="flex items-center justify-between border-b border-amber-500/30 pb-4 mb-6">
-                  <span className="font-black text-amber-300 text-2xl">🎉 이벤트 경기 · {ev.name || '이벤트 경기'}</span>
-                  <span className="font-black text-amber-400 text-xl bg-amber-500/20 px-4 py-1.5 rounded-xl">승점 +{evPoints}점</span>
+      <div className="fixed top-0 left-0 w-[440px] opacity-0 pointer-events-none z-[-100] overflow-visible">
+        <div id="capture-area-hidden" className="bg-slate-800 w-full flex flex-col text-left text-slate-200 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
+          {/* 상단 헤더 (실제 결과 팝업 UI와 100% 동일 규격) */}
+          <div className="p-6 border-b border-slate-700 bg-slate-900">
+            <div className="flex items-center justify-between gap-2 mb-2.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-7 h-7 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700 text-xs overflow-hidden shrink-0">
+                  {activeTeam?.logo?.startsWith('data:image') ? <img src={activeTeam.logo} alt="logo" className="w-full h-full object-cover" /> : (activeTeam?.logo || '⚽')}
                 </div>
-                {ev.winnerTeam ? (
-                  <div className="flex items-center justify-around bg-slate-800/90 rounded-2xl p-6 border border-slate-700/60">
-                    <div className="text-center flex-1">
-                      <div className="text-xl font-black text-emerald-400 mb-2">승 (+{evPoints}점)</div>
-                      <div className={`text-3xl font-black ${TEAM_TEXT_COLORS[ev.winnerTeam]}`}>{getTeamDisplayName(shareMatch, ev.winnerTeam)}</div>
-                    </div>
-                    <span className="text-slate-500 font-black italic text-3xl mx-6">VS</span>
-                    <div className="text-center flex-1">
-                      <div className="text-xl font-black text-red-400 mb-2">패</div>
-                      <div className={`text-3xl font-black ${ev.loserTeam ? TEAM_TEXT_COLORS[ev.loserTeam] : 'text-slate-400'}`}>
-                        {ev.loserTeam ? getTeamDisplayName(shareMatch, ev.loserTeam) : '미지정'}
+                <span className="text-[11px] font-black text-slate-300 truncate">{activeTeam?.name || 'MATCHBOARD'}</span>
+              </div>
+              <span className="text-[10px] font-black italic tracking-tight text-slate-500 shrink-0">MATCHBOARD</span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap mb-1.5">
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${shareMatch.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : shareMatch.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>
+                {shareMatch.matchType === 'external' ? '교류전' : shareMatch.matchType === 'futsal' ? '풋살' : '자체전'}
+              </span>
+              {shareMatch.matchType === 'internal' && shareMatch.eventMatch?.enabled && (
+                <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
+                  🎉 {shareMatch.eventMatch.name || '이벤트 경기'}
+                </span>
+              )}
+              <h2 className="text-lg font-black text-white">{shareMatch.date} 결과</h2>
+            </div>
+            <p className="text-sm text-slate-400 flex items-center gap-1.5 flex-wrap">
+              <span className="inline-flex items-center gap-1"><MapPin size={12} className="inline shrink-0"/>{shareMatch.matchType === 'external' ? `${shareMatch.location} · vs ${shareMatch.opponentName}` : shareMatch.location}</span>
+              <span className="text-slate-600">·</span>
+              <span className="text-xs">{formatTimeAmPm(shareMatch.time)} · 참석 {(shareMatch.attendees || []).length}명</span>
+            </p>
+          </div>
+
+          <div className="p-6 space-y-5 bg-slate-800">
+            {/* 순위표 */}
+            <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
+              <div className="text-xs text-slate-400 mb-3 font-bold border-b border-slate-800 pb-2">순위표</div>
+              <StandingsTable match={shareMatch} isLarge={false} />
+            </div>
+
+            {/* 이벤트 경기 결과 */}
+            {shareMatch.matchType === 'internal' && shareMatch.eventMatch?.enabled && (() => {
+              const ev = shareMatch.eventMatch;
+              const evPoints = Math.max(0, parseInt(ev.points, 10) || 0);
+              return (
+                <div className="bg-amber-500/10 rounded-2xl p-4 border border-amber-500/30 space-y-3">
+                  <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
+                    <span className="text-xs font-black text-amber-300 flex items-center gap-1.5">🎉 이벤트 경기 · {ev.name || '이벤트 경기'}</span>
+                    <span className="text-[11px] font-black text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-md">승점 +{evPoints}점</span>
+                  </div>
+                  {ev.winnerTeam ? (
+                    <div className="flex items-center justify-around bg-slate-900/90 rounded-xl p-3 border border-slate-700/80">
+                      <div className="text-center">
+                        <div className="text-[10px] font-black text-emerald-400 mb-0.5">승 (+{evPoints}점)</div>
+                        <div className={`text-base font-black ${TEAM_TEXT_COLORS[ev.winnerTeam]}`}>{getTeamDisplayName(shareMatch, ev.winnerTeam)}</div>
+                      </div>
+                      <span className="text-slate-600 font-black italic text-sm">VS</span>
+                      <div className="text-center">
+                        <div className="text-[10px] font-black text-red-400 mb-0.5">패</div>
+                        <div className={`text-base font-black ${ev.loserTeam ? TEAM_TEXT_COLORS[ev.loserTeam] : 'text-slate-400'}`}>
+                          {ev.loserTeam ? getTeamDisplayName(shareMatch, ev.loserTeam) : '미지정'}
+                        </div>
                       </div>
                     </div>
+                  ) : (
+                    <div className="text-xs text-slate-400 text-center py-2 bg-slate-900/60 rounded-xl">아직 이벤트 경기 승/패가 입력되지 않았습니다.</div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* 쿼터별 기록 (실제 앱과 동일 1열 카드 + 골키퍼 배지 + 줄바꿈 없는 시간) */}
+            <div className="space-y-4">
+              {(shareMatch.quarterScores || []).length > 0 ? (shareMatch.quarterScores || []).map(qs => {
+                const qLogs = (shareMatch.logs || []).filter(l => l.quarter === qs.quarter);
+                return (
+                  <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
+                    <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
+                      <span className="absolute left-0 font-black text-blue-400 text-sm">{qs.quarter}Q</span>
+                      <span className="font-bold text-white text-lg flex items-center">
+                        <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(shareMatch, qs.team1)}</span>
+                        <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span>
+                        <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(shareMatch, qs.team2)}</span>
+                      </span>
+                    </div>
+                    {renderQuarterGkBadge(shareMatch, qs)}
+                    {qLogs.length > 0 ? (
+                      <div className="space-y-3">
+                        {qLogs.map(l => {
+                          const isLeft = l.teamLetter === qs.team1;
+                          return (
+                            <div key={l.id} className={`flex items-start gap-2.5 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
+                              <span className="text-slate-500 text-[10px] whitespace-nowrap shrink-0 mt-1">{l.time}</span>
+                              <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
+                                <div className="text-white font-bold text-sm flex items-center gap-1">
+                                  <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
+                                  {l.isPK && <span className="text-[9px] bg-red-500/20 text-red-400 px-1 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
+                                </div>
+                                {l.remark && <div className="text-[11px] bg-slate-800/80 px-2 py-1 rounded text-slate-300 mt-1 inline-block border border-slate-700">{l.remark}</div>}
+                                {l.assistName && <div className="text-slate-400 mt-1 flex items-center gap-1"><Footprints size={12} className="text-slate-500"/> <span className="text-xs">{l.assistName}</span></div>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>
+                    )}
                   </div>
-                ) : (
-                  <div className="text-2xl text-slate-400 text-center py-4">이벤트 경기 승/패 미입력</div>
-                )}
-              </div>
-            );
-          })()}
-          <div className="w-full mb-8 grid grid-cols-2 gap-8">
-                 {(shareMatch.quarterScores || []).length > 0 ? (shareMatch.quarterScores || []).map(qs => {
-                   const qLogs = (shareMatch.logs || []).filter(l => l.quarter === qs.quarter);
-                   return (
-                     <div key={qs.quarter} className="w-full bg-slate-800 rounded-3xl p-8 border border-slate-700/50 shadow-md">
-                        <div className="flex flex-col items-center border-b border-slate-700/50 pb-6 mb-6"><span className="font-black text-blue-400 text-2xl mb-3">{qs.quarter}Q</span><span className="font-black text-white text-3xl text-center flex items-center justify-center w-full"><span className={`${TEAM_TEXT_COLORS[qs.team1]} flex-1 text-right`}>{getTeamDisplayName(shareMatch, qs.team1)}</span> <span className="text-slate-500 mx-5 shrink-0">{qs.score1} : {qs.score2}</span> <span className={`${TEAM_TEXT_COLORS[qs.team2]} flex-1 text-left`}>{getTeamDisplayName(shareMatch, qs.team2)}</span></span></div>
-                        <div className="space-y-6">
-                          {qLogs.length > 0 ? qLogs.map(l => {
-                            const isLeft = l.teamLetter === qs.team1;
-                            return ( <div key={l.id} className={`flex items-start gap-5 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}><span className="text-slate-500 text-xl w-16 shrink-0 text-center mt-1">{l.time}</span><div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}><div className="text-slate-100 font-bold text-2xl flex items-center gap-2"><span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}{l.isPK && <span className="text-base bg-red-500/20 text-red-400 px-2 py-1 rounded ml-2 border border-red-500/30">PK</span>}</div>{l.remark && <div className="text-lg bg-slate-900/80 px-4 py-2 rounded-lg text-slate-300 mt-2 inline-block border border-slate-700/50">{l.remark}</div>}{l.assistName && <div className="text-slate-500 mt-2 flex items-center gap-2"><Footprints size={20} className="text-slate-500"/> <span className="text-xl">{l.assistName}</span></div>}</div></div> )
-                          }) : <div className="text-xl text-slate-500 text-center py-6 italic">득점 기록이 없습니다.</div>}
-                        </div>
-                     </div>
-                   )
-                 }) : <div className="text-2xl text-slate-500 text-center py-10 bg-slate-800 rounded-3xl border border-slate-700/50 shadow-md col-span-2">아직 기록이 없습니다.</div>}
-          </div>
-          <div className="w-full bg-slate-800 rounded-3xl p-8 border border-slate-700/50 shadow-md">
-              <div className="text-2xl text-slate-400 mb-6 font-black border-b border-slate-700/50 pb-4">참석자 최종 편성 명단</div>
-              <div className="space-y-8">
-                {TEAM_LETTERS.slice(0, getMatchTeamCount(shareMatch)).map(teamLetter => {
+                );
+              }) : (
+                <div className="text-sm text-slate-500 text-center py-6 bg-slate-900 rounded-2xl border border-slate-700">아직 기록이 없습니다.</div>
+              )}
+            </div>
+
+            {/* 참석자 최종 편성 명단 */}
+            <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
+              <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-800 pb-2">참석자 최종 편성 명단</div>
+              <div className="space-y-4">
+                {TEAM_LETTERS.slice(0, actualTeamCount).map(teamLetter => {
                   const teamPlayers = players.filter(p => (shareMatch.attendees || []).includes(p.id) && ((shareMatch.teamAssignments || {})[p.id]) === teamLetter);
                   if(teamPlayers.length === 0) return null;
                   return (
                     <div key={teamLetter}>
-                      <div className={`text-xl font-black mb-4 ${TEAM_TEXT_COLORS[teamLetter]}`}>{getTeamDisplayName(shareMatch, teamLetter)}</div>
-                      <div className="flex flex-wrap gap-4">{teamPlayers.map(p => ( <div key={p.id} className="bg-slate-900 px-5 py-3 rounded-full border border-slate-600/50 flex items-center"><span className="font-bold text-white text-xl tracking-wide">{p.name}</span></div> ))}</div>
+                      <div className={`text-[11px] font-black mb-2 ${TEAM_TEXT_COLORS[teamLetter]}`}>{getTeamDisplayName(shareMatch, teamLetter)}</div>
+                      <div className="flex flex-wrap gap-2">{teamPlayers.map(p => ( <div key={p.id} className="bg-slate-800 px-3.5 py-2 rounded-full border border-slate-600/50 flex items-center"><span className="font-bold text-white text-[13px] tracking-wide">{p.name}</span></div> ))}</div>
                     </div>
                   );
                 })}
@@ -8421,12 +8517,13 @@ const renderGoalFlowModal = () => {
                   if (unassignedPlayers.length === 0) return null;
                   return (
                     <div>
-                      <div className="text-xl font-black mb-4 text-slate-400">미편성 참석자</div>
-                      <div className="flex flex-wrap gap-4">{unassignedPlayers.map(p => ( <div key={p.id} className="bg-slate-900 px-5 py-3 rounded-full border border-slate-600/50 flex items-center"><span className="font-bold text-white text-xl tracking-wide">{p.name}</span></div> ))}</div>
+                      <div className="text-[11px] font-black mb-2 text-slate-400">미편성 참석자</div>
+                      <div className="flex flex-wrap gap-2">{unassignedPlayers.map(p => ( <div key={p.id} className="bg-slate-800 px-3.5 py-2 rounded-full border border-slate-600/50 flex items-center"><span className="font-bold text-white text-[13px] tracking-wide">{p.name}</span></div> ))}</div>
                     </div>
                   );
                 })()}
               </div>
+            </div>
           </div>
         </div>
       </div>
@@ -9506,51 +9603,52 @@ const renderGoalFlowModal = () => {
               )}
             </div>
 
-            {/* 구장 외부 분리형 전술 해설 박스 (복잡한 1~5단계 버튼 제거 · 여러 줄 해설 전체 표시) */}
-            {(animationFrames || []).length > 0 && animationFrames[activeFrameIndex] && (
-              <div className="bg-slate-900/95 border border-slate-700/90 rounded-2xl px-3 py-2 mb-2 shrink-0 shadow-sm space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 whitespace-nowrap">
-                      {activeFrameIndex + 1} / {animationFrames.length}
-                    </span>
-                    <span className="text-xs font-black text-emerald-400 truncate">
-                      {animationFrames[activeFrameIndex].stepTitle || `${activeFrameIndex + 1}단계`}
-                    </span>
+            {/* 구장 외부 분리형 전술 해설 박스 + 구장 (캡처 공유 시 앱 화면과 동일한 고품질 카드 형태로 함께 캡처) */}
+            <div ref={tacticShareRef} className="bg-slate-900/90 rounded-2xl p-1.5 space-y-2 shrink-0">
+              {(animationFrames || []).length > 0 && animationFrames[activeFrameIndex] && (
+                <div className="bg-slate-900/95 border border-slate-700/90 rounded-2xl px-3 py-2 shrink-0 shadow-sm space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 whitespace-nowrap">
+                        {activeFrameIndex + 1} / {animationFrames.length}
+                      </span>
+                      <span className="text-xs font-black text-emerald-400 truncate">
+                        {animationFrames[activeFrameIndex].stepTitle || `${activeFrameIndex + 1}단계`}
+                      </span>
+                    </div>
+                    <div data-html2canvas-ignore="true" className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => selectTacticFrame(Math.max(0, activeFrameIndex - 1))}
+                        disabled={isPlaying || activeFrameIndex <= 0}
+                        className="h-6 px-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold disabled:opacity-30 whitespace-nowrap"
+                      >
+                        ◀ 이전
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => selectTacticFrame(Math.min(animationFrames.length - 1, activeFrameIndex + 1))}
+                        disabled={isPlaying || activeFrameIndex >= animationFrames.length - 1}
+                        className="h-6 px-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold disabled:opacity-30 whitespace-nowrap"
+                      >
+                        다음 ▶
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => selectTacticFrame(Math.max(0, activeFrameIndex - 1))}
-                      disabled={isPlaying || activeFrameIndex <= 0}
-                      className="h-6 px-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold disabled:opacity-30 whitespace-nowrap"
-                    >
-                      ◀ 이전
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => selectTacticFrame(Math.min(animationFrames.length - 1, activeFrameIndex + 1))}
-                      disabled={isPlaying || activeFrameIndex >= animationFrames.length - 1}
-                      className="h-6 px-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold disabled:opacity-30 whitespace-nowrap"
-                    >
-                      다음 ▶
-                    </button>
-                  </div>
+
+                  <p className="text-xs font-bold text-amber-200 leading-relaxed break-keep">
+                    💡 {animationFrames[activeFrameIndex]?.coachingNote || tacticScenarioSummary || '선수 아이콘을 드래그하여 위치를 수정하거나 재생 버튼을 눌러보세요.'}
+                  </p>
                 </div>
+              )}
 
-                <p className="text-xs font-bold text-amber-200 leading-relaxed break-keep">
-                  💡 {animationFrames[activeFrameIndex]?.coachingNote || tacticScenarioSummary || '선수 아이콘을 드래그하여 위치를 수정하거나 재생 버튼을 눌러보세요.'}
-                </p>
-              </div>
-            )}
-
-            <div className="w-full flex justify-center items-center relative py-1 shrink-0">
-              <div 
-                ref={boardRef}
-                style={{ maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: (currentTool === 'move' || currentTool === 'erase' || isPlaying) ? 'pan-y' : 'none' }}
-                onPointerDown={handleBoardPointerDown} onPointerMove={handleBoardPointerMove} onPointerUp={handleBoardPointerUp} onPointerLeave={handleBoardPointerUp}
-                className={`relative bg-emerald-700 border-2 ${isAutoRecording ? 'border-red-500 shadow-[inset_0_0_20px_rgba(239,68,68,0.7)]' : isPlaying ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'border-white/80 shadow-inner'} overflow-hidden tactic-board select-none w-full mx-auto transition-colors duration-300`}
-              >
+              <div className="w-full flex justify-center items-center relative shrink-0">
+                <div 
+                  ref={boardRef}
+                  style={{ maxWidth: '100%', aspectRatio: pitchType === 'full' ? '2/3' : '4/3', touchAction: (currentTool === 'move' || currentTool === 'erase' || isPlaying) ? 'pan-y' : 'none' }}
+                  onPointerDown={handleBoardPointerDown} onPointerMove={handleBoardPointerMove} onPointerUp={handleBoardPointerUp} onPointerLeave={handleBoardPointerUp}
+                  className={`relative bg-emerald-700 border-2 ${isAutoRecording ? 'border-red-500 shadow-[inset_0_0_20px_rgba(239,68,68,0.7)]' : isPlaying ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'border-white/80 shadow-inner'} overflow-hidden tactic-board select-none w-full mx-auto transition-colors duration-300`}
+                >
                 {pitchType === 'full' && (
                   <>
                     <div className="absolute top-1/2 left-0 w-full border-t-2 border-white/60 pointer-events-none"></div>
@@ -9615,6 +9713,7 @@ const renderGoalFlowModal = () => {
                   </div>
                 ))}
               </div>
+            </div>
             </div>
 
             {tacticAiModal.isOpen && (
