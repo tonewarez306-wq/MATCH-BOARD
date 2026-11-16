@@ -81,6 +81,25 @@ const loadHtml2Canvas = () => {
   });
 };
 
+const captureToCanvas = async (element, { scale = 3, backgroundColor = '#0F172A' } = {}) => {
+  const html2canvas = await loadHtml2Canvas();
+  return html2canvas(element, {
+    scale,
+    useCORS: true,
+    backgroundColor,
+    onclone: (clonedDoc) => {
+      const style = clonedDoc.createElement('style');
+      style.textContent = `
+        /* html2canvas 한글/이모지 베이스라인 하단 쏠림 보정 (캡처 전용) */
+        .h2c-pill { display: inline-flex !important; align-items: center !important; justify-content: center !important; line-height: 1 !important; padding-top: 3px !important; padding-bottom: 6px !important; }
+        .h2c-chip { display: inline-flex !important; align-items: center !important; justify-content: center !important; line-height: 1 !important; padding-top: 6px !important; padding-bottom: 10px !important; }
+        .h2c-shift { position: relative !important; top: -1.5px !important; }
+      `;
+      clonedDoc.head.appendChild(style);
+    }
+  });
+};
+
 const loadLeaflet = () => {
   return new Promise((resolve, reject) => {
     if (window.L) { resolve(window.L); return; }
@@ -1093,7 +1112,7 @@ export default function App() {
     setTimeout(async () => {
       const captureTarget = document.getElementById('capture-area-hidden'); if (!captureTarget) return;
       try {
-        const html2canvas = await loadHtml2Canvas(); const canvas = await html2canvas(captureTarget, { scale: 3, useCORS: true, backgroundColor: '#0F172A' });
+        const canvas = await captureToCanvas(captureTarget, { scale: 3, backgroundColor: '#0F172A' });
         canvas.toBlob((blob) => { if (!blob) return; const file = new File([blob], 'matchboard_result.png', { type: 'image/png' }); setShareModal(prev => ({ ...prev, step: 2, file, imgUrl: URL.createObjectURL(blob), isVideo: false })); }, 'image/png');
       } catch (err) { setSystemAlert({ isOpen: true, message: '오류가 발생했습니다.' }); setShareModal({ isOpen: false, step: 1, data: null, file: null, imgUrl: null, isVideo: false }); }
     }, 500); 
@@ -1105,8 +1124,7 @@ export default function App() {
     setShareModal({ isOpen: true, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
     setTimeout(async () => {
       try {
-        const html2canvas = await loadHtml2Canvas();
-        const canvas = await html2canvas(targetEl, { scale: 3, useCORS: true, backgroundColor: '#0F172A' });
+        const canvas = await captureToCanvas(targetEl, { scale: 3, backgroundColor: '#0F172A' });
         canvas.toBlob((blob) => {
           if (!blob) return;
           const file = new File([blob], 'matchboard_tactic.png', { type: 'image/png' });
@@ -4191,8 +4209,7 @@ ${roleOrderGuide}
     setShareModal({ isOpen: true, step: 1, data: null, file: null, imgUrl: null, isVideo: false });
     setTimeout(async () => {
       try {
-        const html2canvas = await loadHtml2Canvas();
-        const canvas = await html2canvas(gpsCardCaptureRef.current, { scale: 3, useCORS: true, backgroundColor: '#0F172A' });
+        const canvas = await captureToCanvas(gpsCardCaptureRef.current, { scale: 3, backgroundColor: '#0F172A' });
         canvas.toBlob((blob) => {
           if (!blob) return;
           const file = new File([blob], 'matchboard_gps_heatmap.png', { type: 'image/png' });
@@ -8394,22 +8411,22 @@ const renderGoalFlowModal = () => {
                 <div className="w-7 h-7 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700 text-xs overflow-hidden shrink-0">
                   {activeTeam?.logo?.startsWith('data:image') ? <img src={activeTeam.logo} alt="logo" className="w-full h-full object-cover" /> : (activeTeam?.logo || '⚽')}
                 </div>
-                <span className="text-[11px] font-black text-slate-300 truncate">{activeTeam?.name || 'MATCHBOARD'}</span>
+                <span className="text-[11px] font-black text-slate-300 truncate h2c-shift">{activeTeam?.name || 'MATCHBOARD'}</span>
               </div>
-              <span className="text-[10px] font-black italic tracking-tight text-slate-500 shrink-0">MATCHBOARD</span>
+              <span className="text-[10px] font-black italic tracking-tight text-slate-500 shrink-0 h2c-shift">MATCHBOARD</span>
             </div>
             <div className="flex items-center gap-2 flex-wrap mb-1.5">
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${shareMatch.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : shareMatch.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>
+              <span className={`h2c-pill text-[10px] font-bold px-2 py-0.5 rounded border ${shareMatch.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : shareMatch.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>
                 {shareMatch.matchType === 'external' ? '교류전' : shareMatch.matchType === 'futsal' ? '풋살' : '자체전'}
               </span>
               {shareMatch.matchType === 'internal' && shareMatch.eventMatch?.enabled && (
-                <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
+                <span className="h2c-pill text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
                   🎉 {shareMatch.eventMatch.name || '이벤트 경기'}
                 </span>
               )}
-              <h2 className="text-lg font-black text-white">{shareMatch.date} 결과</h2>
+              <h2 className="text-lg font-black text-white h2c-shift">{shareMatch.date} 결과</h2>
             </div>
-            <p className="text-sm text-slate-400 flex items-center gap-1.5 flex-wrap">
+            <p className="text-sm text-slate-400 flex items-center gap-1.5 flex-wrap h2c-shift">
               <span className="inline-flex items-center gap-1"><MapPin size={12} className="inline shrink-0"/>{shareMatch.matchType === 'external' ? `${shareMatch.location} · vs ${shareMatch.opponentName}` : shareMatch.location}</span>
               <span className="text-slate-600">·</span>
               <span className="text-xs">{formatTimeAmPm(shareMatch.time)} · 참석 {(shareMatch.attendees || []).length}명</span>
@@ -8419,8 +8436,8 @@ const renderGoalFlowModal = () => {
           <div className="p-6 space-y-5 bg-slate-800">
             {/* 순위표 */}
             <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
-              <div className="text-xs text-slate-400 mb-3 font-bold border-b border-slate-800 pb-2">순위표</div>
-              <StandingsTable match={shareMatch} isLarge={false} />
+              <div className="text-xs text-slate-400 mb-3 font-bold border-b border-slate-800 pb-2 h2c-shift">순위표</div>
+              <div className="h2c-shift"><StandingsTable match={shareMatch} isLarge={false} /></div>
             </div>
 
             {/* 이벤트 경기 결과 */}
@@ -8430,8 +8447,8 @@ const renderGoalFlowModal = () => {
               return (
                 <div className="bg-amber-500/10 rounded-2xl p-4 border border-amber-500/30 space-y-3">
                   <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
-                    <span className="text-xs font-black text-amber-300 flex items-center gap-1.5">🎉 이벤트 경기 · {ev.name || '이벤트 경기'}</span>
-                    <span className="text-[11px] font-black text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-md">승점 +{evPoints}점</span>
+                    <span className="text-xs font-black text-amber-300 flex items-center gap-1.5 h2c-shift">🎉 이벤트 경기 · {ev.name || '이벤트 경기'}</span>
+                    <span className="h2c-pill text-[11px] font-black text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-md">승점 +{evPoints}점</span>
                   </div>
                   {ev.winnerTeam ? (
                     <div className="flex items-center justify-around bg-slate-900/90 rounded-xl p-3 border border-slate-700/80">
@@ -8460,7 +8477,7 @@ const renderGoalFlowModal = () => {
                 const qLogs = (shareMatch.logs || []).filter(l => l.quarter === qs.quarter);
                 return (
                   <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
-                    <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
+                    <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3 h2c-shift">
                       <span className="absolute left-0 font-black text-blue-400 text-sm">{qs.quarter}Q</span>
                       <span className="font-bold text-white text-lg flex items-center">
                         <span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(shareMatch, qs.team1)}</span>
@@ -8468,20 +8485,20 @@ const renderGoalFlowModal = () => {
                         <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(shareMatch, qs.team2)}</span>
                       </span>
                     </div>
-                    {renderQuarterGkBadge(shareMatch, qs)}
+                    <div className="h2c-shift">{renderQuarterGkBadge(shareMatch, qs)}</div>
                     {qLogs.length > 0 ? (
                       <div className="space-y-3">
                         {qLogs.map(l => {
                           const isLeft = l.teamLetter === qs.team1;
                           return (
-                            <div key={l.id} className={`flex items-start gap-2.5 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
+                            <div key={l.id} className={`flex items-start gap-2.5 w-full h2c-shift ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
                               <span className="text-slate-500 text-[10px] whitespace-nowrap shrink-0 mt-1">{l.time}</span>
                               <div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}>
                                 <div className="text-white font-bold text-sm flex items-center gap-1">
                                   <span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}
-                                  {l.isPK && <span className="text-[9px] bg-red-500/20 text-red-400 px-1 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
+                                  {l.isPK && <span className="h2c-pill text-[9px] bg-red-500/20 text-red-400 px-1 py-0.5 rounded ml-1 border border-red-500/30">PK</span>}
                                 </div>
-                                {l.remark && <div className="text-[11px] bg-slate-800/80 px-2 py-1 rounded text-slate-300 mt-1 inline-block border border-slate-700">{l.remark}</div>}
+                                {l.remark && <div className="h2c-pill text-[11px] bg-slate-800/80 px-2 py-1 rounded text-slate-300 mt-1 inline-block border border-slate-700">{l.remark}</div>}
                                 {l.assistName && <div className="text-slate-400 mt-1 flex items-center gap-1"><Footprints size={12} className="text-slate-500"/> <span className="text-xs">{l.assistName}</span></div>}
                               </div>
                             </div>
@@ -8489,7 +8506,7 @@ const renderGoalFlowModal = () => {
                         })}
                       </div>
                     ) : (
-                      <div className="text-sm text-slate-500 italic text-center py-2">득점 기록이 없습니다.</div>
+                      <div className="text-sm text-slate-500 italic text-center py-2 h2c-shift">득점 기록이 없습니다.</div>
                     )}
                   </div>
                 );
@@ -8500,7 +8517,7 @@ const renderGoalFlowModal = () => {
 
             {/* 참석자 최종 편성 명단 */}
             <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
-              <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-800 pb-2">참석자 최종 편성 명단</div>
+              <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-800 pb-2 h2c-shift">참석자 최종 편성 명단</div>
               <div className="space-y-4">
                 {TEAM_LETTERS.slice(0, actualTeamCount).map(teamLetter => {
                   const teamPlayers = players.filter(p => (shareMatch.attendees || []).includes(p.id) && ((shareMatch.teamAssignments || {})[p.id]) === teamLetter);
@@ -8508,7 +8525,7 @@ const renderGoalFlowModal = () => {
                   return (
                     <div key={teamLetter}>
                       <div className={`text-[11px] font-black mb-2 ${TEAM_TEXT_COLORS[teamLetter]}`}>{getTeamDisplayName(shareMatch, teamLetter)}</div>
-                      <div className="flex flex-wrap gap-2">{teamPlayers.map(p => ( <div key={p.id} className="bg-slate-800 px-3.5 py-2 rounded-full border border-slate-600/50 flex items-center"><span className="font-bold text-white text-[13px] tracking-wide">{p.name}</span></div> ))}</div>
+                      <div className="flex flex-wrap gap-2">{teamPlayers.map(p => ( <div key={p.id} className="h2c-chip bg-slate-800 px-3.5 py-2 rounded-full border border-slate-600/50 flex items-center"><span className="font-bold text-white text-[13px] tracking-wide">{p.name}</span></div> ))}</div>
                     </div>
                   );
                 })}
@@ -8517,8 +8534,8 @@ const renderGoalFlowModal = () => {
                   if (unassignedPlayers.length === 0) return null;
                   return (
                     <div>
-                      <div className="text-[11px] font-black mb-2 text-slate-400">미편성 참석자</div>
-                      <div className="flex flex-wrap gap-2">{unassignedPlayers.map(p => ( <div key={p.id} className="bg-slate-800 px-3.5 py-2 rounded-full border border-slate-600/50 flex items-center"><span className="font-bold text-white text-[13px] tracking-wide">{p.name}</span></div> ))}</div>
+                      <div className="text-[11px] font-black mb-2 text-slate-400 h2c-shift">미편성 참석자</div>
+                      <div className="flex flex-wrap gap-2">{unassignedPlayers.map(p => ( <div key={p.id} className="h2c-chip bg-slate-800 px-3.5 py-2 rounded-full border border-slate-600/50 flex items-center"><span className="font-bold text-white text-[13px] tracking-wide">{p.name}</span></div> ))}</div>
                     </div>
                   );
                 })()}
@@ -9609,10 +9626,10 @@ const renderGoalFlowModal = () => {
                 <div className="bg-slate-900/95 border border-slate-700/90 rounded-2xl px-3 py-2 shrink-0 shadow-sm space-y-1">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 whitespace-nowrap">
+                      <span className="h2c-pill text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 whitespace-nowrap">
                         {activeFrameIndex + 1} / {animationFrames.length}
                       </span>
-                      <span className="text-xs font-black text-emerald-400 truncate">
+                      <span className="text-xs font-black text-emerald-400 truncate h2c-shift">
                         {animationFrames[activeFrameIndex].stepTitle || `${activeFrameIndex + 1}단계`}
                       </span>
                     </div>
