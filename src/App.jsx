@@ -31,83 +31,7 @@ const getMatchTeamCount = (match) => {
   return maxIdx + 1; 
 };
 
-const getTournamentQuarterInfo = (quarter) => {
-  const setNum = Math.ceil(quarter / 4); const matchInSet = (quarter - 1) % 4 + 1;
-  const labels = ['1경기', '2경기', '패자전', '승자전']; return { setNum, matchInSet, title: `${setNum}세트 ${labels[matchInSet - 1]}` };
-};
-
-const getTournamentMatchup = (quarter, match, stats = null) => {
-  if (!match || !match.isTournament) return ['A', 'B'];
-  const { setNum, matchInSet } = getTournamentQuarterInfo(quarter);
-  if (matchInSet === 1) { if (setNum === 1) return ['A', 'B']; if (setNum === 2) return ['A', 'C']; if (setNum === 3) return ['A', 'D']; }
-  if (matchInSet === 2) { if (setNum === 1) return ['C', 'D']; if (setNum === 2) return ['B', 'D']; if (setNum === 3) return ['B', 'C']; }
-  const qs1 = (match.quarterScores || []).find(q => q.quarter === (setNum - 1) * 4 + 1);
-  const qs2 = (match.quarterScores || []).find(q => q.quarter === (setNum - 1) * 4 + 2);
-  if (!qs1 || !qs2) return ['A', 'B']; 
-  const resolveWinner = (qs) => {
-      if (qs.score1 > qs.score2) return { w: qs.team1, l: qs.team2 };
-      if (qs.score1 < qs.score2) return { w: qs.team2, l: qs.team1 };
-      const p1 = stats ? stats.find(s => s.team === qs.team1) : null; const p2 = stats ? stats.find(s => s.team === qs.team2) : null;
-      if (p1 && p2) {
-          if (p1.gd > p2.gd) return { w: qs.team1, l: qs.team2 }; if (p1.gd < p2.gd) return { w: qs.team2, l: qs.team1 };
-          if (p1.gf > p2.gf) return { w: qs.team1, l: qs.team2 }; if (p1.gf < p2.gf) return { w: qs.team2, l: qs.team1 };
-      }
-      return { w: qs.team1, l: qs.team2 };
-  };
-  const res1 = resolveWinner(qs1); const res2 = resolveWinner(qs2);
-  if (matchInSet === 3) return [res1.l, res2.l]; if (matchInSet === 4) return [res1.w, res2.w]; 
-  return ['A', 'B'];
-};
-
-const calculateTournamentStandings = (match) => {
-  const stats = {};
-  TEAM_LETTERS.forEach(t => { stats[t] = { team: t, matches: 0, setPts: 0, s1: 0, s2: 0, s3: 0, gd: 0, gf: 0, ga: 0, w: 0, d: 0, l: 0 }; });
-  (match.quarterScores || []).forEach(qs => {
-    const { team1, team2, score1, score2 } = qs; if (!stats[team1] || !stats[team2]) return;
-    stats[team1].matches++; stats[team2].matches++;
-    stats[team1].gf += score1; stats[team1].ga += score2; stats[team2].gf += score2; stats[team2].ga += score1;
-    stats[team1].gd += (score1 - score2); stats[team2].gd += (score2 - score1);
-    if (score1 > score2) { stats[team1].w++; stats[team2].l++; } else if (score1 < score2) { stats[team1].l++; stats[team2].w++; } else { stats[team1].d++; stats[team2].d++; }
-  });
-  for (let setNum = 1; setNum <= 3; setNum++) {
-    const qs1 = (match.quarterScores || []).find(q => q.quarter === (setNum - 1) * 4 + 1);
-    const qs2 = (match.quarterScores || []).find(q => q.quarter === (setNum - 1) * 4 + 2);
-    const qs3 = (match.quarterScores || []).find(q => q.quarter === (setNum - 1) * 4 + 3);
-    const qs4 = (match.quarterScores || []).find(q => q.quarter === (setNum - 1) * 4 + 4);
-    let tempSetStats = {}; TEAM_LETTERS.forEach(t => tempSetStats[t] = { gd: 0, gf: 0 });
-    if (qs1) { tempSetStats[qs1.team1].gd += (qs1.score1 - qs1.score2); tempSetStats[qs1.team1].gf += qs1.score1; tempSetStats[qs1.team2].gd += (qs1.score2 - qs1.score1); tempSetStats[qs1.team2].gf += qs1.score2; }
-    if (qs2) { tempSetStats[qs2.team1].gd += (qs2.score1 - qs2.score2); tempSetStats[qs2.team1].gf += qs2.score1; tempSetStats[qs2.team2].gd += (qs2.score2 - qs2.score1); tempSetStats[qs2.team2].gf += qs2.score2; }
-    if (qs3) { tempSetStats[qs3.team1].gd += (qs3.score1 - qs3.score2); tempSetStats[qs3.team1].gf += qs3.score1; tempSetStats[qs3.team2].gd += (qs3.score2 - qs3.score1); tempSetStats[qs3.team2].gf += qs3.score2; }
-    if (qs4) { tempSetStats[qs4.team1].gd += (qs4.score1 - qs4.score2); tempSetStats[qs4.team1].gf += qs4.score1; tempSetStats[qs4.team2].gd += (qs4.score2 - qs4.score1); tempSetStats[qs4.team2].gf += qs4.score2; }
-    let ranks = []; 
-    if (qs4) {
-      let w = qs4.team1, l = qs4.team2;
-      if (qs4.score1 > qs4.score2) { w = qs4.team1; l = qs4.team2; } else if (qs4.score1 < qs4.score2) { w = qs4.team2; l = qs4.team1; }
-      else {
-        if (tempSetStats[qs4.team1].gd > tempSetStats[qs4.team2].gd) { w = qs4.team1; l = qs4.team2; } else if (tempSetStats[qs4.team1].gd < tempSetStats[qs4.team2].gd) { w = qs4.team2; l = qs4.team1; }
-        else { if (tempSetStats[qs4.team1].gf > tempSetStats[qs4.team2].gf) { w = qs4.team1; l = qs4.team2; } else if (tempSetStats[qs4.team1].gf < tempSetStats[qs4.team2].gf) { w = qs4.team2; l = qs4.team1; } else { w = qs4.team1; l = qs4.team2; } }
-      }
-      ranks[0] = w; ranks[1] = l;
-    }
-    if (qs3) {
-      let w = qs3.team1, l = qs3.team2;
-      if (qs3.score1 > qs3.score2) { w = qs3.team1; l = qs3.team2; } else if (qs3.score1 < qs3.score2) { w = qs3.team2; l = qs3.team1; }
-      else {
-        if (tempSetStats[qs3.team1].gd > tempSetStats[qs3.team2].gd) { w = qs3.team1; l = qs3.team2; } else if (tempSetStats[qs3.team1].gd < tempSetStats[qs3.team2].gd) { w = qs3.team2; l = qs3.team1; }
-        else { if (tempSetStats[qs3.team1].gf > tempSetStats[qs3.team2].gf) { w = qs3.team1; l = qs3.team2; } else if (tempSetStats[qs3.team1].gf < tempSetStats[qs3.team2].gf) { w = qs3.team2; l = qs3.team1; } else { w = qs3.team1; l = qs3.team2; } }
-      }
-      ranks[2] = w; ranks[3] = l;
-    }
-    if (ranks[0]) { stats[ranks[0]].setPts += 4; stats[ranks[0]][`s${setNum}`] = 4; }
-    if (ranks[1]) { stats[ranks[1]].setPts += 3; stats[ranks[1]][`s${setNum}`] = 3; }
-    if (ranks[2]) { stats[ranks[2]].setPts += 2; stats[ranks[2]][`s${setNum}`] = 2; }
-    if (ranks[3]) { stats[ranks[3]].setPts += 1; stats[ranks[3]][`s${setNum}`] = 1; }
-  }
-  return Object.values(stats).sort((a, b) => { if (b.setPts !== a.setPts) return b.setPts - a.setPts; if (b.gd !== a.gd) return b.gd - a.gd; return b.gf - a.gf; });
-};
-
 const calculateStandings = (match) => {
-  if (match.isTournament) return calculateTournamentStandings(match);
   const stats = {}; const actualTeamCount = getMatchTeamCount(match); 
   TEAM_LETTERS.slice(0, actualTeamCount).forEach(t => { stats[t] = { team: t, matches: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 }; });
   (match.quarterScores || []).forEach(qs => {
@@ -115,6 +39,20 @@ const calculateStandings = (match) => {
     stats[team1].matches++; stats[team2].matches++; stats[team1].gf += score1; stats[team1].ga += score2; stats[team2].gf += score2; stats[team2].ga += score1;
     if (score1 > score2) { stats[team1].w++; stats[team2].l++; stats[team1].pts += 3; } else if (score1 < score2) { stats[team2].w++; stats[team1].l++; stats[team2].pts += 3; } else { stats[team1].d++; stats[team2].d++; stats[team1].pts += 1; stats[team2].pts += 1; }
   });
+  if (match.matchType === 'internal' && match.eventMatch?.enabled && match.eventMatch?.winnerTeam) {
+    const wTeam = match.eventMatch.winnerTeam;
+    const lTeam = match.eventMatch.loserTeam;
+    const evPts = Math.max(0, parseInt(match.eventMatch.points, 10) || 0);
+    if (stats[wTeam]) {
+      stats[wTeam].matches++;
+      stats[wTeam].w++;
+      stats[wTeam].pts += evPts;
+    }
+    if (lTeam && lTeam !== wTeam && stats[lTeam]) {
+      stats[lTeam].matches++;
+      stats[lTeam].l++;
+    }
+  }
   Object.values(stats).forEach(s => s.gd = s.gf - s.ga);
   return Object.values(stats).sort((a, b) => { if (b.pts !== a.pts) return b.pts - a.pts; if (b.gd !== a.gd) return b.gd - a.gd; return b.gf - a.gf; });
 };
@@ -282,6 +220,8 @@ export default function App() {
 
   const [matchModal, setMatchModal] = useState({ isOpen: false, match: null }); 
   const [matchTypeForm, setMatchTypeForm] = useState('internal'); 
+  const [matchTeamCountForm, setMatchTeamCountForm] = useState(2);
+  const [eventMatchForm, setEventMatchForm] = useState({ enabled: false, name: '', points: 3, winnerTeam: '', loserTeam: '' }); 
   const [assignmentModal, setAssignmentModal] = useState({ isOpen: false, match: null }); 
   const [quarterEditModal, setQuarterEditModal] = useState({ isOpen: false, match: null, quarterScore: null });
   const [detailModal, setDetailModal] = useState({ isOpen: false, match: null }); 
@@ -514,12 +454,12 @@ export default function App() {
       if (scoreA < scoreB) return makeBadge('패', `${scoreA}:${scoreB}`, 'bg-red-500/20 text-red-400 border-red-500/40');
       return makeBadge('무', `${scoreA}:${scoreB}`, 'bg-slate-600/30 text-slate-300 border-slate-500/40');
     }
-    if (qScores.length > 0) {
+    if (qScores.length > 0 || (m.matchType === 'internal' && m.eventMatch?.enabled && m.eventMatch?.winnerTeam)) {
       const standings = calculateStandings(m);
       const top = standings[0]; const second = standings[1];
       if (top && second) {
-        const topPts = m.isTournament ? top.setPts : top.pts;
-        const secondPts = m.isTournament ? second.setPts : second.pts;
+        const topPts = top.pts;
+        const secondPts = second.pts;
         if (topPts === 0 && secondPts === 0) return null;
         if (topPts === secondPts && top.gd === second.gd && top.gf === second.gf) {
           return makeBadge('무', '동률', 'bg-slate-600/30 text-slate-300 border-slate-500/40');
@@ -826,8 +766,7 @@ export default function App() {
         gk2: match.matchType === 'external' ? null : (match.liveStatus.gk2 ?? getLastGkForTeam(match, (match.liveStatus.playingTeams || ['A', 'B'])[1]))
       };
     }
-    const stats = match.isTournament ? calculateTournamentStandings(match) : null;
-    let playingTeams = match.isTournament ? getTournamentMatchup(currentQ, match, stats) : ['A', 'B'];
+    let playingTeams = ['A', 'B'];
     let isQuarterActive = false;
     if (match.matchType === 'external') {
       if (currentLogs.length > 0) isQuarterActive = true;
@@ -965,7 +904,18 @@ export default function App() {
   const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
   const prevYear = () => setViewDate(new Date(viewDate.getFullYear() - 1, viewDate.getMonth(), 1));
   const nextYear = () => setViewDate(new Date(viewDate.getFullYear() + 1, viewDate.getMonth(), 1));
-  const openMatchModal = (match) => { setMatchTypeForm(match?.matchType || 'internal'); setMatchModal({ isOpen: true, match }); };
+  const openMatchModal = (match) => {
+    setMatchTypeForm(match?.matchType || 'internal');
+    setMatchTeamCountForm(match?.teamCount || 2);
+    setEventMatchForm({
+      enabled: !!match?.eventMatch?.enabled,
+      name: match?.eventMatch?.name || '',
+      points: match?.eventMatch?.points ?? 3,
+      winnerTeam: match?.eventMatch?.winnerTeam || '',
+      loserTeam: match?.eventMatch?.loserTeam || ''
+    });
+    setMatchModal({ isOpen: true, match });
+  };
 
   const saveMemo = async (dateStr, content) => {
     if (isProcessing) return; setIsProcessing(true);
@@ -1011,8 +961,20 @@ export default function App() {
     e.preventDefault(); if(isProcessing) return; setIsProcessing(true);
     try {
       const fd = new FormData(e.target); const attendees = currentTeamPlayers.filter(p => fd.get(`attendee_${p.id}`)).map(p => p.id);
-      const matchType = matchTypeForm; const isTournament = fd.get('isTournament') === 'true'; const opponentName = matchType === 'external' ? fd.get('opponentName') : '';
-      const teamCount = isTournament ? 4 : (matchType === 'external' ? 2 : parseInt(fd.get('teamCount'))); const totalQuarters = isTournament ? 12 : parseInt(fd.get('totalQuarters'));
+      const matchType = matchTypeForm; const opponentName = matchType === 'external' ? fd.get('opponentName') : '';
+      const teamCount = matchType === 'external' ? 2 : parseInt(fd.get('teamCount'), 10);
+      const totalQuarters = parseInt(fd.get('totalQuarters'), 10);
+      const eventMatch = (matchType === 'internal' && eventMatchForm.enabled)
+        ? {
+            enabled: true,
+            name: (eventMatchForm.name || '').trim() || '이벤트 경기',
+            points: Math.max(0, parseInt(eventMatchForm.points, 10) || 0),
+            winnerTeam: eventMatchForm.winnerTeam || '',
+            loserTeam: eventMatchForm.winnerTeam && eventMatchForm.loserTeam && eventMatchForm.loserTeam !== eventMatchForm.winnerTeam
+              ? eventMatchForm.loserTeam
+              : ''
+          }
+        : null;
       const newAssignments = { ...(matchModal.match?.teamAssignments || {}) }; attendees.forEach(pId => { if (matchType === 'external') newAssignments[pId] = 'A'; });
       const matchId = matchModal.match?.id || 'm' + Date.now().toString();
       if (matchModal.match?.status === 'completed') {
@@ -1021,9 +983,22 @@ export default function App() {
         for (const id of removed) { const p = players.find(x => x.id === id); if (p) updatePromises.push(setDoc(doc(db, 'players', id), { ...p, caps: Math.max(0, (p.caps || 0) - 1) })); }
         if (updatePromises.length > 0) await Promise.all(updatePromises);
       }
-      const newMatch = { ...matchModal.match, id: matchId, teamId: activeTeamId, date: fd.get('date'), time: fd.get('time'), location: fd.get('location'), matchType, opponentName, teamCount, isTournament, totalQuarters, attendees, teamAssignments: newAssignments, scores: matchModal.match?.scores || { A: 0, B: 0, C: 0, D: 0 }, quarterScores: matchModal.match?.quarterScores || [], logs: matchModal.match?.logs || [], status: matchModal.match?.status || 'scheduled' };
+      const newMatch = { ...matchModal.match, id: matchId, teamId: activeTeamId, date: fd.get('date'), time: fd.get('time'), location: fd.get('location'), matchType, opponentName, teamCount, isTournament: false, eventMatch, totalQuarters, attendees, teamAssignments: newAssignments, scores: matchModal.match?.scores || { A: 0, B: 0, C: 0, D: 0 }, quarterScores: matchModal.match?.quarterScores || [], logs: matchModal.match?.logs || [], status: matchModal.match?.status || 'scheduled' };
       await setDoc(doc(db, 'matches', matchId), newMatch); setMatchModal({ isOpen: false, match: null });
     } finally { setIsProcessing(false); }
+  };
+
+  const saveEventMatchResult = async (targetMatch, nextEventMatch) => {
+    if (!targetMatch?.id || isProcessing) return;
+    setIsProcessing(true);
+    try {
+      await setDoc(doc(db, 'matches', targetMatch.id), {
+        ...targetMatch,
+        eventMatch: nextEventMatch
+      });
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const requestDeleteTeam = (id) => { setSystemConfirm({ isOpen: true, message: '정말 삭제하시겠습니까?\n복구할 수 없습니다.', onConfirm: async () => { if(isProcessing) return; setIsProcessing(true); await deleteDoc(doc(db, 'teams', id)); setIsProcessing(false); } }); };
@@ -1299,8 +1274,8 @@ export default function App() {
          updatePromises.push(setDoc(doc(db, 'matches', liveMatchId), { ...updatedMatch, status: 'completed', liveStatus: null }));
          await Promise.all(updatePromises); setAppState('main'); setLiveMatchId(null);
       } else {
-         const nextQ = liveState.currentQuarter + 1; const stats = updatedMatch.isTournament ? calculateTournamentStandings(updatedMatch) : null;
-         const nextTeams = updatedMatch.isTournament ? getTournamentMatchup(nextQ, updatedMatch, stats) : ['A', 'B'];
+         const nextQ = liveState.currentQuarter + 1;
+         const nextTeams = ['A', 'B'];
          const nextGk1 = getLastGkForTeam(updatedMatch, nextTeams[0]);
          const nextGk2 = updatedMatch.matchType === 'external' ? null : getLastGkForTeam(updatedMatch, nextTeams[1]);
          const nextLiveStatus = { currentQuarter: nextQ, playingTeams: nextTeams, isQuarterActive: false, gk1: nextGk1, gk2: nextGk2, updatedAt: Date.now() };
@@ -7387,26 +7362,8 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
   };
 
   const StandingsTable = ({ match, isLarge }) => {
-    const isTour = match.isTournament; const standings = isTour ? calculateTournamentStandings(match) : calculateStandings(match);
+    const standings = calculateStandings(match);
     const textClass = isLarge ? "text-2xl py-6" : "text-xs py-2"; const headerClass = isLarge ? "pb-6" : "pb-2";
-    if (isTour) {
-      return (
-        <table className={`w-full text-center ${isLarge ? 'text-2xl' : 'text-xs'}`}>
-          <thead><tr className="text-slate-500 font-bold border-b border-slate-700/50"><th className={headerClass}>순위</th><th className={`${headerClass} text-left`}>팀</th><th className={headerClass}>총점</th><th className={headerClass}>1S</th><th className={headerClass}>2S</th><th className={headerClass}>3S</th><th className={headerClass}>득실</th></tr></thead>
-          <tbody>
-            {standings.map((st, i) => (
-              <tr key={st.team} className="border-t border-slate-800/50">
-                <td className={`${textClass} font-black ${i === 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{i + 1}</td>
-                <td className={`${textClass} text-left font-bold ${TEAM_TEXT_COLORS[st.team]}`}>{getTeamDisplayName(match, st.team)}</td>
-                <td className={`${textClass} text-blue-400 font-black`}>{st.setPts}</td>
-                <td className={`${textClass} text-white`}>{st.s1 || '-'}</td><td className={`${textClass} text-white`}>{st.s2 || '-'}</td><td className={`${textClass} text-white`}>{st.s3 || '-'}</td>
-                <td className={`${textClass} text-white`}>{st.gd > 0 ? '+'+st.gd : st.gd}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      );
-    }
     return (
       <table className={`w-full text-center ${isLarge ? 'text-2xl' : 'text-xs'}`}>
         <thead><tr className="text-slate-500 font-bold border-b border-slate-700/50"><th className={headerClass}>순위</th><th className={`${headerClass} text-left`}>팀</th><th className={headerClass}>승점</th><th className={headerClass}>승(W)</th><th className={headerClass}>무(D)</th><th className={headerClass}>패(L)</th><th className={headerClass}>득실</th></tr></thead>
@@ -7474,62 +7431,29 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
   };
 
   const renderQuartersList = (match) => {
-    if (match.isTournament) {
-      let elements = [];
-      for (let setNum = 1; setNum <= 3; setNum++) {
-        const setQuarters = [1, 2, 3, 4].map(i => (setNum - 1) * 4 + i); const playedInSet = (match.quarterScores || []).filter(qs => setQuarters.includes(qs.quarter));
-        if (playedInSet.length === 0) { elements.push( <div key={`set-${setNum}`} className="bg-slate-800/30 rounded-2xl p-4 border border-slate-700/50 border-dashed mb-4 flex justify-center items-center h-20"><span className="text-slate-500 font-bold text-[13px]">{setNum}세트 전체 - 미진행 (조기종료)</span></div> ); } 
-        else {
-          setQuarters.forEach(qNum => {
-            const qs = playedInSet.find(q => q.quarter === qNum);
-            if (qs) {
-              const { title } = getTournamentQuarterInfo(qs.quarter);
-              elements.push(
-                <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700 mb-4">
-                  <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
-                    <span className="absolute left-0 font-black text-blue-400 text-xs">{title}</span>
-                    <span className="font-bold text-white text-lg flex items-center"><span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(match, qs.team1)}</span> <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span> <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(match, qs.team2)}</span></span>
-                    {checkCanEdit(match) && ( <button onClick={() => setQuarterEditModal({isOpen: true, match, quarterScore: qs})} className="absolute right-0 text-slate-500 p-1 bg-slate-800 rounded-md"><Edit size={14}/></button> )}
-                  </div>
-                  {renderQuarterGkBadge(match, qs)}
-                  {renderQuarterLogsBlock(match, qs, true)}
-                  {checkCanEdit(match) && (
-                    <div className="flex justify-center gap-2 mt-4 pt-4 border-t border-slate-800/50">
-                      <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: match.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-slate-700 transition"><Plus size={12}/> {getTeamDisplayName(match, qs.team1)} 득점 추가</button>
-                      <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: match.id, quarter: qs.quarter, teamLetter: qs.team2, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-slate-700 transition"><Plus size={12}/> {getTeamDisplayName(match, qs.team2)} 득점 추가</button>
-                    </div>
-                  )}
-                </div>
-              );
-            } else { elements.push( <div key={`q-${qNum}`} className="bg-slate-800/30 rounded-xl p-3 border border-slate-700/50 border-dashed mb-4 flex justify-center items-center"><span className="text-slate-500 font-bold text-xs">{getTournamentQuarterInfo(qNum).title} - 미진행</span></div> ); }
-          });
-        }
-      } return elements;
-    } else {
-      let elements = [];
-      for (let i = 1; i <= match.totalQuarters; i++) {
-        const qs = (match.quarterScores || []).find(q => q.quarter === i);
-        if (qs) {
-          elements.push(
-            <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700 mb-4">
-              <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
-                <span className="absolute left-0 font-black text-blue-400">{qs.quarter}Q</span>
-                <span className="font-bold text-white text-lg flex items-center"><span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(match, qs.team1)}</span> <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span> <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(match, qs.team2)}</span></span>
-                {checkCanEdit(match) && ( <button onClick={() => setQuarterEditModal({isOpen: true, match, quarterScore: qs})} className="absolute right-0 text-slate-500 p-1 bg-slate-800 rounded-md"><Edit size={14}/></button> )}
-              </div>
-              {renderQuarterGkBadge(match, qs)}
-              {renderQuarterLogsBlock(match, qs, true)}
-              {checkCanEdit(match) && (
-                <div className="flex justify-center gap-2 mt-4 pt-4 border-t border-slate-800/50">
-                  <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: match.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-slate-700 transition"><Plus size={12}/> {getTeamDisplayName(match, qs.team1)} 득점 추가</button>
-                  <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: match.id, quarter: qs.quarter, teamLetter: qs.team2, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-slate-700 transition"><Plus size={12}/> {getTeamDisplayName(match, qs.team2)} 득점 추가</button>
-                </div>
-              )}
+    let elements = [];
+    for (let i = 1; i <= match.totalQuarters; i++) {
+      const qs = (match.quarterScores || []).find(q => q.quarter === i);
+      if (qs) {
+        elements.push(
+          <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-700 mb-4">
+            <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-3">
+              <span className="absolute left-0 font-black text-blue-400">{qs.quarter}Q</span>
+              <span className="font-bold text-white text-lg flex items-center"><span className={TEAM_TEXT_COLORS[qs.team1]}>{getTeamDisplayName(match, qs.team1)}</span> <span className="text-slate-500 mx-3">{qs.score1} : {qs.score2}</span> <span className={TEAM_TEXT_COLORS[qs.team2]}>{getTeamDisplayName(match, qs.team2)}</span></span>
+              {checkCanEdit(match) && ( <button onClick={() => setQuarterEditModal({isOpen: true, match, quarterScore: qs})} className="absolute right-0 text-slate-500 p-1 bg-slate-800 rounded-md"><Edit size={14}/></button> )}
             </div>
-          );
-        } else if (match.status === 'completed') { elements.push( <div key={`q-${i}`} className="bg-slate-800/30 rounded-xl p-3 border border-slate-700/50 border-dashed mb-4 flex justify-center items-center"><span className="text-slate-500 font-bold text-xs">{i}Q 미진행 (조기종료)</span></div> ); }
-      } return elements;
-    }
+            {renderQuarterGkBadge(match, qs)}
+            {renderQuarterLogsBlock(match, qs, true)}
+            {checkCanEdit(match) && (
+              <div className="flex justify-center gap-2 mt-4 pt-4 border-t border-slate-800/50">
+                <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: match.id, quarter: qs.quarter, teamLetter: qs.team1, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-slate-700 transition"><Plus size={12}/> {getTeamDisplayName(match, qs.team1)} 득점 추가</button>
+                <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: match.id, quarter: qs.quarter, teamLetter: qs.team2, availableTeams: [qs.team1, qs.team2], scorer: null, isPK: false, remark: '', isMissingAdd: true })} className="text-[11px] bg-slate-800 text-slate-400 px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-slate-700 transition"><Plus size={12}/> {getTeamDisplayName(match, qs.team2)} 득점 추가</button>
+              </div>
+            )}
+          </div>
+        );
+      } else if (match.status === 'completed') { elements.push( <div key={`q-${i}`} className="bg-slate-800/30 rounded-xl p-3 border border-slate-700/50 border-dashed mb-4 flex justify-center items-center"><span className="text-slate-500 font-bold text-xs">{i}Q 미진행 (조기종료)</span></div> ); }
+    } return elements;
   };
 
   const renderQuarterEditModal = () => {
@@ -7597,7 +7521,9 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${detailMatch.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : detailMatch.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>{detailMatch.matchType === 'external' ? '교류전' : detailMatch.matchType === 'futsal' ? '풋살' : '자체전'}</span>
-                  {detailMatch.isTournament && <span className="text-[10px] font-bold bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded border border-yellow-500/30">토너먼트</span>}
+                  {detailMatch.matchType === 'internal' && detailMatch.eventMatch?.enabled && (
+                    <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">🎉 {detailMatch.eventMatch.name || '이벤트 경기'}</span>
+                  )}
                   <h2 className="text-lg font-black text-white">{detailMatch.date} 결과</h2>
                 </div>
                 <p className="text-sm text-slate-400"><MapPin size={12} className="inline mr-1"/>{detailMatch.location}</p>
@@ -7611,6 +7537,75 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
           </div>
           <div className="flex-1 overflow-y-auto p-6 hide-scrollbar space-y-6">
             <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700"><div className="text-xs text-slate-400 mb-3 font-bold border-b border-slate-800 pb-2">순위표</div><StandingsTable match={detailMatch} isLarge={false} /></div>
+            {detailMatch.matchType === 'internal' && detailMatch.eventMatch?.enabled && (() => {
+              const ev = detailMatch.eventMatch;
+              const teamList = TEAM_LETTERS.slice(0, actualTeamCount);
+              const evPoints = Math.max(0, parseInt(ev.points, 10) || 0);
+              return (
+                <div className="bg-amber-500/10 rounded-2xl p-4 border border-amber-500/30 space-y-3">
+                  <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
+                    <span className="text-xs font-black text-amber-300 flex items-center gap-1.5">🎉 이벤트 경기 · {ev.name || '이벤트 경기'}</span>
+                    <span className="text-[11px] font-black text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-md">승점 +{evPoints}점</span>
+                  </div>
+                  {ev.winnerTeam ? (
+                    <div className="flex items-center justify-around bg-slate-900/90 rounded-xl p-3 border border-slate-700/80">
+                      <div className="text-center">
+                        <div className="text-[10px] font-black text-emerald-400 mb-0.5">승 (+{evPoints}점)</div>
+                        <div className={`text-base font-black ${TEAM_TEXT_COLORS[ev.winnerTeam]}`}>{getTeamDisplayName(detailMatch, ev.winnerTeam)}</div>
+                      </div>
+                      <span className="text-slate-600 font-black italic text-sm">VS</span>
+                      <div className="text-center">
+                        <div className="text-[10px] font-black text-red-400 mb-0.5">패</div>
+                        <div className={`text-base font-black ${ev.loserTeam ? TEAM_TEXT_COLORS[ev.loserTeam] : 'text-slate-400'}`}>
+                          {ev.loserTeam ? getTeamDisplayName(detailMatch, ev.loserTeam) : '미지정'}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-400 text-center py-2 bg-slate-900/60 rounded-xl">아직 이벤트 경기 승/패가 입력되지 않았습니다.</div>
+                  )}
+                  {checkCanEdit(detailMatch) && (
+                    <div className="space-y-2 pt-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-slate-300 shrink-0">승리 팀 선택 (승)</span>
+                        <div className="flex gap-1">
+                          {teamList.map(t => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => {
+                                const autoLoser = actualTeamCount === 2 ? teamList.find(x => x !== t) : (ev.loserTeam === t ? '' : ev.loserTeam);
+                                saveEventMatchResult(detailMatch, { ...ev, winnerTeam: t, loserTeam: autoLoser || '' });
+                              }}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-black border transition ${ev.winnerTeam === t ? 'bg-emerald-600 text-white border-emerald-400' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
+                            >
+                              {t}팀 승
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {actualTeamCount > 2 && ev.winnerTeam && (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-bold text-slate-300 shrink-0">패배 팀 선택 (패)</span>
+                          <div className="flex gap-1">
+                            {teamList.filter(t => t !== ev.winnerTeam).map(t => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => saveEventMatchResult(detailMatch, { ...ev, loserTeam: t })}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-black border transition ${ev.loserTeam === t ? 'bg-red-600 text-white border-red-400' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
+                              >
+                                {t}팀 패
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <div className="space-y-4">{renderQuartersList(detailMatch)}</div>
             <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
               <div className="text-xs text-slate-400 mb-4 font-bold border-b border-slate-800 pb-2 flex justify-between items-end">
@@ -7659,14 +7654,123 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
             {matchTypeForm === 'external' && ( <div><label className="block text-xs font-bold text-purple-400 mb-1">상대팀 이름</label><input type="text" name="opponentName" required defaultValue={matchModal.match?.opponentName || ""} className="w-full bg-slate-900 border border-purple-500/50 p-3 rounded-xl text-white outline-none" /></div> )}
             <div className="flex gap-4">
               {(matchTypeForm === 'internal' || matchTypeForm === 'futsal') && (
-                <div className="flex-1"><label className="block text-xs font-bold text-slate-400 mb-1">총 팀 개수</label><select name="teamCount" id="teamCountSelect" defaultValue={matchModal.match?.teamCount || 2} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none" onChange={(e)=>{ const isTourRow = document.getElementById('isTournamentRow'); const chk = document.getElementById('isTournamentChk'); const qInput = document.getElementById('totalQuartersInput'); if(e.target.value === '4') { if(isTourRow) isTourRow.style.display = 'flex'; } else { if(isTourRow) isTourRow.style.display = 'none'; if(chk) chk.checked = false; if(qInput) qInput.readOnly = false; } }}><option value="2">2팀 (A,B)</option><option value="3">3팀 (A,B,C)</option><option value="4">4팀 (A,B,C,D)</option></select></div>
+                <div className="flex-1">
+                  <label className="block text-xs font-bold text-slate-400 mb-1">총 팀 개수</label>
+                  <select
+                    name="teamCount"
+                    id="teamCountSelect"
+                    value={matchTeamCountForm}
+                    onChange={(e) => {
+                      const cnt = parseInt(e.target.value, 10) || 2;
+                      setMatchTeamCountForm(cnt);
+                      setEventMatchForm(prev => {
+                        const validTeams = TEAM_LETTERS.slice(0, cnt);
+                        const nextWinner = validTeams.includes(prev.winnerTeam) ? prev.winnerTeam : '';
+                        let nextLoser = validTeams.includes(prev.loserTeam) && prev.loserTeam !== nextWinner ? prev.loserTeam : '';
+                        if (cnt === 2 && nextWinner) nextLoser = validTeams.find(t => t !== nextWinner) || '';
+                        return { ...prev, winnerTeam: nextWinner, loserTeam: nextLoser };
+                      });
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none"
+                  >
+                    <option value="2">2팀 (A,B)</option>
+                    <option value="3">3팀 (A,B,C)</option>
+                    <option value="4">4팀 (A,B,C,D)</option>
+                  </select>
+                </div>
               )}
               <div className={matchTypeForm === 'external' ? 'w-full' : 'flex-1'}><label className="block text-xs font-bold text-slate-400 mb-1">총 쿼터 수</label><input type="number" id="totalQuartersInput" name="totalQuarters" required defaultValue={matchModal.match?.totalQuarters || 4} min="1" max="20" className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none" /></div>
             </div>
-            {(matchTypeForm === 'internal' || matchTypeForm === 'futsal') && (
-              <div id="isTournamentRow" className="flex items-center gap-3 bg-yellow-500/10 border border-yellow-500/30 p-3 rounded-xl" style={{ display: (matchModal.match?.teamCount == 4 || (document.getElementById('teamCountSelect')?.value == '4')) ? 'flex' : 'none' }}>
-                <input type="checkbox" id="isTournamentChk" name="isTournament" value="true" defaultChecked={matchModal.match?.isTournament} className="w-5 h-5 accent-yellow-500" onChange={(e)=>{ const qInput = document.getElementById('totalQuartersInput'); if(e.target.checked) { if(qInput) { qInput.value = 12; qInput.readOnly = true; } } else { if(qInput) qInput.readOnly = false; } }} />
-                <div><div className="text-sm font-bold text-yellow-400 flex items-center gap-1"><Trophy size={16}/> 4팀 3세트 토너먼트 모드</div><div className="text-[10px] text-yellow-500/70">체크 시 총 12쿼터 고정 및 승점 로직이 적용됩니다.</div></div>
+            {matchTypeForm === 'internal' && (
+              <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-2xl space-y-3">
+                <label className="flex items-center justify-between gap-3 cursor-pointer">
+                  <div>
+                    <div className="text-sm font-black text-amber-300 flex items-center gap-1.5">🎉 이벤트 경기 추가</div>
+                    <div className="text-[10px] text-amber-200/70">승/패만 존재하며 승리 시 수기 입력한 승점이 반영됩니다.</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={eventMatchForm.enabled}
+                    onChange={(e) => setEventMatchForm(prev => ({ ...prev, enabled: e.target.checked }))}
+                    className="w-5 h-5 accent-amber-500 shrink-0"
+                  />
+                </label>
+                {eventMatchForm.enabled && (
+                  <div className="space-y-2.5 pt-2 border-t border-amber-500/20">
+                    <div className="flex gap-2">
+                      <div className="flex-[2]">
+                        <label className="block text-[11px] font-bold text-amber-200 mb-1">이벤트 경기 이름</label>
+                        <input
+                          type="text"
+                          required={eventMatchForm.enabled}
+                          value={eventMatchForm.name}
+                          onChange={(e) => setEventMatchForm(prev => ({ ...prev, name: e.target.value }))}
+                          placeholder="예: 승부차기, 족구, 스페셜매치"
+                          className="w-full bg-slate-900 border border-amber-500/40 p-2.5 rounded-xl text-xs text-white outline-none focus:border-amber-400"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-[11px] font-bold text-amber-200 mb-1">승점 (수기)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="99"
+                          required={eventMatchForm.enabled}
+                          value={eventMatchForm.points}
+                          onChange={(e) => setEventMatchForm(prev => ({ ...prev, points: e.target.value }))}
+                          className="w-full bg-slate-900 border border-amber-500/40 p-2.5 rounded-xl text-xs text-white text-center font-black outline-none focus:border-amber-400"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-bold text-amber-200">승리 팀 (승/패 결과)</label>
+                        {eventMatchForm.winnerTeam && (
+                          <button
+                            type="button"
+                            onClick={() => setEventMatchForm(prev => ({ ...prev, winnerTeam: '', loserTeam: '' }))}
+                            className="text-[10px] text-slate-400 hover:text-white underline"
+                          >
+                            미정으로 초기화
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {TEAM_LETTERS.slice(0, matchTeamCountForm).map(t => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => {
+                              const validTeams = TEAM_LETTERS.slice(0, matchTeamCountForm);
+                              const autoLoser = matchTeamCountForm === 2 ? validTeams.find(x => x !== t) : (eventMatchForm.loserTeam === t ? '' : eventMatchForm.loserTeam);
+                              setEventMatchForm(prev => ({ ...prev, winnerTeam: t, loserTeam: autoLoser || '' }));
+                            }}
+                            className={`py-2 rounded-lg text-xs font-black border transition ${eventMatchForm.winnerTeam === t ? 'bg-emerald-600 text-white border-emerald-400 shadow' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
+                          >
+                            {t}팀 승
+                          </button>
+                        ))}
+                      </div>
+                      {matchTeamCountForm > 2 && eventMatchForm.winnerTeam && (
+                        <div className="mt-2">
+                          <label className="block text-[11px] font-bold text-slate-300 mb-1">패배 팀 선택 (패)</label>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {TEAM_LETTERS.slice(0, matchTeamCountForm).filter(t => t !== eventMatchForm.winnerTeam).map(t => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => setEventMatchForm(prev => ({ ...prev, loserTeam: t }))}
+                                className={`py-1.5 rounded-lg text-xs font-black border transition ${eventMatchForm.loserTeam === t ? 'bg-red-600 text-white border-red-400 shadow' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
+                              >
+                                {t}팀 패
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             <div className="pt-2"><label className="block text-xs font-bold text-slate-400 mb-2">참석자 체크</label><div className="grid grid-cols-2 gap-2">{currentTeamPlayers.map(p => ( <label key={p.id} className="flex items-center gap-2 bg-slate-900 p-3 rounded-lg border border-slate-700 cursor-pointer hover:border-slate-500"><input type="checkbox" name={`attendee_${p.id}`} defaultChecked={matchModal.match ? (matchModal.match.attendees || []).includes(p.id) : false} className="accent-blue-500 w-4 h-4 rounded" /><span className="text-sm font-bold text-white">{p.name}</span></label> ))}</div></div>
@@ -8239,35 +8343,38 @@ const renderGoalFlowModal = () => {
       <div className="fixed top-0 left-0 w-[960px] opacity-0 pointer-events-none z-[-100] overflow-visible">
         <div id="capture-area-hidden" className="bg-slate-900 p-12 w-full flex flex-col items-center text-left text-slate-200 border-none pb-16">
           <div className="mb-8 w-full pb-6 border-b border-slate-700"><h3 className="font-black text-white text-5xl leading-tight mb-4">{shareMatch.matchType === 'external' ? `[교류전] vs ${shareMatch.opponentName}` : shareMatch.matchType === 'futsal' ? `[풋살] ${shareMatch.location}` : `[자체전] ${shareMatch.location}`}</h3><p className="text-slate-400 text-2xl font-medium">{new Date(shareMatch.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} {formatTimeAmPm(shareMatch.time)} · 참석 {(shareMatch.attendees || []).length}명</p></div>
-          <div className="w-full bg-slate-800 rounded-3xl p-8 mb-8 border border-slate-700/50 shadow-md"><div className="font-black text-slate-400 text-2xl border-b border-slate-700/50 pb-4 mb-6">순위표 {shareMatch.isTournament && <span className="text-yellow-400 text-lg ml-2">(토너먼트 룰 적용)</span>}</div><StandingsTable match={shareMatch} isLarge={true} /></div>
+          <div className="w-full bg-slate-800 rounded-3xl p-8 mb-8 border border-slate-700/50 shadow-md"><div className="font-black text-slate-400 text-2xl border-b border-slate-700/50 pb-4 mb-6">순위표</div><StandingsTable match={shareMatch} isLarge={true} /></div>
+          {shareMatch.matchType === 'internal' && shareMatch.eventMatch?.enabled && (() => {
+            const ev = shareMatch.eventMatch;
+            const evPoints = Math.max(0, parseInt(ev.points, 10) || 0);
+            return (
+              <div className="w-full bg-amber-500/10 rounded-3xl p-8 mb-8 border border-amber-500/40 shadow-md">
+                <div className="flex items-center justify-between border-b border-amber-500/30 pb-4 mb-6">
+                  <span className="font-black text-amber-300 text-2xl">🎉 이벤트 경기 · {ev.name || '이벤트 경기'}</span>
+                  <span className="font-black text-amber-400 text-xl bg-amber-500/20 px-4 py-1.5 rounded-xl">승점 +{evPoints}점</span>
+                </div>
+                {ev.winnerTeam ? (
+                  <div className="flex items-center justify-around bg-slate-800/90 rounded-2xl p-6 border border-slate-700/60">
+                    <div className="text-center flex-1">
+                      <div className="text-xl font-black text-emerald-400 mb-2">승 (+{evPoints}점)</div>
+                      <div className={`text-3xl font-black ${TEAM_TEXT_COLORS[ev.winnerTeam]}`}>{getTeamDisplayName(shareMatch, ev.winnerTeam)}</div>
+                    </div>
+                    <span className="text-slate-500 font-black italic text-3xl mx-6">VS</span>
+                    <div className="text-center flex-1">
+                      <div className="text-xl font-black text-red-400 mb-2">패</div>
+                      <div className={`text-3xl font-black ${ev.loserTeam ? TEAM_TEXT_COLORS[ev.loserTeam] : 'text-slate-400'}`}>
+                        {ev.loserTeam ? getTeamDisplayName(shareMatch, ev.loserTeam) : '미지정'}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-2xl text-slate-400 text-center py-4">이벤트 경기 승/패 미입력</div>
+                )}
+              </div>
+            );
+          })()}
           <div className="w-full mb-8 grid grid-cols-2 gap-8">
-                {shareMatch.isTournament ? (() => {
-                  let elements = [];
-                  for (let setNum = 1; setNum <= 3; setNum++) {
-                    const setQuarters = [1, 2, 3, 4].map(i => (setNum - 1) * 4 + i); const playedInSet = (shareMatch.quarterScores || []).filter(qs => setQuarters.includes(qs.quarter));
-                    if (playedInSet.length === 0) { elements.push( <div key={`set-${setNum}`} className="bg-slate-800/30 rounded-3xl p-8 border border-slate-700/50 border-dashed col-span-2 flex justify-center items-center py-12"><span className="text-slate-500 font-bold text-2xl">{setNum}세트 전체 - 미진행 (조기종료)</span></div> ); } 
-                    else {
-                      setQuarters.forEach(qNum => {
-                        const qs = playedInSet.find(q => q.quarter === qNum);
-                        if (qs) {
-                          const qLogs = (shareMatch.logs || []).filter(l => l.quarter === qs.quarter); const { title } = getTournamentQuarterInfo(qs.quarter);
-                          elements.push(
-                            <div key={qs.quarter} className="w-full bg-slate-800 rounded-3xl p-8 border border-slate-700/50 shadow-md">
-                               <div className="flex flex-col items-center border-b border-slate-700/50 pb-6 mb-6"><span className="font-black text-blue-400 text-2xl mb-3">{title}</span><span className="font-black text-white text-3xl text-center flex items-center justify-center w-full"><span className={`${TEAM_TEXT_COLORS[qs.team1]} flex-1 text-right`}>{getTeamDisplayName(shareMatch, qs.team1)}</span> <span className="text-slate-500 mx-5 shrink-0">{qs.score1} : {qs.score2}</span> <span className={`${TEAM_TEXT_COLORS[qs.team2]} flex-1 text-left`}>{getTeamDisplayName(shareMatch, qs.team2)}</span></span></div>
-                               <div className="space-y-6">
-                                 {qLogs.length > 0 ? qLogs.map(l => {
-                                   const isLeft = l.teamLetter === qs.team1;
-                                   return ( <div key={l.id} className={`flex items-start gap-5 w-full ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}><span className="text-slate-500 text-xl w-16 shrink-0 text-center mt-1">{l.time}</span><div className={`flex flex-col ${isLeft ? 'items-start' : 'items-end'}`}><div className="text-slate-100 font-bold text-2xl flex items-center gap-2"><span className={TEAM_TEXT_COLORS[l.teamLetter]}>⚽</span> {l.scorerName}{l.isPK && <span className="text-base bg-red-500/20 text-red-400 px-2 py-1 rounded ml-2 border border-red-500/30">PK</span>}</div>{l.remark && <div className="text-lg bg-slate-900/80 px-4 py-2 rounded-lg text-slate-300 mt-2 inline-block border border-slate-700/50">{l.remark}</div>}{l.assistName && ( <div className="text-slate-500 mt-2 flex items-center gap-2"><Footprints size={20} className="text-slate-500"/> <span className="text-xl">{l.assistName}</span></div> )}</div></div> )
-                                 }) : <div className="text-xl text-slate-500 text-center py-6 italic">득점 기록이 없습니다.</div>}
-                               </div>
-                            </div>
-                          );
-                        } else { elements.push( <div key={`q-${qNum}`} className="bg-slate-800/30 rounded-3xl p-6 border border-slate-700/50 border-dashed flex justify-center items-center"><span className="text-slate-500 font-bold text-xl">{getTournamentQuarterInfo(qNum).title} - 미진행</span></div> ); }
-                      });
-                    }
-                  } return elements;
-               })() : (
-                 (shareMatch.quarterScores || []).length > 0 ? (shareMatch.quarterScores || []).map(qs => {
+                 {(shareMatch.quarterScores || []).length > 0 ? (shareMatch.quarterScores || []).map(qs => {
                    const qLogs = (shareMatch.logs || []).filter(l => l.quarter === qs.quarter);
                    return (
                      <div key={qs.quarter} className="w-full bg-slate-800 rounded-3xl p-8 border border-slate-700/50 shadow-md">
@@ -8280,8 +8387,7 @@ const renderGoalFlowModal = () => {
                         </div>
                      </div>
                    )
-                 }) : <div className="text-2xl text-slate-500 text-center py-10 bg-slate-800 rounded-3xl border border-slate-700/50 shadow-md col-span-2">아직 기록이 없습니다.</div>
-               )}
+                 }) : <div className="text-2xl text-slate-500 text-center py-10 bg-slate-800 rounded-3xl border border-slate-700/50 shadow-md col-span-2">아직 기록이 없습니다.</div>}
           </div>
           <div className="w-full bg-slate-800 rounded-3xl p-8 border border-slate-700/50 shadow-md">
               <div className="text-2xl text-slate-400 mb-6 font-black border-b border-slate-700/50 pb-4">참석자 최종 편성 명단</div>
@@ -8571,7 +8677,6 @@ const renderGoalFlowModal = () => {
         {!liveState.isQuarterActive ? (
           <>
             <div className="flex-1 flex flex-col justify-center pb-4 overflow-y-auto hide-scrollbar animate-in fade-in slide-in-from-bottom-4 duration-500">
-              {liveMatch.isTournament && <div className="text-center text-yellow-400 font-bold mb-2 text-sm">{getTournamentQuarterInfo(liveState.currentQuarter).title} 대진표 자동 배정됨</div>}
               <h2 className="text-3xl font-black text-center text-white mb-2">{liveState.currentQuarter}Q 매치업</h2>
               <p className="text-center text-slate-400 mb-6">이번 쿼터에 맞붙을 팀과 골키퍼를 확인하세요.</p>
               {isExternal ? (
@@ -8607,6 +8712,49 @@ const renderGoalFlowModal = () => {
               </div>
               <button onClick={() => { if (liveState.playingTeams[0] === liveState.playingTeams[1]) { setSystemAlert({isOpen:true, message:'서로 다른 팀을 선택해주세요.'}); return; } updateLiveStateAndSync({ isQuarterActive: true }); }} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 rounded-xl text-xl shadow-lg transition">쿼터 시작하기</button>
               <button onClick={() => endQuarter(true)} className="w-full bg-slate-800 text-slate-400 hover:text-white font-bold py-3 rounded-xl mt-3 text-sm transition border border-slate-700">경기 조기 종료</button>
+              {liveMatch.matchType === 'internal' && liveMatch.eventMatch?.enabled && (() => {
+                const ev = liveMatch.eventMatch;
+                const liveTeamCount = getMatchTeamCount(liveMatch);
+                const teamList = TEAM_LETTERS.slice(0, liveTeamCount);
+                const evPoints = Math.max(0, parseInt(ev.points, 10) || 0);
+                return (
+                  <div className="mt-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-amber-300">🎉 이벤트: {ev.name || '이벤트 경기'}</span>
+                      <span className="text-[10px] font-black text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded">승 +{evPoints}점</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1">
+                      {teamList.map(t => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => {
+                            const autoLoser = liveTeamCount === 2 ? teamList.find(x => x !== t) : (ev.loserTeam === t ? '' : ev.loserTeam);
+                            saveEventMatchResult(liveMatch, { ...ev, winnerTeam: t, loserTeam: autoLoser || '' });
+                          }}
+                          className={`py-1.5 rounded-lg text-[11px] font-black border transition ${ev.winnerTeam === t ? 'bg-emerald-600 text-white border-emerald-400' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
+                        >
+                          {t}팀 승
+                        </button>
+                      ))}
+                    </div>
+                    {liveTeamCount > 2 && ev.winnerTeam && (
+                      <div className="grid grid-cols-3 gap-1">
+                        {teamList.filter(t => t !== ev.winnerTeam).map(t => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => saveEventMatchResult(liveMatch, { ...ev, loserTeam: t })}
+                            className={`py-1 rounded-lg text-[11px] font-black border transition ${ev.loserTeam === t ? 'bg-red-600 text-white border-red-400' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
+                          >
+                            {t}팀 패
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
             <div className="bg-slate-800/50 p-4 rounded-t-3xl border-t border-slate-700/50 -mx-5 -mb-5 sm:-mx-6 sm:-mb-6 mt-auto">
                <h3 className="text-[11px] font-bold text-slate-400 mb-3 ml-2 flex items-center gap-1.5"><Activity size={12}/> {liveState.currentQuarter - 1 > 0 ? '이전 쿼터 결과' : '첫 쿼터 준비 중'}</h3>
@@ -8726,7 +8874,7 @@ const renderGoalFlowModal = () => {
                   })()}
                   <div className="flex items-center gap-2 mb-1 mt-1">
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${m.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : m.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>{m.matchType === 'external' ? '교류전' : m.matchType === 'futsal' ? '풋살' : '자체전'}</span>
-                    {m.isTournament && <span className="text-[10px] font-bold bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded border border-yellow-500/30">토너먼트</span>}
+                    {m.matchType === 'internal' && m.eventMatch?.enabled && <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">🎉 {m.eventMatch.name || '이벤트'}</span>}
                     <div className="text-lg font-bold text-white">{m.location}</div>
                   </div>
                   <div className="text-xs text-slate-400 mb-4 mt-1">{m.matchType === 'external' ? `우리 팀 VS ${m.opponentName}` : `총 ${m.teamCount || 2}팀 파전`} • 총 {m.totalQuarters}쿼터 • 참석 {(m.attendees || []).length}명</div>
@@ -8742,7 +8890,7 @@ const renderGoalFlowModal = () => {
                   <div className="flex items-center gap-2 text-sm text-slate-400 font-bold mb-2"><CheckCircle size={14}/> {m.date} (종료)</div>
                   <div className="flex items-center gap-2 mb-3">
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${m.matchType === 'external' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : m.matchType === 'futsal' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-green-500/20 text-green-400 border-green-500/30'}`}>{m.matchType === 'external' ? '교류전' : m.matchType === 'futsal' ? '풋살' : '자체전'}</span>
-                    {m.isTournament && <span className="text-[10px] font-bold bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded border border-yellow-500/30">토너먼트</span>}
+                    {m.matchType === 'internal' && m.eventMatch?.enabled && <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">🎉 {m.eventMatch.name || '이벤트'}</span>}
                     <div className="text-base font-bold text-slate-300">{m.location}</div>
                   </div>
                   <div className="bg-slate-800 rounded-xl p-3 mb-3 border border-slate-700/50">
