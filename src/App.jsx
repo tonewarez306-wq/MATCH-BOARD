@@ -969,10 +969,8 @@ export default function App() {
             enabled: true,
             name: (eventMatchForm.name || '').trim() || '이벤트 경기',
             points: Math.max(0, parseInt(eventMatchForm.points, 10) || 0),
-            winnerTeam: eventMatchForm.winnerTeam || '',
-            loserTeam: eventMatchForm.winnerTeam && eventMatchForm.loserTeam && eventMatchForm.loserTeam !== eventMatchForm.winnerTeam
-              ? eventMatchForm.loserTeam
-              : ''
+            winnerTeam: matchModal.match?.eventMatch?.winnerTeam || '',
+            loserTeam: matchModal.match?.eventMatch?.loserTeam || ''
           }
         : null;
       const newAssignments = { ...(matchModal.match?.teamAssignments || {}) }; attendees.forEach(pId => { if (matchType === 'external') newAssignments[pId] = 'A'; });
@@ -7722,53 +7720,6 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
                         />
                       </div>
                     </div>
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="text-[11px] font-bold text-amber-200">승리 팀 (승/패 결과)</label>
-                        {eventMatchForm.winnerTeam && (
-                          <button
-                            type="button"
-                            onClick={() => setEventMatchForm(prev => ({ ...prev, winnerTeam: '', loserTeam: '' }))}
-                            className="text-[10px] text-slate-400 hover:text-white underline"
-                          >
-                            미정으로 초기화
-                          </button>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {TEAM_LETTERS.slice(0, matchTeamCountForm).map(t => (
-                          <button
-                            key={t}
-                            type="button"
-                            onClick={() => {
-                              const validTeams = TEAM_LETTERS.slice(0, matchTeamCountForm);
-                              const autoLoser = matchTeamCountForm === 2 ? validTeams.find(x => x !== t) : (eventMatchForm.loserTeam === t ? '' : eventMatchForm.loserTeam);
-                              setEventMatchForm(prev => ({ ...prev, winnerTeam: t, loserTeam: autoLoser || '' }));
-                            }}
-                            className={`py-2 rounded-lg text-xs font-black border transition ${eventMatchForm.winnerTeam === t ? 'bg-emerald-600 text-white border-emerald-400 shadow' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
-                          >
-                            {t}팀 승
-                          </button>
-                        ))}
-                      </div>
-                      {matchTeamCountForm > 2 && eventMatchForm.winnerTeam && (
-                        <div className="mt-2">
-                          <label className="block text-[11px] font-bold text-slate-300 mb-1">패배 팀 선택 (패)</label>
-                          <div className="grid grid-cols-3 gap-1.5">
-                            {TEAM_LETTERS.slice(0, matchTeamCountForm).filter(t => t !== eventMatchForm.winnerTeam).map(t => (
-                              <button
-                                key={t}
-                                type="button"
-                                onClick={() => setEventMatchForm(prev => ({ ...prev, loserTeam: t }))}
-                                className={`py-1.5 rounded-lg text-xs font-black border transition ${eventMatchForm.loserTeam === t ? 'bg-red-600 text-white border-red-400 shadow' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
-                              >
-                                {t}팀 패
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
                   </div>
                 )}
               </div>
@@ -8821,6 +8772,49 @@ const renderGoalFlowModal = () => {
                  <div className="relative flex justify-center items-center border-b border-slate-800 pb-3 mb-4"><span className="absolute left-0 font-black text-blue-400 flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> {liveState.currentQuarter}Q</span><span className="font-bold text-white text-[15px]"><span className={TEAM_TEXT_COLORS[activeTeams[0]]}>{getTeamDisplayName(liveMatch, activeTeams[0])}</span><span className="text-slate-500 mx-3">{(liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === activeTeams[0]).length} : {(liveMatch.logs || []).filter(l => l.quarter === liveState.currentQuarter && l.teamLetter === activeTeams[1]).length}</span><span className={TEAM_TEXT_COLORS[activeTeams[1]]}>{getTeamDisplayName(liveMatch, activeTeams[1])}</span></span></div>
                  {renderQuarterLogsBlock(liveMatch, { quarter: liveState.currentQuarter, team1: activeTeams[0] }, true)}
               </div>
+              {liveMatch.matchType === 'internal' && liveMatch.eventMatch?.enabled && (() => {
+                const ev = liveMatch.eventMatch;
+                const liveTeamCount = getMatchTeamCount(liveMatch);
+                const teamList = TEAM_LETTERS.slice(0, liveTeamCount);
+                const evPoints = Math.max(0, parseInt(ev.points, 10) || 0);
+                return (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 space-y-2 shrink-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-amber-300">🎉 이벤트: {ev.name || '이벤트 경기'}</span>
+                      <span className="text-[10px] font-black text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded">승 +{evPoints}점</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1">
+                      {teamList.map(t => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => {
+                            const autoLoser = liveTeamCount === 2 ? teamList.find(x => x !== t) : (ev.loserTeam === t ? '' : ev.loserTeam);
+                            saveEventMatchResult(liveMatch, { ...ev, winnerTeam: t, loserTeam: autoLoser || '' });
+                          }}
+                          className={`py-1.5 rounded-lg text-[11px] font-black border transition ${ev.winnerTeam === t ? 'bg-emerald-600 text-white border-emerald-400' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
+                        >
+                          {t}팀 승
+                        </button>
+                      ))}
+                    </div>
+                    {liveTeamCount > 2 && ev.winnerTeam && (
+                      <div className="grid grid-cols-3 gap-1">
+                        {teamList.filter(t => t !== ev.winnerTeam).map(t => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => saveEventMatchResult(liveMatch, { ...ev, loserTeam: t })}
+                            className={`py-1 rounded-lg text-[11px] font-black border transition ${ev.loserTeam === t ? 'bg-red-600 text-white border-red-400' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
+                          >
+                            {t}팀 패
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="h-6 shrink-0 w-full"></div>
             </div>
           </>
