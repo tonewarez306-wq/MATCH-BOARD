@@ -673,7 +673,7 @@ export default function App() {
   const minGaRate = gkStatsList.length > 0 ? Math.min(...gkStatsList.map(s => s.gaRate)) : null;
   const topGks = minGaRate !== null ? gkStatsList.filter(s => Math.abs(s.gaRate - minGaRate) < 1e-6) : [];
 
-  const globalStyles = ( <style>{` html, body { overscroll-behavior: none !important; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; scrollbar-width: none; -ms-overflow-style: none; } html::-webkit-scrollbar, body::-webkit-scrollbar, .hide-scrollbar::-webkit-scrollbar { display: none !important; width: 0 !important; } .hide-scrollbar { -ms-overflow-style: none !important; scrollbar-width: none !important; } input, textarea { font-size: 16px; } input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; } input[type="number"] { -moz-appearance: textfield; } .will-change-transform { will-change: transform, left, top; } `}</style> );
+  const globalStyles = ( <style>{` html, body { overscroll-behavior-x: none; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; scrollbar-width: none; -ms-overflow-style: none; } html::-webkit-scrollbar, body::-webkit-scrollbar, .hide-scrollbar::-webkit-scrollbar { display: none !important; width: 0 !important; } .hide-scrollbar { -ms-overflow-style: none !important; scrollbar-width: none !important; -webkit-overflow-scrolling: touch; } input, textarea { font-size: 16px; } input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; } input[type="number"] { -moz-appearance: textfield; } .will-change-transform { will-change: transform, left, top; } `}</style> );
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e) => {
@@ -949,6 +949,10 @@ export default function App() {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, [appState === 'login']);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [activeTab, appState]);
 
   const prevMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
   const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
@@ -7647,7 +7651,7 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
             </div>
             {checkCanEdit(detailMatch) && ( <button onClick={() => { setDetailModal({isOpen: false, match: null}); setDetailModalMatchId(null); openMatchModal(detailMatch); }} className="w-full mt-3 bg-slate-800 text-blue-400 py-2 rounded-xl text-xs font-bold border border-blue-500/30 hover:bg-slate-700 transition flex items-center justify-center gap-1"><Edit size={14}/> 경기 설정 (타입 / 장소 / 명단) 변경</button> )}
           </div>
-          <div className="flex-1 overflow-y-auto p-6 hide-scrollbar space-y-6">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-6 hide-scrollbar space-y-6">
             <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700"><div className="text-xs text-slate-400 mb-3 font-bold border-b border-slate-800 pb-2">순위표</div><StandingsTable match={detailMatch} isLarge={false} /></div>
             {detailMatch.matchType === 'internal' && detailMatch.eventMatch?.enabled && (() => {
               const ev = detailMatch.eventMatch;
@@ -7767,7 +7771,7 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
              <button type="button" onClick={() => setMatchTypeForm('external')} className={`flex-1 py-2.5 px-3 rounded-lg text-sm font-bold transition whitespace-nowrap ${matchTypeForm === 'external' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'}`}>교류전</button>
              <button type="button" onClick={() => setMatchTypeForm('futsal')} className={`flex-1 py-2.5 px-3 rounded-lg text-sm font-bold transition whitespace-nowrap ${matchTypeForm === 'futsal' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'}`}>풋살</button>
           </div>
-          <form id="matchForm" onSubmit={saveMatch} className="space-y-4 overflow-y-auto hide-scrollbar flex-1 pb-4 pr-2">
+          <form id="matchForm" onSubmit={saveMatch} className="space-y-4 overflow-y-auto overscroll-contain hide-scrollbar flex-1 min-h-0 pb-4 pr-2">
             <div className="flex gap-4">
               <div className="flex-1"><label className="block text-xs font-bold text-slate-400 mb-1">날짜</label><input type="date" name="date" required defaultValue={matchModal.match?.date || getTodayString()} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" /></div>
               <div className="flex-1"><label className="block text-xs font-bold text-slate-400 mb-1">시간</label><input type="time" name="time" required defaultValue={matchModal.match?.time || "06:30"} className="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white outline-none focus:border-blue-500" /></div>
@@ -7880,7 +7884,7 @@ ${cfg.axes.map((a, i) => `${i + 1}. ${a}`).join('\n')}
               완료
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto pr-2 space-y-2 hide-scrollbar">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-2 space-y-2 hide-scrollbar">
             {currentTeamPlayers.filter(p => (assignmentModal.match.attendees || []).includes(p.id)).map(p => {
               const currentTeam = (assignmentModal.match.teamAssignments || {})[p.id] || null;
               return (
@@ -8382,7 +8386,7 @@ const renderGoalFlowModal = () => {
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100] animate-in fade-in zoom-in-95">
         <div className="bg-slate-800 p-6 rounded-3xl w-full max-w-sm border border-slate-700 shadow-xl max-h-[80vh] flex flex-col">
           <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-700 pb-4"><h2 className="text-lg font-bold text-white flex items-center gap-2"><Calendar size={18}/> {dateMemoModal.dateStr} 일정</h2><button onClick={() => setDateMemoModal({ isOpen: false, dateStr: null, matches: [], memo: '' })} className="text-slate-400 hover:text-white"><X size={20}/></button></div>
-          <div className="flex-1 overflow-y-auto pr-1 space-y-4 hide-scrollbar">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 space-y-4 hide-scrollbar">
              {dateMemoModal.matches.length > 0 ? (
                 <div className="space-y-3">
                   <h3 className="text-xs font-bold text-slate-500">예정/종료된 경기</h3>
@@ -8624,7 +8628,7 @@ const renderGoalFlowModal = () => {
             <button onClick={() => setInstallGuideModal(false)} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
           </div>
 
-          <div className="flex-1 overflow-y-auto pr-0.5 space-y-4 hide-scrollbar">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-0.5 space-y-4 hide-scrollbar">
             {/* 카카오톡 인앱브라우저 안내 배너 */}
             <div className={`rounded-2xl p-3.5 border ${isKakao ? 'bg-amber-500/15 border-amber-500/40' : 'bg-slate-900/90 border-slate-700/80'}`}>
               <div className="flex items-start gap-2.5">
@@ -8771,7 +8775,6 @@ const renderGoalFlowModal = () => {
           {!isLoginAdminMode ? ( <button onClick={() => setAuthModal({ isOpen: true, type: 'loginAdminAuth' })} className="text-xs text-slate-400 border border-slate-700 bg-slate-800 px-3 py-1.5 rounded-lg hover:text-white transition flex items-center gap-1"><Shield size={14}/> 관리자 설정</button> ) : ( <button onClick={() => setIsLoginAdminMode(false)} className="text-xs text-red-400 border border-red-500/30 bg-red-500/10 px-3 py-1.5 rounded-lg hover:bg-red-500/20 transition flex items-center gap-1"><LogOut size={14}/> 관리자 종료</button> )}
         </div>
         <div className="text-center mb-10 mt-8 animate-in fade-in duration-200">
-          <div className="flex justify-center mb-5"><div className="relative"><div className="w-16 h-16 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-2xl flex items-center justify-center shadow-lg relative z-10"><Activity size={32} className="text-blue-500" /></div></div></div>
           <h1 className="text-4xl font-black tracking-tighter mb-3 bg-gradient-to-r from-white via-blue-100 to-slate-400 text-transparent bg-clip-text">MATCHBOARD</h1>
           <p className="text-slate-400 text-sm font-medium tracking-wide">승리를 기록하는 가장 스마트한 방법</p>
           {isLoginAdminMode && <div className="mt-5 bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs py-2 px-4 rounded-xl font-bold inline-block">시스템 관리자 모드 활성화됨</div>}
@@ -8846,7 +8849,8 @@ const renderGoalFlowModal = () => {
 
         {!liveState.isQuarterActive ? (
           <>
-            <div className="flex-1 flex flex-col justify-center pb-4 overflow-y-auto hide-scrollbar animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-4 hide-scrollbar">
+              <div className="min-h-full flex flex-col justify-center animate-in fade-in slide-in-from-bottom-4 duration-500">
               <h2 className="text-3xl font-black text-center text-white mb-2">{liveState.currentQuarter}Q 매치업</h2>
               <p className="text-center text-slate-400 mb-6">이번 쿼터에 맞붙을 팀과 골키퍼를 확인하세요.</p>
               {isExternal ? (
@@ -8925,8 +8929,9 @@ const renderGoalFlowModal = () => {
                   </div>
                 );
               })()}
+              </div>
             </div>
-            <div className="bg-slate-800/50 p-4 rounded-t-3xl border-t border-slate-700/50 -mx-5 -mb-5 sm:-mx-6 sm:-mb-6 mt-auto">
+            <div className="bg-slate-800/50 p-4 rounded-t-3xl border-t border-slate-700/50 -mx-5 -mb-5 sm:-mx-6 sm:-mb-6 mt-auto shrink-0">
                <h3 className="text-[11px] font-bold text-slate-400 mb-3 ml-2 flex items-center gap-1.5"><Activity size={12}/> {liveState.currentQuarter - 1 > 0 ? '이전 쿼터 결과' : '첫 쿼터 준비 중'}</h3>
                <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-2 px-2">
                   {(liveMatch.quarterScores || []).map(qs => ( <div key={qs.quarter} className="flex-shrink-0 bg-slate-900 border border-slate-700 rounded-xl p-3 flex flex-col items-center justify-center min-w-[140px]"><div className="text-[10px] font-black text-slate-500 mb-2 bg-slate-800 px-2.5 py-0.5 rounded-full">{qs.quarter}Q</div><div className="flex items-center justify-between w-full gap-2"><div className="flex flex-col items-center w-0 flex-1"><span className={`text-[10px] font-bold whitespace-nowrap mb-0.5 ${TEAM_TEXT_COLORS[qs.team1]}`}>{getTeamDisplayName(liveMatch, qs.team1)}</span><span className="text-white font-black text-xl leading-none">{qs.score1}</span></div><div className="text-slate-600 font-black text-xs pb-1 shrink-0">:</div><div className="flex flex-col items-center w-0 flex-1"><span className={`text-[10px] font-bold whitespace-nowrap mb-0.5 ${TEAM_TEXT_COLORS[qs.team2]}`}>{getTeamDisplayName(liveMatch, qs.team2)}</span><span className="text-white font-black text-xl leading-none">{qs.score2}</span></div></div></div> )).reverse()}
@@ -8973,7 +8978,7 @@ const renderGoalFlowModal = () => {
               <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: null, quarter: null, teamLetter: activeTeams[0], scorer: null, isPK: false, remark: '', isMissingAdd: false })} className={`flex-1 border-2 py-6 rounded-3xl flex flex-col items-center justify-center gap-2 transition shadow-lg ${activeTeams[0] === 'A' ? 'bg-slate-800 border-slate-400 text-white' : TEAM_COLORS[activeTeams[0]]}`}><Trophy size={28} className="fill-current"/><span className="font-black text-sm">{getTeamDisplayName(liveMatch, activeTeams[0])} 득점</span></button>
               <button onClick={() => setGoalFlow({ isOpen: true, step: 1, matchId: null, quarter: null, teamLetter: activeTeams[1], scorer: null, isPK: false, remark: '', isMissingAdd: false })} className={`flex-1 border-2 py-6 rounded-3xl flex flex-col items-center justify-center gap-2 transition shadow-lg ${activeTeams[1] === 'A' ? 'bg-slate-800 border-slate-400 text-white' : TEAM_COLORS[activeTeams[1]]}`}><Trophy size={28} className="fill-current"/><span className="font-black text-sm">{getTeamDisplayName(liveMatch, activeTeams[1])} 득점</span></button>
             </div>
-            <div className="flex-1 bg-slate-800/40 border border-slate-700/50 rounded-3xl p-4 sm:p-5 pb-8 overflow-y-auto flex flex-col gap-4 hide-scrollbar">
+            <div className="flex-1 min-h-0 bg-slate-800/40 border border-slate-700/50 rounded-3xl p-4 sm:p-5 pb-8 overflow-y-auto overscroll-contain flex flex-col gap-4 hide-scrollbar">
               <div className="flex justify-between items-center mb-2 shrink-0"><h3 className="text-sm font-bold text-slate-400 flex items-center gap-2"><List size={16}/> 쿼터별 기록 현황</h3><button onClick={requestEndQuarter} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs transition border border-slate-600 shadow-sm">현재 쿼터 종료</button></div>
               {(liveMatch.quarterScores || []).map(qs => (
                 <div key={qs.quarter} className="bg-slate-900 rounded-2xl p-4 border border-slate-800 mb-2 shrink-0">
@@ -9044,7 +9049,7 @@ const renderGoalFlowModal = () => {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl flex flex-col">
+    <div className="min-h-[100dvh] bg-slate-900 text-slate-200 font-sans pb-24 max-w-md mx-auto relative shadow-xl flex flex-col overflow-x-clip">
       {globalStyles}
       <header className="px-6 py-4 border-b border-slate-800 bg-slate-900 sticky top-0 z-[60] flex justify-between items-center shrink-0" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
         <div className="flex items-center gap-3">
@@ -9061,9 +9066,9 @@ const renderGoalFlowModal = () => {
         </div>
       </header>
 
-      <main className="p-6 flex-1 flex flex-col min-h-0">
+      <main className="p-6 flex-1">
         {activeTab === 'matches' && (
-          <div className="space-y-6 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar">
+          <div className="space-y-6 animate-in fade-in">
             <div className="flex justify-between items-center mb-2"><h2 className="text-xl font-black text-white">팀 경기</h2>{isAdmin && ( <button onClick={() => openMatchModal(null)} className="bg-blue-500 text-white px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-1 shadow-lg hover:bg-blue-600 transition"><Plus size={16}/> 새 경기</button> )}</div>
             {monthlyMatches.length === 0 && (
                <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-6 text-center shadow-lg mb-4">
@@ -9134,7 +9139,7 @@ const renderGoalFlowModal = () => {
 
         {}
         {activeTab === 'schedule' && (
-          <div className="space-y-6 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar">
+          <div className="space-y-6 animate-in fade-in">
             <h2 className="text-xl font-black text-white">팀 스케쥴</h2>
             <div className="flex justify-between items-center bg-slate-800 p-3 rounded-2xl border border-slate-700">
               <button onClick={prevMonth} className="p-2 text-slate-400 hover:text-white"><ChevronLeft size={20}/></button>
@@ -9230,7 +9235,7 @@ const renderGoalFlowModal = () => {
         )}
 
         {activeTab === 'stats' && (
-          <div className="space-y-4 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar pb-4">
+          <div className="space-y-4 animate-in fade-in pb-4">
             <div className="flex justify-between items-center">
               <h2 className="text-xl font-black text-white">팀 통계</h2>
               <button
@@ -9488,7 +9493,7 @@ const renderGoalFlowModal = () => {
 
         {}
         {activeTab === 'tactics' && (
-          <div className="animate-in fade-in flex-1 flex flex-col min-h-0 overflow-y-auto hide-scrollbar relative pb-4 -mx-3 px-2">
+          <div className="animate-in fade-in flex flex-col relative pb-4 -mx-3 px-2">
             {/* 상단 컨트롤 패널 (iOS/AOS 줄바꿈·짤림 방지 규격) */}
             <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-2 space-y-1.5 shrink-0 mb-2 shadow-sm">
               {/* 1단: 전술 템플릿 드롭다운 + AI 전술 버튼 (2열 구성으로 드롭다운 공간 확보) */}
@@ -9771,7 +9776,7 @@ const renderGoalFlowModal = () => {
 
             {tacticAiModal.isOpen && (
               <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[160] flex items-center justify-center p-3 sm:p-4 animate-in fade-in break-keep">
-                <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl p-4 sm:p-5 w-full max-w-md shadow-2xl space-y-3 max-h-[92vh] overflow-y-auto">
+                <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl p-4 sm:p-5 w-full max-w-md shadow-2xl space-y-3 max-h-[92vh] overflow-y-auto overscroll-contain">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-1.5">
@@ -10032,7 +10037,7 @@ const renderGoalFlowModal = () => {
         )}
 
         {activeTab === 'gps' && (
-          <div className="space-y-3.5 animate-in fade-in flex-1 overflow-y-auto overflow-x-hidden hide-scrollbar pb-6 break-keep">
+          <div className="space-y-3.5 animate-in fade-in pb-6 break-keep">
             {/* 상단 서브탭: GPS 분석 / 슈팅 측정 / AI 자세코칭 */}
             <div className="grid grid-cols-3 bg-slate-900 p-1 rounded-2xl border border-slate-700/80 gap-1 shadow-sm">
               <button
@@ -11990,7 +11995,7 @@ const renderGoalFlowModal = () => {
         )}
 
         {activeTab === 'roster' && (
-          <div className="space-y-4 animate-in fade-in flex-1 overflow-y-auto hide-scrollbar">
+          <div className="space-y-4 animate-in fade-in">
             <div className="flex justify-between items-center">
               <h2 className="text-xl font-black text-white">팀 명단</h2>
               {isAdmin && (
@@ -12068,7 +12073,7 @@ const renderGoalFlowModal = () => {
               <button onClick={() => setShootGuideModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain overflow-x-hidden space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
               {/* 원리 요약 다이어그램 박스 */}
               <div className="bg-slate-950 border border-amber-500/30 rounded-2xl p-3 text-center space-y-1.5">
                 <div className="text-[11px] font-black text-amber-400">📡 가상 레이저 트랩(Optical Laser Trap) 원리</div>
@@ -12341,7 +12346,7 @@ const renderGoalFlowModal = () => {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain overflow-x-hidden space-y-3 pr-0.5 hide-scrollbar text-xs leading-relaxed text-slate-300">
               {gpsGuideTab === 'android' ? (
                 <>
                   <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3 text-[11px] text-amber-200 leading-relaxed space-y-1.5">
@@ -12452,7 +12457,7 @@ const renderGoalFlowModal = () => {
               <button onClick={() => setPitchManagerModal(false)} className="text-slate-400 hover:text-white p-1 shrink-0"><X size={20}/></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-2.5 pr-0.5 hide-scrollbar">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain overflow-x-hidden space-y-2.5 pr-0.5 hide-scrollbar">
               {/* 지도 종류 선택 탭 (네이버 위성 / 네이버 일반 / 구글 위성) */}
               <div className="grid grid-cols-3 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1">
                 <button

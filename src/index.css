@@ -3,12 +3,16 @@
 @tailwind utilities;
 
 @layer base {
-  html,
-  body {
+  html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
-    overflow-x: hidden;
+  }
+
+  body {
+    min-height: 100%;
+    overflow-x: clip;
     -webkit-tap-highlight-color: transparent;
+    -webkit-overflow-scrolling: touch;
   }
 
   select,
