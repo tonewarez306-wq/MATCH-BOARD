@@ -403,8 +403,10 @@ export default function App() {
   const [shootFootType, setShootFootType] = useState('오른발'); // '오른발' | '왼발' | '발리/논스톱' | '프리킥'
   const [shootAutoSave, setShootAutoSave] = useState(true);
   const [shootSoundEnabled, setShootSoundEnabled] = useState(true);
+  const [shootDetectionMode, setShootDetectionMode] = useState('ai_hybrid'); // 'ai_hybrid' | 'optical_only'
+  const [shootAiStatus, setShootAiStatus] = useState('idle'); // 'idle' | 'loading' | 'ready' | 'error'
   const [isShootTrapLocked, setIsShootTrapLocked] = useState(false); // 카메라 조준/거치 중 오작동 방지 수동 잠금 토글
-  const [shootTrapStatus, setShootTrapStatus] = useState('idle'); // 'idle' | 'stabilizing' | 'ready' | 'armed_gate1' | 'measured' | 'shake_warn' | 'locked'
+  const [shootTrapStatus, setShootTrapStatus] = useState('idle'); // 'idle' | 'stabilizing' | 'searching_ball' | 'ready' | 'armed_gate1' | 'measured' | 'shake_warn' | 'locked'
   const [shootLastResult, setShootLastResult] = useState(null);
   const [shootEditModal, setShootEditModal] = useState({ isOpen: false, record: null, playerId: '', customPlayerName: '', footType: '오른발' });
   const [shootManualModal, setShootManualModal] = useState({ isOpen: false, speedKmh: '', playerId: '', customPlayerName: '', footType: '오른발' });
@@ -414,6 +416,8 @@ export default function App() {
   const shootStreamRef = useRef(null);
   const shootRafRef = useRef(null);
   const shootAudioCtxRef = useRef(null);
+  const shootBallDetectorRef = useRef(null);
+  const shootBallDetectorPromiseRef = useRef(null);
   const shootTrapRuntimeRef = useRef({
     prevFrameData: null,
     state: 'ready', // 'ready' | 'armed_gate1' | 'cooldown'
@@ -433,7 +437,11 @@ export default function App() {
     prevFrameTs: 0,
     shakeWarnUntilMs: 0,
     stableSinceMs: 0,
-    globalMotion: 0
+    globalMotion: 0,
+    noiseFloor: 6.0,
+    aiLastDetectMs: 0,
+    aiBallBox: null,
+    aiLockUntilMs: 0
   });
 
   // AI 자세 코칭 (슈팅·패스·볼 터치 실시간 촬영 + 33관절 스켈레톤 + Gemini 2.5 비전 코칭) 상태
@@ -4496,6 +4504,47 @@ ${roleOrderGuide}
     shootTrapRuntimeRef.current.scoreB = 0;
   };
 
+  const ensureShootBallDetector = async () => {
+    if (shootBallDetectorRef.current) {
+      setShootAiStatus('ready');
+      return shootBallDetectorRef.current;
+    }
+    if (shootBallDetectorPromiseRef.current) return shootBallDetectorPromiseRef.current;
+    setShootAiStatus('loading');
+    shootBallDetectorPromiseRef.current = (async () => {
+      const visionModuleUrl = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+      const wasmUrl = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
+      const modelUrl = 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/efficientdet_lite0.tflite';
+      for (const delegate of ['GPU', 'CPU']) {
+        try {
+          const vision = await import(/* @vite-ignore */ visionModuleUrl);
+          const filesetResolver = await vision.FilesetResolver.forVisionTasks(wasmUrl);
+          const detector = await vision.ObjectDetector.createFromOptions(filesetResolver, {
+            baseOptions: { modelAssetPath: modelUrl, delegate },
+            runningMode: 'IMAGE',
+            scoreThreshold: 0.24,
+            maxResults: 3,
+            categoryAllowlist: ['sports ball']
+          });
+          shootBallDetectorRef.current = detector;
+          setShootAiStatus('ready');
+          return detector;
+        } catch (err) {
+          if (delegate === 'CPU') {
+            console.warn('MediaPipe ObjectDetector load failed, optical fallback active:', err);
+            setShootAiStatus('error');
+          }
+        }
+      }
+      return null;
+    })();
+    try {
+      return await shootBallDetectorPromiseRef.current;
+    } finally {
+      shootBallDetectorPromiseRef.current = null;
+    }
+  };
+
   const startShootCamera = async (overrideFacingMode = null) => {
     const targetFacing = overrideFacingMode || shootFacingMode;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -4573,7 +4622,7 @@ ${roleOrderGuide}
         lastShotSpeed: 0,
         lastShotAtMs: 0,
         lastShotPts: [],
-        cooldownUntilMs: initNow + 650,
+        cooldownUntilMs: initNow + 1600,
         scoreA: 0,
         scoreB: 0,
         prevScoreA: 0,
@@ -4581,8 +4630,16 @@ ${roleOrderGuide}
         prevFrameTs: initNow,
         shakeWarnUntilMs: 0,
         stableSinceMs: initNow,
-        globalMotion: 0
+        globalMotion: 0,
+        noiseFloor: 7.0,
+        aiLastDetectMs: 0,
+        aiBallBox: null,
+        aiLockUntilMs: 0
       };
+
+      if (shootDetectionMode === 'ai_hybrid') {
+        ensureShootBallDetector();
+      }
     } catch (err) {
       console.error('Camera error:', err);
       setSystemAlert({
@@ -4684,6 +4741,7 @@ ${roleOrderGuide}
     const cellMaxDiff = new Float32Array(gridLen);
     const cellSumX = new Float32Array(gridLen);
     const cellSumY = new Float32Array(gridLen);
+    const cellSumLuma = new Float32Array(gridLen);
     const cellWeight = new Float32Array(gridLen);
     const visited = new Uint8Array(gridLen);
     const bfsQueue = new Int16Array(gridLen);
@@ -4775,10 +4833,11 @@ ${roleOrderGuide}
               // 반면 스마트폰 자체가 흔들리거나 패닝되면 화면 전체가 밀려 p60, p75가 급상승함.
               const p60Diff = sortedSamples[57];
               const p75Diff = sortedSamples[72];
+              const p90Diff = sortedSamples[86];
               rt.globalMotion = p60Diff;
 
-              const maxP60 = shootSensitivity === 'high' ? 9.5 : shootSensitivity === 'low' ? 5.5 : 7.5;
-              const maxP75 = shootSensitivity === 'high' ? 15.5 : shootSensitivity === 'low' ? 9.5 : 12.5;
+              const maxP60 = shootSensitivity === 'high' ? 8.5 : shootSensitivity === 'low' ? 5.0 : 6.8;
+              const maxP75 = shootSensitivity === 'high' ? 14.0 : shootSensitivity === 'low' ? 9.0 : 11.5;
               const isCameraShaking = p60Diff > maxP60 || p75Diff > maxP75;
               // 1) 수동 잠금 또는 스마트폰 자체 흔들림 감지 시 배경 빠른 재적응 후 대기
               if (isShootTrapLocked || isCameraShaking) {
@@ -4804,20 +4863,73 @@ ${roleOrderGuide}
                 if (isShootTrapLocked) {
                   setShootTrapStatus('locked');
                 } else {
-                  rt.shakeWarnUntilMs = nowMs + 420;
+                  rt.shakeWarnUntilMs = nowMs + 600;
                   setShootTrapStatus('shake_warn');
                 }
               } else {
-                // 2) 카메라 안정 상태: 적응형 배경 차분(bgRGB) + 프레임 차분(prevRGB) 하이브리드 전경 추출
-                // 이전 프레임 잔상(Ghost)은 제거하고 현재 프레임의 실제 공 위치만 정확히 분리함
-                const bgThresh = shootSensitivity === 'high' ? 12.5 : shootSensitivity === 'low' ? 21.0 : 15.5;
-                const motionThresh = shootSensitivity === 'high' ? 8.5 : shootSensitivity === 'low' ? 16.0 : 11.5;
-                const minBallPx = shootSensitivity === 'high' ? 2 : shootSensitivity === 'low' ? 5 : 3;
+                // 1.5) 자동 노이즈 바닥(Noise Floor) 학습 & MediaPipe AI 축구공(sports ball) 5.5fps 락온
+                const isStabilizingNow = (nowMs - (rt.stableSinceMs || 0)) < 1500;
+                if (isStabilizingNow) {
+                  rt.noiseFloor = (rt.noiseFloor || 7.0) * 0.8 + p90Diff * 0.2;
+                } else if (!rt.tracks || rt.tracks.length === 0) {
+                  rt.noiseFloor = (rt.noiseFloor || 7.0) * 0.96 + p90Diff * 0.04;
+                }
+
+                if (
+                  shootDetectionMode === 'ai_hybrid' &&
+                  shootBallDetectorRef.current &&
+                  (nowMs - (rt.aiLastDetectMs || 0)) >= 180
+                ) {
+                  rt.aiLastDetectMs = nowMs;
+                  try {
+                    const aiRes = shootBallDetectorRef.current.detect(procCanvas);
+                    const dets = aiRes?.detections || [];
+                    let bestBall = null;
+                    for (let di = 0; di < dets.length; di++) {
+                      const d = dets[di];
+                      const cat = d.categories?.[0];
+                      const bb = d.boundingBox;
+                      if (!cat || !bb || bb.width <= 2 || bb.height <= 2) continue;
+                      const score = cat.score || 0;
+                      if (score >= 0.24 && (!bestBall || score > bestBall.score)) {
+                        const nx = Math.max(0, bb.originX / procW);
+                        const ny = Math.max(0, bb.originY / procH);
+                        const nw = Math.min(1 - nx, bb.width / procW);
+                        const nh = Math.min(1 - ny, bb.height / procH);
+                        bestBall = {
+                          x: nx,
+                          y: ny,
+                          w: nw,
+                          h: nh,
+                          cx: nx + nw * 0.5,
+                          cy: ny + nh * 0.5,
+                          diameterFrac: Math.max(nw, nh),
+                          score,
+                          seenAtMs: nowMs
+                        };
+                      }
+                    }
+                    if (bestBall) {
+                      rt.aiBallBox = bestBall;
+                      rt.aiLockUntilMs = nowMs + 4800;
+                    }
+                  } catch {
+                    // AI 단발 추론 오류 무시
+                  }
+                }
+
+                // 2) 카메라 안정 상태: 동적 노이즈 보정 기반 적응형 배경 차분 + 프레임 차분
+                const baseBg = shootSensitivity === 'high' ? 19.0 : shootSensitivity === 'low' ? 30.0 : 24.0;
+                const baseMot = shootSensitivity === 'high' ? 14.0 : shootSensitivity === 'low' ? 23.0 : 18.0;
+                const bgThresh = Math.max(baseBg, Math.min(54.0, (rt.noiseFloor || 7.0) * 2.4 + 12.0));
+                const motionThresh = Math.max(baseMot, Math.min(46.0, (rt.noiseFloor || 7.0) * 1.9 + 9.0));
+                const minBallPx = shootSensitivity === 'high' ? 8 : shootSensitivity === 'low' ? 15 : 11;
 
                 cellActive.fill(0);
                 cellMaxDiff.fill(0);
                 cellSumX.fill(0);
                 cellSumY.fill(0);
+                cellSumLuma.fill(0);
                 cellWeight.fill(0);
 
                 const yStartPx = Math.max(4, Math.floor(procH * yMinFrac));
@@ -4858,18 +4970,19 @@ ${roleOrderGuide}
                       if (
                         !isReturningToBg &&
                         diffBg >= bgThresh &&
-                        (diffPrev >= motionThresh || (diffBg >= bgThresh * 1.4 && prevDiffBg >= bgThresh))
+                        (diffPrev >= motionThresh || (diffBg >= bgThresh * 1.45 && prevDiffBg >= bgThresh))
                       ) {
                         const cIdx = gy * gridW + (x >> 2);
                         cellActive[cIdx]++;
                         if (diffBg > cellMaxDiff[cIdx]) cellMaxDiff[cIdx] = diffBg;
                         cellSumX[cIdx] += x * diffBg;
                         cellSumY[cIdx] += y * diffBg;
+                        cellSumLuma[cIdx] += (0.299 * r + 0.587 * g + 0.114 * b) * diffBg;
                         cellWeight[cIdx] += diffBg;
                       }
                     }
 
-                    const alpha = diffPrev < 11 ? 0.15 : 0.025;
+                    const alpha = isStabilizingNow ? 0.25 : (diffPrev < 12 ? 0.14 : 0.025);
                     bgRGB[p3] += (r - bgRGB[p3]) * alpha;
                     bgRGB[p3 + 1] += (g - bgRGB[p3 + 1]) * alpha;
                     bgRGB[p3 + 2] += (b - bgRGB[p3 + 2]) * alpha;
@@ -4880,84 +4993,103 @@ ${roleOrderGuide}
                 }
                 rt.prevFrameTs = nowMs;
 
-                // 3) 4x4 격자 기반 연결 요소 탐색(BFS)으로 키커(사람)와 축구공(Ball Blob)을 분리 추출
+                // Clutter Gate: 조명 깜빡임·노출 급변·큰 물체 통과로 터널 내 활성 셀이 과도하게 폭주한 프레임 차단
+                let totalActiveCells = 0;
+                for (let ci = 0; ci < gridLen; ci++) {
+                  if (cellActive[ci] >= 2) totalActiveCells++;
+                }
+                const isClutteredFrame = totalActiveCells > Math.floor(gridLen * 0.20);
+
+                // 3) 4x4 격자 기반 연결 요소 탐색(BFS) + 공 형상·밀도·종횡비·AI 크기 검증
                 visited.fill(0);
                 const candidateBlobs = [];
-                for (let gy = 1; gy < gridH - 1; gy++) {
-                  for (let gx = 1; gx < gridW - 1; gx++) {
-                    const startIdx = gy * gridW + gx;
-                    if (visited[startIdx]) continue;
-                    const isSeed =
-                      cellActive[startIdx] >= 2 ||
-                      (cellActive[startIdx] === 1 && cellMaxDiff[startIdx] >= bgThresh + 8);
-                    if (!isSeed) continue;
+                const aiRefDia = (rt.aiBallBox && nowMs <= rt.aiLockUntilMs) ? rt.aiBallBox.diameterFrac : 0;
 
-                    let qHead = 0;
-                    let qTail = 0;
-                    bfsQueue[qTail++] = startIdx;
-                    visited[startIdx] = 1;
+                if (!isClutteredFrame) {
+                  for (let gy = 1; gy < gridH - 1; gy++) {
+                    for (let gx = 1; gx < gridW - 1; gx++) {
+                      const startIdx = gy * gridW + gx;
+                      if (visited[startIdx]) continue;
+                      const isSeed =
+                        cellActive[startIdx] >= 3 ||
+                        (cellActive[startIdx] >= 2 && cellMaxDiff[startIdx] >= bgThresh + 8);
+                      if (!isSeed) continue;
 
-                    let minGX = gx, maxGX = gx, minGY = gy, maxGY = gy;
-                    let sumWX = 0, sumWY = 0, sumW = 0;
-                    let totalActPx = 0;
-                    let peakDiff = 0;
+                      let qHead = 0;
+                      let qTail = 0;
+                      bfsQueue[qTail++] = startIdx;
+                      visited[startIdx] = 1;
 
-                    while (qHead < qTail) {
-                      const cur = bfsQueue[qHead++];
-                      const cgy = Math.floor(cur / gridW);
-                      const cgx = cur - cgy * gridW;
+                      let minGX = gx, maxGX = gx, minGY = gy, maxGY = gy;
+                      let sumWX = 0, sumWY = 0, sumWLuma = 0, sumW = 0;
+                      let totalActPx = 0;
+                      let peakDiff = 0;
 
-                      if (cgx < minGX) minGX = cgx;
-                      if (cgx > maxGX) maxGX = cgx;
-                      if (cgy < minGY) minGY = cgy;
-                      if (cgy > maxGY) maxGY = cgy;
+                      while (qHead < qTail) {
+                        const cur = bfsQueue[qHead++];
+                        const cgy = Math.floor(cur / gridW);
+                        const cgx = cur - cgy * gridW;
 
-                      totalActPx += cellActive[cur];
-                      sumWX += cellSumX[cur];
-                      sumWY += cellSumY[cur];
-                      sumW += cellWeight[cur];
-                      if (cellMaxDiff[cur] > peakDiff) peakDiff = cellMaxDiff[cur];
+                        if (cgx < minGX) minGX = cgx;
+                        if (cgx > maxGX) maxGX = cgx;
+                        if (cgy < minGY) minGY = cgy;
+                        if (cgy > maxGY) maxGY = cgy;
 
-                      // 빠른 슈팅 모션 블러를 하나로 묶기 위해 가로는 ±2셀, 세로는 ±1셀 탐색
-                      for (let dy = -1; dy <= 1; dy++) {
-                        const ngy = cgy + dy;
-                        if (ngy < 1 || ngy >= gridH - 1) continue;
-                        for (let dx = -2; dx <= 2; dx++) {
-                          const ngx = cgx + dx;
-                          if (ngx < 1 || ngx >= gridW - 1) continue;
-                          const nIdx = ngy * gridW + ngx;
-                          if (visited[nIdx]) continue;
-                          if (cellActive[nIdx] >= 1 && cellMaxDiff[nIdx] >= bgThresh) {
-                            visited[nIdx] = 1;
-                            bfsQueue[qTail++] = nIdx;
+                        totalActPx += cellActive[cur];
+                        sumWX += cellSumX[cur];
+                        sumWY += cellSumY[cur];
+                        sumWLuma += cellSumLuma[cur];
+                        sumW += cellWeight[cur];
+                        if (cellMaxDiff[cur] > peakDiff) peakDiff = cellMaxDiff[cur];
+
+                        for (let dy = -1; dy <= 1; dy++) {
+                          const ngy = cgy + dy;
+                          if (ngy < 1 || ngy >= gridH - 1) continue;
+                          for (let dx = -2; dx <= 2; dx++) {
+                            const ngx = cgx + dx;
+                            if (ngx < 1 || ngx >= gridW - 1) continue;
+                            const nIdx = ngy * gridW + ngx;
+                            if (visited[nIdx]) continue;
+                            if (cellActive[nIdx] >= 2 && cellMaxDiff[nIdx] >= bgThresh) {
+                              visited[nIdx] = 1;
+                              bfsQueue[qTail++] = nIdx;
+                            }
                           }
                         }
                       }
-                    }
 
-                    const wFrac = ((maxGX - minGX + 1) * 4) / procW;
-                    const hFrac = ((maxGY - minGY + 1) * 4) / procH;
-                    const cellCount = qTail;
+                      const wFrac = ((maxGX - minGX + 1) * 4) / procW;
+                      const hFrac = ((maxGY - minGY + 1) * 4) / procH;
+                      const cellCount = qTail;
+                      const bboxAreaCells = Math.max(1, (maxGX - minGX + 1) * (maxGY - minGY + 1));
+                      const fillRatio = totalActPx / (bboxAreaCells * 16);
+                      const aspect = wFrac / Math.max(0.015, hFrac);
 
-                    // 사람 전신(키가 큰 블롭 hFrac > 0.38)은 배제하고 축구공 크기~모션블러 궤적만 통과
-                    const isHumanSized = hFrac > 0.38 || (hFrac > 0.25 && wFrac > 0.22 && totalActPx > 240);
-                    if (!isHumanSized && totalActPx >= minBallPx && wFrac <= 0.48 && cellCount <= 145 && sumW > 0) {
-                      candidateBlobs.push({
-                        cx: (sumWX / sumW) / procW,
-                        cy: (sumWY / sumW) / procH,
-                        wFrac,
-                        hFrac,
-                        activePx: totalActPx,
-                        peakDiff
-                      });
+                      // 사람 전신·얇은 수직선·흩어진 노이즈 배제 + 공 형상(둥근/가로 모션블러) & AI 크기 일치 검증
+                      const isHumanSized = hFrac > 0.34 || (hFrac > 0.24 && wFrac > 0.22 && totalActPx > 220);
+                      const passesShape = fillRatio >= 0.18 && aspect >= 0.48 && aspect <= 4.2;
+                      const passesAiSize = !aiRefDia || (hFrac >= Math.max(0.025, aiRefDia * 0.28) && hFrac <= Math.min(0.36, aiRefDia * 2.8));
+
+                      if (!isHumanSized && passesShape && passesAiSize && totalActPx >= minBallPx && wFrac <= 0.45 && cellCount <= 125 && sumW > 0) {
+                        candidateBlobs.push({
+                          cx: (sumWX / sumW) / procW,
+                          cy: (sumWY / sumW) / procH,
+                          wFrac,
+                          hFrac,
+                          activePx: totalActPx,
+                          avgLuma: sumWLuma / sumW,
+                          peakDiff
+                        });
+                      }
                     }
                   }
                 }
 
-                // 강한 공 후보 최대 8개 유지 및 HUD 타겟 링 표시용 저장
-                candidateBlobs.sort((a, b) => (b.activePx * b.peakDiff) - (a.activePx * a.peakDiff));
-                const topBlobs = candidateBlobs.slice(0, 8);
-                rt.liveBlobs = topBlobs.slice(0, 4);
+                // 잡음 블롭이 6개를 초과하는 혼잡 프레임은 오매칭 방지를 위해 건너뜀
+                const cleanBlobs = candidateBlobs.length <= 6 ? candidateBlobs : [];
+                cleanBlobs.sort((a, b) => (b.activePx * b.peakDiff) - (a.activePx * a.peakDiff));
+                const topBlobs = cleanBlobs.slice(0, 5);
+                rt.liveBlobs = topBlobs.slice(0, 3);
 
                 // 게이트 근처 실시간 감도 바 애니메이션 업데이트
                 let nearAScore = 0;
@@ -4972,15 +5104,26 @@ ${roleOrderGuide}
                 rt.scoreA = nearAScore > rt.scoreA ? nearAScore : Math.round(rt.scoreA * 0.72);
                 rt.scoreB = nearBScore > rt.scoreB ? nearBScore : Math.round(rt.scoreB * 0.72);
 
-                // 4) 다중 가설 볼 궤적 추적(Multi-Track Association) 및 서브프레임 게이트 통과 속도 산출
+                // 4) AI 축구공 락온 게이트 + 다중 가설 볼 궤적 추적(3프레임 이상 연속 궤적 필수)
+                const isAiGateRequired = shootDetectionMode === 'ai_hybrid' && shootAiStatus !== 'error';
+                const isAiBallLocked = nowMs <= (rt.aiLockUntilMs || 0);
+
                 if (nowMs < rt.cooldownUntilMs) {
                   rt.tracks = [];
-                } else if (nowMs < rt.shakeWarnUntilMs || (nowMs - (rt.stableSinceMs || 0)) < 420) {
+                } else if (nowMs < rt.shakeWarnUntilMs || (nowMs - (rt.stableSinceMs || 0)) < 1500) {
                   rt.tracks = [];
                   rt.state = 'ready';
                   rt.startGate = null;
                   const nextStatus = nowMs < rt.shakeWarnUntilMs ? 'shake_warn' : 'stabilizing';
                   setShootTrapStatus(prev => (prev !== nextStatus ? nextStatus : prev));
+                } else if (isAiGateRequired && !isAiBallLocked) {
+                  // AI 하이브리드 모드: 축구공이 화면에서 확인되기 전에는 오측정 방지를 위해 측정 잠금 유지
+                  rt.tracks = [];
+                  rt.state = 'ready';
+                  rt.startGate = null;
+                  rt.scoreA = 0;
+                  rt.scoreB = 0;
+                  setShootTrapStatus(prev => (prev !== 'searching_ball' ? 'searching_ball' : prev));
                 } else {
                   if (rt.state === 'cooldown') {
                     rt.state = 'ready';
@@ -4991,47 +5134,51 @@ ${roleOrderGuide}
                     setShootTrapStatus('ready');
                   } else {
                     setShootTrapStatus(prev =>
-                      prev === 'shake_warn' || prev === 'stabilizing' || prev === 'locked' || (prev === 'measured' && rt.state === 'ready')
+                      prev === 'shake_warn' || prev === 'stabilizing' || prev === 'searching_ball' || prev === 'locked' || (prev === 'measured' && rt.state === 'ready')
                         ? 'ready'
                         : prev
                     );
                   }
 
                   const metersPerX = shootGateDistanceM / gateSpanFrac;
-                  const minVx = (3.05 / metersPerX) / 1000;  // 약 11 km/h (가벼운 패스/토스 테스트도 인식)
+                  const minVx = (3.8 / metersPerX) / 1000;   // 약 13.7 km/h 이상만 슈팅으로 인정
                   const maxVx = (47.22 / metersPerX) / 1000; // 약 170 km/h (초고속 캐논슛까지 인식)
 
                   const prevTracks = Array.isArray(rt.tracks) ? rt.tracks : [];
                   const nextTracks = [];
                   const usedBlobMask = new Uint8Array(topBlobs.length);
 
-                  // 기존 2점 이상 확정 방향 궤적 우선 연장
+                  // 기존 2점 이상 확정 방향 궤적 우선 연장 (크기·밝기 일관성 동시 검증)
                   for (let ti = 0; ti < prevTracks.length; ti++) {
                     const tr = prevTracks[ti];
                     const pts = tr.pts;
                     const lastPt = pts[pts.length - 1];
                     const dt = nowMs - lastPt.t;
-                    if (dt < 5 || dt > 105 || (nowMs - pts[0].t) > 950) continue;
+                    if (dt < 5 || dt > 95 || (nowMs - pts[0].t) > 800) continue;
 
                     if (pts.length >= 2 && tr.dir) {
                       const predX = lastPt.x + tr.vx * dt;
                       const predY = lastPt.y + tr.vy * dt;
                       let bestBi = -1;
                       let bestErr = 999;
-                      const maxErrX = Math.max(0.11, Math.abs(tr.vx * dt) * 0.68);
+                      const maxErrX = Math.max(0.095, Math.abs(tr.vx * dt) * 0.58);
 
                       for (let bi = 0; bi < topBlobs.length; bi++) {
                         const b = topBlobs[bi];
                         const dx = b.cx - lastPt.x;
-                        if (tr.dir === 'ltr' && dx <= 0.012) continue;
-                        if (tr.dir === 'rtl' && dx >= -0.012) continue;
+                        if (tr.dir === 'ltr' && dx <= 0.015) continue;
+                        if (tr.dir === 'rtl' && dx >= -0.015) continue;
                         const stepVx = Math.abs(dx) / dt;
-                        if (stepVx < minVx * 0.72 || stepVx > maxVx * 1.18) continue;
+                        if (stepVx < minVx * 0.78 || stepVx > maxVx * 1.15) continue;
                         const absTrackVx = Math.abs(tr.vx);
-                        if (stepVx < absTrackVx * 0.40 || stepVx > absTrackVx * 2.35) continue;
+                        if (stepVx < absTrackVx * 0.45 || stepVx > absTrackVx * 2.2) continue;
+                        // 프레임 간 공 크기 및 밝기 일관성 검증 (무작위 노이즈 연결 원천 차단)
+                        const areaRatio = b.activePx / Math.max(1, lastPt.px || b.activePx);
+                        if (areaRatio < 0.28 || areaRatio > 3.5) continue;
+                        if (Math.abs(b.avgLuma - (lastPt.luma ?? b.avgLuma)) > 72) continue;
                         const errX = Math.abs(b.cx - predX);
                         const errY = Math.abs(b.cy - predY);
-                        if (errX <= maxErrX && errY <= 0.145) {
+                        if (errX <= maxErrX && errY <= 0.125) {
                           const err = errX + errY * 0.8;
                           if (err < bestErr) {
                             bestErr = err;
@@ -5050,10 +5197,9 @@ ${roleOrderGuide}
                           vx: newVx,
                           vy: newVy,
                           gate1Fired: tr.gate1Fired,
-                          pts: [...pts, { x: b.cx, y: b.cy, t: nowMs, peak: b.peakDiff }]
+                          pts: [...pts, { x: b.cx, y: b.cy, t: nowMs, peak: b.peakDiff, px: b.activePx, luma: b.avgLuma }]
                         });
-                      } else if (dt <= 45) {
-                        // 1프레임 일시 가림 허용
+                      } else if (dt <= 40) {
                         nextTracks.push(tr);
                       }
                     }
@@ -5065,24 +5211,28 @@ ${roleOrderGuide}
                     if (tr.pts.length !== 1) continue;
                     const p0 = tr.pts[0];
                     const dt = nowMs - p0.t;
-                    if (dt < 5 || dt > 90) continue;
+                    if (dt < 5 || dt > 85) continue;
 
                     for (let bi = 0; bi < topBlobs.length; bi++) {
                       const b = topBlobs[bi];
                       const dx = b.cx - p0.x;
                       const dy = b.cy - p0.y;
                       const absDx = Math.abs(dx);
+                      if (absDx < 0.025) continue;
                       const dir = dx > 0 ? 'ltr' : 'rtl';
                       if (shootDirectionMode !== 'auto' && shootDirectionMode !== dir) continue;
                       const stepVx = absDx / dt;
                       if (stepVx < minVx || stepVx > maxVx) continue;
-                      if (Math.abs(dy) > Math.max(0.15, absDx * 0.82)) continue;
+                      if (Math.abs(dy) > Math.max(0.13, absDx * 0.78)) continue;
+                      const areaRatio = b.activePx / Math.max(1, p0.px || b.activePx);
+                      if (areaRatio < 0.28 || areaRatio > 3.5) continue;
+                      if (Math.abs(b.avgLuma - (p0.luma ?? b.avgLuma)) > 72) continue;
                       nextTracks.push({
                         dir,
                         vx: dx / dt,
                         vy: dy / dt,
                         gate1Fired: false,
-                        pts: [p0, { x: b.cx, y: b.cy, t: nowMs, peak: b.peakDiff }]
+                        pts: [p0, { x: b.cx, y: b.cy, t: nowMs, peak: b.peakDiff, px: b.activePx, luma: b.avgLuma }]
                       });
                     }
                   }
@@ -5092,20 +5242,20 @@ ${roleOrderGuide}
                     if (usedBlobMask[bi]) continue;
                     const b = topBlobs[bi];
                     const allowSeed =
-                      (shootDirectionMode !== 'rtl' && b.cx <= 0.60) ||
-                      (shootDirectionMode !== 'ltr' && b.cx >= 0.40);
-                    if (allowSeed && nextTracks.length < 18) {
+                      (shootDirectionMode !== 'rtl' && b.cx <= 0.56) ||
+                      (shootDirectionMode !== 'ltr' && b.cx >= 0.44);
+                    if (allowSeed && nextTracks.length < 12) {
                       nextTracks.push({
                         dir: null,
                         vx: 0,
                         vy: 0,
                         gate1Fired: false,
-                        pts: [{ x: b.cx, y: b.cy, t: nowMs, peak: b.peakDiff }]
+                        pts: [{ x: b.cx, y: b.cy, t: nowMs, peak: b.peakDiff, px: b.activePx, luma: b.avgLuma }]
                       });
                     }
                   }
 
-                  // 5) 유효 궤적의 GATE 1 진입 알림 및 GATE 2 통과 서브프레임 구속 산출
+                  // 5) 유효 궤적(최소 3프레임 연속)의 GATE 1 진입 알림 및 GATE 2 통과 서브프레임 구속 산출
                   const interpTimeAtX = (pts, targetX) => {
                     for (let i = 0; i < pts.length - 1; i++) {
                       const a = pts[i];
@@ -5123,22 +5273,33 @@ ${roleOrderGuide}
                   for (let ti = 0; ti < nextTracks.length; ti++) {
                     const tr = nextTracks[ti];
                     const pts = tr.pts;
-                    if (pts.length < 2 || !tr.dir) continue;
+                    if (pts.length < 3 || !tr.dir) continue;
 
                     const firstPt = pts[0];
                     const lastPt = pts[pts.length - 1];
                     const spanX = Math.abs(lastPt.x - firstPt.x);
 
-                    // 3점 이상 궤적의 수직 부드러움(직선/포물선 일관성) 검증
+                    // 3점 이상 궤적의 수직 부드러움(직선/포물선) + 구간 속도 일관성 검증
                     let isSmooth = true;
-                    if (pts.length >= 3 && spanX > 0.08) {
+                    let minSegVx = Infinity;
+                    let maxSegVx = 0;
+                    if (spanX > 0.08) {
                       for (let k = 1; k < pts.length - 1; k++) {
                         const ratioX = (pts[k].x - firstPt.x) / (lastPt.x - firstPt.x);
                         const lineY = firstPt.y + ratioX * (lastPt.y - firstPt.y);
-                        if (Math.abs(pts[k].y - lineY) > 0.14) {
+                        if (Math.abs(pts[k].y - lineY) > 0.12) {
                           isSmooth = false;
                           break;
                         }
+                      }
+                      for (let k = 1; k < pts.length; k++) {
+                        const segDt = Math.max(4, pts[k].t - pts[k - 1].t);
+                        const segVx = Math.abs(pts[k].x - pts[k - 1].x) / segDt;
+                        if (segVx < minSegVx) minSegVx = segVx;
+                        if (segVx > maxSegVx) maxSegVx = segVx;
+                      }
+                      if (minSegVx <= 0 || maxSegVx / minSegVx > 2.45) {
+                        isSmooth = false;
                       }
                     }
                     if (!isSmooth) continue;
@@ -5157,17 +5318,11 @@ ${roleOrderGuide}
                       }
                     }
 
-                    // GATE 2 통과 완료 판정 (Case 1: 두 게이트 정식 통과 / Case 2: 발에서 떨어진 직후 게이트2 통과 복원)
-                    const isFullLtr = tr.dir === 'ltr' && firstPt.x <= gateAXFrac + 0.03 && lastPt.x >= gateBXFrac - 0.01;
-                    const isFullRtl = tr.dir === 'rtl' && firstPt.x >= gateBXFrac - 0.03 && lastPt.x <= gateAXFrac + 0.01;
-                    const allowTwoFrameFast =
-                      pts.length === 2 &&
-                      spanX >= 0.44 &&
-                      Math.abs(lastPt.y - firstPt.y) <= 0.24 &&
-                      firstPt.peak >= bgThresh + 7 &&
-                      lastPt.peak >= bgThresh + 7;
+                    // GATE 2 통과 완료 판정 (2프레임 우연 오측정 원천 차단 · 최소 3프레임 연속 궤적 필수)
+                    const isFullLtr = tr.dir === 'ltr' && firstPt.x <= gateAXFrac + 0.04 && lastPt.x >= gateBXFrac - 0.01;
+                    const isFullRtl = tr.dir === 'rtl' && firstPt.x >= gateBXFrac - 0.04 && lastPt.x <= gateAXFrac + 0.01;
 
-                    if ((isFullLtr || isFullRtl) && (pts.length >= 3 || allowTwoFrameFast)) {
+                    if (isFullLtr || isFullRtl) {
                       const gStart = tr.dir === 'ltr' ? gateAXFrac : gateBXFrac;
                       const gEnd = tr.dir === 'ltr' ? gateBXFrac : gateAXFrac;
                       let tStart = interpTimeAtX(pts, gStart);
@@ -5180,19 +5335,19 @@ ${roleOrderGuide}
                       }
                       const exactElapsedMs = Math.abs(tEnd - tStart);
                       const calcSpeedKmh = exactElapsedMs > 12 ? (shootGateDistanceM / (exactElapsedMs / 1000)) * 3.6 : 0;
-                      if (calcSpeedKmh >= 11 && calcSpeedKmh <= 170) {
+                      if (calcSpeedKmh >= 14 && calcSpeedKmh <= 170) {
                         measuredShot = { speedKmh: calcSpeedKmh, elapsedMs: exactElapsedMs, dir: tr.dir, pts };
                         break;
                       }
                     }
 
-                    const isNearStartLtr = tr.dir === 'ltr' && firstPt.x > gateAXFrac + 0.03 && firstPt.x <= 0.42 && lastPt.x >= gateBXFrac;
-                    const isNearStartRtl = tr.dir === 'rtl' && firstPt.x < gateBXFrac - 0.03 && firstPt.x >= 0.58 && lastPt.x <= gateAXFrac;
-                    if ((isNearStartLtr || isNearStartRtl) && pts.length >= 3 && spanX >= 0.34) {
+                    const isNearStartLtr = tr.dir === 'ltr' && firstPt.x > gateAXFrac + 0.04 && firstPt.x <= 0.40 && lastPt.x >= gateBXFrac;
+                    const isNearStartRtl = tr.dir === 'rtl' && firstPt.x < gateBXFrac - 0.04 && firstPt.x >= 0.60 && lastPt.x <= gateAXFrac;
+                    if ((isNearStartLtr || isNearStartRtl) && spanX >= 0.36) {
                       const traveledM = (spanX / gateSpanFrac) * shootGateDistanceM;
                       const rawDtMs = lastPt.t - firstPt.t;
                       const calcSpeedKmh = rawDtMs > 12 ? (traveledM / (rawDtMs / 1000)) * 3.6 : 0;
-                      if (calcSpeedKmh >= 11 && calcSpeedKmh <= 170) {
+                      if (calcSpeedKmh >= 14 && calcSpeedKmh <= 170) {
                         const eqElapsedMs = (shootGateDistanceM / (calcSpeedKmh / 3.6)) * 1000;
                         measuredShot = { speedKmh: calcSpeedKmh, elapsedMs: eqElapsedMs, dir: tr.dir, pts };
                         break;
@@ -5360,6 +5515,29 @@ ${roleOrderGuide}
         drawLaserGate(xA, 'GATE 1', rt.scoreA, rt.state === 'armed_gate1' && rt.startGate === 'A');
         drawLaserGate(xB, 'GATE 2', rt.scoreB, rt.state === 'armed_gate1' && rt.startGate === 'B');
 
+        // MediaPipe AI 축구공(sports ball) 락온 타겟 박스 표시
+        if (isShootCameraActive && shootDetectionMode === 'ai_hybrid' && rt.aiBallBox && (nowMs - rt.aiBallBox.seenAtMs) < 1600) {
+          const ab = rt.aiBallBox;
+          const bx = Math.round(ab.x * W);
+          const by = Math.round(ab.y * H);
+          const bw = Math.max(18, Math.round(ab.w * W));
+          const bh = Math.max(18, Math.round(ab.h * H));
+          const alpha = Math.max(0.25, 1 - (nowMs - ab.seenAtMs) / 1800);
+          ctx.strokeStyle = `rgba(52, 211, 153, ${alpha})`;
+          ctx.lineWidth = 2.5;
+          ctx.strokeRect(bx, by, bw, bh);
+          const tagText = `⚽ AI BALL ${Math.round((ab.score || 0) * 100)}%`;
+          ctx.font = 'bold 10px sans-serif';
+          const tw = ctx.measureText(tagText).width + 10;
+          const ty = Math.max(14, by - 16);
+          ctx.fillStyle = `rgba(6, 78, 59, ${alpha * 0.9})`;
+          ctx.fillRect(bx, ty, tw, 15);
+          ctx.fillStyle = '#6EE7B7';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(tagText, bx + 5, ty + 7.5);
+        }
+
         // 실시간 공 인식 타겟 락온(Ball Lock-On) 링 & 진행 궤적 표시
         if (isShootCameraActive && Array.isArray(rt.liveBlobs) && rt.liveBlobs.length > 0) {
           for (let bi = 0; bi < Math.min(2, rt.liveBlobs.length); bi++) {
@@ -5441,7 +5619,7 @@ ${roleOrderGuide}
       isCancelled = true;
       if (shootRafRef.current) cancelAnimationFrame(shootRafRef.current);
     };
-  }, [appState, activeTab, recordSubTab, isShootCameraActive, shootGateDistanceM, shootSensitivity, shootDirectionMode, isShootTrapLocked]);
+  }, [appState, activeTab, recordSubTab, isShootCameraActive, shootGateDistanceM, shootSensitivity, shootDirectionMode, isShootTrapLocked, shootDetectionMode, shootAiStatus]);
 
   const saveLastShotManually = async () => {
     if (!shootLastResult || shootLastResult.saved || !activeTeamId || isProcessing) return;
@@ -8655,133 +8833,6 @@ const renderGoalFlowModal = () => {
                 <span className="text-base shrink-0 mt-0.5">💬</span>
                 <div className="text-xs leading-relaxed text-slate-300">
                   {isKakao ? (
-                    <span className="font-bold text-amber-300 block mb-1">현재 카카오톡 인앱브라우저로 접속 중입니다!</span>
-                  ) : (
-                    <span className="font-bold text-amber-400 block mb-1">카카오톡 채팅방 링크로 열었을 때 필독!</span>
-                  )}
-                  카카오톡 안에서 열린 화면에서는 홈 화면 아이콘 추가가 제한됩니다. 먼저 <strong className="text-white">외부 기본 브라우저(크롬 / 삼성인터넷 / Safari)</strong>로 전환한 뒤 설치해주세요.
-                </div>
-              </div>
-
-              <div className="mt-3 flex gap-2">
-                {isAndroid && (
-                  <button
-                    type="button"
-                    onClick={handleOpenExternalBrowser}
-                    className="flex-1 py-2.5 px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition flex items-center justify-center gap-1 shadow"
-                  >
-                    <ArrowUpRight size={14} className="shrink-0"/> 외부 브라우저로 바로 열기
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={handleCopyUrl}
-                  className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1"
-                >
-                  🔗 주소 복사하기
-                </button>
-              </div>
-            </div>
-
-            {/* 크롬/삼성인터넷 등에서 PWA 즉시 설치가 가능한 경우 */}
-            {deferredInstallPrompt && (
-              <button
-                type="button"
-                onClick={handleDirectInstall}
-                className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white font-black text-xs rounded-2xl shadow-lg flex items-center justify-center gap-2 transition"
-              >
-                <span>⚡</span> 지금 바로 바탕화면에 앱 설치하기
-              </button>
-            )}
-
-            {/* 기기 OS 선택 탭 */}
-            <div className="grid grid-cols-2 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1">
-              <button
-                type="button"
-                onClick={() => setInstallGuideTab('android')}
-                className={`py-2 rounded-lg text-xs font-bold transition ${installGuideTab === 'android' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-              >
-                🤖 안드로이드 (갤럭시)
-              </button>
-              <button
-                type="button"
-                onClick={() => setInstallGuideTab('ios')}
-                className={`py-2 rounded-lg text-xs font-bold transition ${installGuideTab === 'ios' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-              >
-                🍎 아이폰 (iOS)
-              </button>
-            </div>
-
-            {/* 단계별 안내 */}
-            {installGuideTab === 'android' ? (
-              <div className="space-y-2.5">
-                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                  <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">1</div>
-                  <div className="text-xs leading-relaxed text-slate-300">
-                    <div className="font-bold text-white mb-0.5">카카오톡에서 외부 브라우저로 열기</div>
-                    카톡 화면 우측 하단(또는 우측 상단)의 <strong className="text-amber-400">⋮ (점 3개)</strong> 버튼 터치 → <strong className="text-white">[다른 브라우저로 열기]</strong>를 선택하세요.
-                    <div className="text-[11px] text-slate-400 mt-1">* 위 노란색 <strong className="text-amber-300">[외부 브라우저로 바로 열기]</strong> 버튼을 누르면 바로 이동됩니다.</div>
-                  </div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                  <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">2</div>
-                  <div className="text-xs leading-relaxed text-slate-300">
-                    <div className="font-bold text-white mb-0.5">브라우저 메뉴 버튼 터치</div>
-                    • <strong className="text-emerald-400">크롬(Chrome)</strong>: 우측 상단 <strong className="text-white">⋮ (점 3개)</strong> 터치<br/>
-                    • <strong className="text-blue-400">삼성 인터넷</strong>: 우측 하단 <strong className="text-white">≡ (줄 3개)</strong> 터치 (또는 주소창 옆 <strong className="text-white">＋</strong> 아이콘)
-                  </div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">3</div>
-                  <div className="text-xs leading-relaxed text-slate-300">
-                    <div className="font-bold text-white mb-0.5">앱 설치 / 홈 화면에 추가</div>
-                    • <strong className="text-emerald-400">크롬</strong>: 메뉴에서 <strong className="text-white">[앱 설치]</strong> 또는 <strong className="text-white">[홈 화면에 추가]</strong> 선택<br/>
-                    • <strong className="text-blue-400">삼성 인터넷</strong>: <strong className="text-white">[현재 페이지 추가] → [홈 화면]</strong> 선택 후 추가하면 바탕화면에 앱 아이콘이 생성됩니다!
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                  <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">1</div>
-                  <div className="text-xs leading-relaxed text-slate-300">
-                    <div className="font-bold text-white mb-0.5">카카오톡에서 Safari로 열기</div>
-                    카톡 화면 우측 하단의 <strong className="text-amber-400">[📤 공유 아이콘]</strong>(네모에서 화살표가 위로 나오는 모양) 터치 → <strong className="text-white">[Safari로 열기]</strong>를 선택하세요.
-                    <div className="text-[11px] text-slate-400 mt-1">* 또는 위 <strong className="text-slate-200">[주소 복사하기]</strong>를 눌러 <strong className="text-white">Safari 앱</strong> 주소창에 붙여넣어 이동하세요.</div>
-                  </div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                  <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">2</div>
-                  <div className="text-xs leading-relaxed text-slate-300">
-                    <div className="font-bold text-white mb-0.5">Safari 하단 [공유] 버튼 터치</div>
-                    Safari 브라우저로 페이지가 열렸다면, 화면 하단 중앙에 있는 <strong className="text-blue-400">[📤 공유 버튼]</strong>(네모 위 화살표)을 눌러주세요.
-                  </div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
-                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">3</div>
-                  <div className="text-xs leading-relaxed text-slate-300">
-                    <div className="font-bold text-white mb-0.5">[홈 화면에 추가] 선택</div>
-                    공유 메뉴를 살짝 위로 올려 <strong className="text-white">[홈 화면에 추가 ➕]</strong>를 누른 뒤, 우측 상단 <strong className="text-emerald-400">[추가]</strong>를 누르면 아이폰 바탕화면에 앱 아이콘이 생성됩니다!
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setInstallGuideModal(false)}
-            className="w-full mt-4 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl text-sm transition shrink-0"
-          >
-            확인했어요
-          </button>
-        </div>
-      </div>
-    );
   };
 
   if (appState === 'login') {
@@ -10946,6 +10997,7 @@ const renderGoalFlowModal = () => {
                           shootTrapStatus === 'armed_gate1' ? 'bg-amber-400 animate-pulse' :
                           shootTrapStatus === 'shake_warn' ? 'bg-orange-500 animate-bounce' :
                           shootTrapStatus === 'stabilizing' ? 'bg-yellow-400 animate-pulse' :
+                          shootTrapStatus === 'searching_ball' ? 'bg-indigo-400 animate-pulse' :
                           shootTrapStatus === 'locked' ? 'bg-sky-400' :
                           isShootCameraActive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
                         }`} />
@@ -10953,9 +11005,15 @@ const renderGoalFlowModal = () => {
                           {shootTrapStatus === 'measured' ? '🔴 SHOT DETECTED! (구속 측정 완료)' :
                            shootTrapStatus === 'armed_gate1' ? '🟡 GATE 1 통과! (GATE 2 감지 중...)' :
                            shootTrapStatus === 'shake_warn' ? '🟠 카메라 흔들림 감지됨 (오작동 자동 차단중)' :
-                           shootTrapStatus === 'stabilizing' ? '🟡 카메라 안정화 확인 중... (잠시 고정하세요)' :
-                           shootTrapStatus === 'locked' ? '🔒 조준 잠금됨 (구도 맞춘 후 잠금 해제)' :
-                           isShootCameraActive ? '🟢 LASER TRAP ARMED (흔들림 없음 · 슈팅 대기중)' : '⚪ STANDBY (카메라를 켜거나 시뮬레이션 실행)'}
+                           shootTrapStatus === 'stabilizing' ? '🟡 카메라 안정화·노이즈 보정 중... (잠시 고정)' :
+                           shootTrapStatus === 'searching_ball'
+                             ? (shootAiStatus === 'loading' ? '⏳ AI 축구공 인식 모델 불러오는 중...' : '🔍 AI 축구공 탐색 중... (공을 화면에 비춰주세요)')
+                             : shootTrapStatus === 'locked' ? '🔒 조준 잠금됨 (구도 맞춘 후 잠금 해제)' :
+                           isShootCameraActive
+                             ? (shootDetectionMode === 'ai_hybrid' && shootAiStatus !== 'error'
+                               ? '🟢 AI 공 락온 완료! (슈팅 즉시 측정)'
+                               : '🟢 LASER TRAP ARMED (노이즈 차단 · 슈팅 대기중)')
+                             : '⚪ STANDBY (카메라를 켜거나 시뮬레이션 실행)'}
                         </span>
                       </div>
                       {shootLastResult && (
@@ -11077,6 +11135,38 @@ const renderGoalFlowModal = () => {
                         title="실내에서도 레이저 통과 및 자동 랭킹 기록을 테스트할 수 있습니다"
                       >
                         ⚡ 테스트 슈팅
+                      </button>
+                    </div>
+
+                    {/* 감지 방식 전환: AI 축구공 락온 하이브리드 vs 일반 고속 광학 트랩 */}
+                    <div className="grid grid-cols-2 gap-1.5 bg-slate-950/90 p-1 rounded-xl border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShootDetectionMode('ai_hybrid');
+                          if (isShootCameraActive) ensureShootBallDetector();
+                        }}
+                        className={`py-2 px-2 rounded-lg text-[11px] font-black transition flex items-center justify-center gap-1 whitespace-nowrap ${
+                          shootDetectionMode === 'ai_hybrid'
+                            ? 'bg-emerald-600 text-white shadow'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <span>🤖 AI 공 락온</span>
+                        {shootDetectionMode === 'ai_hybrid' && shootAiStatus === 'loading' && (
+                          <span className="text-[9px] opacity-80">(로딩)</span>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShootDetectionMode('optical_only')}
+                        className={`py-2 px-2 rounded-lg text-[11px] font-black transition flex items-center justify-center gap-1 whitespace-nowrap ${
+                          shootDetectionMode === 'optical_only'
+                            ? 'bg-sky-600 text-white shadow'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <span>⚡ 고속 광학 (야간·원거리)</span>
                       </button>
                     </div>
 
