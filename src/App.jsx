@@ -4522,7 +4522,7 @@ ${roleOrderGuide}
           const detector = await vision.ObjectDetector.createFromOptions(filesetResolver, {
             baseOptions: { modelAssetPath: modelUrl, delegate },
             runningMode: 'IMAGE',
-            scoreThreshold: 0.24,
+            scoreThreshold: 0.38,
             maxResults: 3,
             categoryAllowlist: ['sports ball']
           });
@@ -4836,9 +4836,10 @@ ${roleOrderGuide}
               const p90Diff = sortedSamples[86];
               rt.globalMotion = p60Diff;
 
-              const maxP60 = shootSensitivity === 'high' ? 8.5 : shootSensitivity === 'low' ? 5.0 : 6.8;
-              const maxP75 = shootSensitivity === 'high' ? 14.0 : shootSensitivity === 'low' ? 9.0 : 11.5;
-              const isCameraShaking = p60Diff > maxP60 || p75Diff > maxP75;
+              const maxP60 = shootSensitivity === 'high' ? 8.0 : shootSensitivity === 'low' ? 4.8 : 6.2;
+              const maxP75 = shootSensitivity === 'high' ? 13.0 : shootSensitivity === 'low' ? 8.5 : 10.5;
+              const maxP90 = shootSensitivity === 'high' ? 21.0 : shootSensitivity === 'low' ? 13.0 : 16.5;
+              const isCameraShaking = p60Diff > maxP60 || p75Diff > maxP75 || p90Diff > maxP90;
               // 1) 수동 잠금 또는 스마트폰 자체 흔들림 감지 시 배경 빠른 재적응 후 대기
               if (isShootTrapLocked || isCameraShaking) {
                 for (let i = 0, j = 0; i < totalPixels * 4; i += 4, j += 3) {
@@ -4891,7 +4892,8 @@ ${roleOrderGuide}
                       const bb = d.boundingBox;
                       if (!cat || !bb || bb.width <= 2 || bb.height <= 2) continue;
                       const score = cat.score || 0;
-                      if (score >= 0.24 && (!bestBall || score > bestBall.score)) {
+                      const boxAspect = bb.width / Math.max(1, bb.height);
+                      if (score >= 0.38 && boxAspect >= 0.62 && boxAspect <= 1.6 && (!bestBall || score > bestBall.score)) {
                         const nx = Math.max(0, bb.originX / procW);
                         const ny = Math.max(0, bb.originY / procH);
                         const nw = Math.min(1 - nx, bb.width / procW);
@@ -8833,6 +8835,133 @@ const renderGoalFlowModal = () => {
                 <span className="text-base shrink-0 mt-0.5">💬</span>
                 <div className="text-xs leading-relaxed text-slate-300">
                   {isKakao ? (
+                    <span className="font-bold text-amber-300 block mb-1">현재 카카오톡 인앱브라우저로 접속 중입니다!</span>
+                  ) : (
+                    <span className="font-bold text-amber-400 block mb-1">카카오톡 채팅방 링크로 열었을 때 필독!</span>
+                  )}
+                  카카오톡 안에서 열린 화면에서는 홈 화면 아이콘 추가가 제한됩니다. 먼저 <strong className="text-white">외부 기본 브라우저(크롬 / 삼성인터넷 / Safari)</strong>로 전환한 뒤 설치해주세요.
+                </div>
+              </div>
+
+              <div className="mt-3 flex gap-2">
+                {isAndroid && (
+                  <button
+                    type="button"
+                    onClick={handleOpenExternalBrowser}
+                    className="flex-1 py-2.5 px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition flex items-center justify-center gap-1 shadow"
+                  >
+                    <ArrowUpRight size={14} className="shrink-0"/> 외부 브라우저로 바로 열기
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleCopyUrl}
+                  className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1"
+                >
+                  🔗 주소 복사하기
+                </button>
+              </div>
+            </div>
+
+            {/* 크롬/삼성인터넷 등에서 PWA 즉시 설치가 가능한 경우 */}
+            {deferredInstallPrompt && (
+              <button
+                type="button"
+                onClick={handleDirectInstall}
+                className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white font-black text-xs rounded-2xl shadow-lg flex items-center justify-center gap-2 transition"
+              >
+                <span>⚡</span> 지금 바로 바탕화면에 앱 설치하기
+              </button>
+            )}
+
+            {/* 기기 OS 선택 탭 */}
+            <div className="grid grid-cols-2 bg-slate-900 p-1 rounded-xl border border-slate-700/80 gap-1">
+              <button
+                type="button"
+                onClick={() => setInstallGuideTab('android')}
+                className={`py-2 rounded-lg text-xs font-bold transition ${installGuideTab === 'android' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+              >
+                🤖 안드로이드 (갤럭시)
+              </button>
+              <button
+                type="button"
+                onClick={() => setInstallGuideTab('ios')}
+                className={`py-2 rounded-lg text-xs font-bold transition ${installGuideTab === 'ios' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+              >
+                🍎 아이폰 (iOS)
+              </button>
+            </div>
+
+            {/* 단계별 안내 */}
+            {installGuideTab === 'android' ? (
+              <div className="space-y-2.5">
+                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">1</div>
+                  <div className="text-xs leading-relaxed text-slate-300">
+                    <div className="font-bold text-white mb-0.5">카카오톡에서 외부 브라우저로 열기</div>
+                    카톡 화면 우측 하단(또는 우측 상단)의 <strong className="text-amber-400">⋮ (점 3개)</strong> 버튼 터치 → <strong className="text-white">[다른 브라우저로 열기]</strong>를 선택하세요.
+                    <div className="text-[11px] text-slate-400 mt-1">* 위 노란색 <strong className="text-amber-300">[외부 브라우저로 바로 열기]</strong> 버튼을 누르면 바로 이동됩니다.</div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">2</div>
+                  <div className="text-xs leading-relaxed text-slate-300">
+                    <div className="font-bold text-white mb-0.5">브라우저 메뉴 버튼 터치</div>
+                    • <strong className="text-emerald-400">크롬(Chrome)</strong>: 우측 상단 <strong className="text-white">⋮ (점 3개)</strong> 터치<br/>
+                    • <strong className="text-blue-400">삼성 인터넷</strong>: 우측 하단 <strong className="text-white">≡ (줄 3개)</strong> 터치 (또는 주소창 옆 <strong className="text-white">＋</strong> 아이콘)
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">3</div>
+                  <div className="text-xs leading-relaxed text-slate-300">
+                    <div className="font-bold text-white mb-0.5">앱 설치 / 홈 화면에 추가</div>
+                    • <strong className="text-emerald-400">크롬</strong>: 메뉴에서 <strong className="text-white">[앱 설치]</strong> 또는 <strong className="text-white">[홈 화면에 추가]</strong> 선택<br/>
+                    • <strong className="text-blue-400">삼성 인터넷</strong>: <strong className="text-white">[현재 페이지 추가] → [홈 화면]</strong> 선택 후 추가하면 바탕화면에 앱 아이콘이 생성됩니다!
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">1</div>
+                  <div className="text-xs leading-relaxed text-slate-300">
+                    <div className="font-bold text-white mb-0.5">카카오톡에서 Safari로 열기</div>
+                    카톡 화면 우측 하단의 <strong className="text-amber-400">[📤 공유 아이콘]</strong>(네모에서 화살표가 위로 나오는 모양) 터치 → <strong className="text-white">[Safari로 열기]</strong>를 선택하세요.
+                    <div className="text-[11px] text-slate-400 mt-1">* 또는 위 <strong className="text-slate-200">[주소 복사하기]</strong>를 눌러 <strong className="text-white">Safari 앱</strong> 주소창에 붙여넣어 이동하세요.</div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">2</div>
+                  <div className="text-xs leading-relaxed text-slate-300">
+                    <div className="font-bold text-white mb-0.5">Safari 하단 [공유] 버튼 터치</div>
+                    Safari 브라우저로 페이지가 열렸다면, 화면 하단 중앙에 있는 <strong className="text-blue-400">[📤 공유 버튼]</strong>(네모 위 화살표)을 눌러주세요.
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 flex gap-3 items-start">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">3</div>
+                  <div className="text-xs leading-relaxed text-slate-300">
+                    <div className="font-bold text-white mb-0.5">[홈 화면에 추가] 선택</div>
+                    공유 메뉴를 살짝 위로 올려 <strong className="text-white">[홈 화면에 추가 ➕]</strong>를 누른 뒤, 우측 상단 <strong className="text-emerald-400">[추가]</strong>를 누르면 아이폰 바탕화면에 앱 아이콘이 생성됩니다!
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setInstallGuideModal(false)}
+            className="w-full mt-4 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl text-sm transition shrink-0"
+          >
+            확인했어요
+          </button>
+        </div>
+      </div>
+    );
   };
 
   if (appState === 'login') {
